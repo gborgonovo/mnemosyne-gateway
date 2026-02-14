@@ -85,12 +85,20 @@ class Filter:
             return body
 
         last_assistant_message = messages[-1].get("content", "")
-        if self.valves.memo_tag in last_assistant_message:
-            # 1. Identify what to save (User input + Assistant response)
-            # Find the last user message for full context
-            last_user_input = next((m["content"] for m in reversed(messages[:-1]) if m["role"] == "user"), "")
-            
-            content_to_save = f"User: {last_user_input}\nAssistant: {last_assistant_message}"
+        # Find the last user message
+        last_user_msg_idx = next((i for i in range(len(messages)-2, -1, -1) if messages[i]["role"] == "user"), None)
+        last_user_input = messages[last_user_msg_idx]["content"] if last_user_msg_idx is not None else ""
+
+        # Check if the tag is in either message
+        user_tagged = self.valves.memo_tag in last_user_input
+        assistant_tagged = self.valves.memo_tag in last_assistant_message
+
+        if user_tagged or assistant_tagged:
+            # 1. Prepare content to save
+            # We strip the tags from the saved content to keep the graph clean
+            clean_user = last_user_input.replace(self.valves.memo_tag, "").strip()
+            clean_assistant = last_assistant_message.replace(self.valves.memo_tag, "").strip()
+            content_to_save = f"User: {clean_user}\nAssistant: {clean_assistant}"
             
             try:
                 # 2. Send to Mnemosyne
@@ -100,9 +108,9 @@ class Filter:
                     timeout=5
                 )
                 
-                # 3. Clean the response for the user
-                cleaned_content = last_assistant_message.replace(self.valves.memo_tag, "").strip()
-                body["messages"][-1]["content"] = cleaned_content
+                # 3. Clean the response for the user (remove tag from UI)
+                if assistant_tagged:
+                    body["messages"][-1]["content"] = clean_assistant
                 
             except Exception as e:
                 print(f"Mnemosyne Outlet Error: {e}")
