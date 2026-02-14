@@ -67,8 +67,33 @@ class Filter:
                     }
                     messages.insert(-1, context_msg)
             
-            # 2. Add selective search for the last message
-            # (Optional: limit searching to avoid too many injections)
+            # 2. Targeted Search for specific keywords
+            # We use a simple keyword extraction for now (splitting by spaces)
+            # but in the future, we could call an endpoint that extracts semantic entities.
+            keywords = last_user_message.split()
+            found_concepts = []
+
+            # Search for the top 3 potential concepts to avoid bloating context
+            for word in keywords:
+                if len(word) < 4: continue # Skip short words
+                try:
+                    search_resp = requests.get(f"{self.valves.mnemosyne_url}/search", params={"q": word}, timeout=2)
+                    if search_resp.status_code == 200:
+                        concept_data = search_resp.json()
+                        details = f"- {concept_data['name']}: {json.dumps(concept_data['properties'])}"
+                        if concept_data.get("related"):
+                            details += f" (Related: {', '.join(concept_data['related'][:3])})"
+                        found_concepts.append(details)
+                    if len(found_concepts) >= 3: break
+                except:
+                    continue
+
+            if found_concepts:
+                search_msg = {
+                    "role": "system",
+                    "content": f"[SPECIFIC MEMORIES FOUND]\n" + "\n".join(found_concepts)
+                }
+                messages.insert(-1, search_msg)
             
         except Exception as e:
             print(f"Mnemosyne Inlet Error: {e}")
