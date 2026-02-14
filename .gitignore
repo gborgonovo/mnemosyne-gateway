@@ -3,19 +3,39 @@
 # Private Workspace (User's specific request)
 openclaw_workspace/
 
+# Neo4j Data (Docker volumes)
+docker/neo4j_data/
+data/
+db/
+
 # Secrets and Configuration
 config/settings.yaml
 .env
+
+# System/Agent Metadata (IMPORTANT for privacy)
+.gemini/
+.antigravity/
+brain/
+.system_generated/
+walkthrough.md
+implementation_plan.md
+task.md
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-Active
 .venv/
 env/
 venv/
-ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
 
 # IDEs
 .vscode/
@@ -24,9 +44,3 @@ ENV/
 # System
 .DS_Store
 Thumbs.db
-
-# Project logs
-*.log
-walkthrough.md
-implementation_plan.md
-task.md
