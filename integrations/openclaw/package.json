@@ -1,0 +1,14 @@
+{
+    "name": "mnemosyne",
+    "version": "1.0.0",
+    "description": "Integration with Mnemosyne Knowledge Graph via Python CLI.",
+    "author": "Giorgio",
+    "license": "MIT",
+    "category": "productivity",
+    "keywords": [
+        "memory",
+        "graph",
+        "mnemosyne",
+        "python"
+    ]
+}

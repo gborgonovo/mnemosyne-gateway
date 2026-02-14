@@ -1,0 +1,13 @@
+services:
+  neo4j:
+    image: neo4j:5.15.0
+    container_name: mnemosyne_db
+    ports:
+      - "7474:7474" # HTTP Browser
+      - "7687:7687" # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/mnemosyne  # Username/Password
+      - NEO4J_PLUGINS=["apoc"]      # Useful for utility functions
+    volumes:
+      - ./neo4j_data:/data
+    restart: unless-stopped

@@ -1,0 +1,32 @@
+# Mnemosyne Gateway Git Ignore
+
+# Private Workspace (User's specific request)
+openclaw_workspace/
+
+# Secrets and Configuration
+config/settings.yaml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+Active
+.venv/
+env/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Project logs
+*.log
+walkthrough.md
+implementation_plan.md
+task.md

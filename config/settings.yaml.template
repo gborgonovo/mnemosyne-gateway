@@ -1,0 +1,38 @@
+system:
+  version: 1.0
+  debug: true
+
+graph:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "your_password_here"
+
+attention:
+  decay_rate: 0.05
+  propagation_dampening: 
+    forward: 1.0
+    backward: 0.5
+  activation_threshold: 0.6
+  
+initiative:
+  initiative_threshold: 0.6
+  explanation_threshold: 0.5
+
+llm:
+  mode: "ollama"
+  model_name: "qwen2.5-coder:7b-instruct-q5_K_M"
+  display_name: "Alfred (Mnemosyne)"
+  ollama_url: "http://127.0.0.1:11434"
+  api_key: ""
+  
+  prompts:
+    alfred: |
+      [Insert your prompt here]
+
+gardener:
+  interval_seconds: 3600
+  similarity_threshold: 0.85
+
+gateway:
+  host: "0.0.0.0"
+  port: 8000

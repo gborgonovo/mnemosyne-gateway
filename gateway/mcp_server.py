@@ -1,0 +1,232 @@
+import asyncio
+import sys
+import os
+import yaml
+import logging
+import json
+from datetime import datetime
+
+# Setup Logging
+# Configure file handler for get_recent_logs tool
+file_handler = logging.FileHandler('/tmp/mnemosyne.log')
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logging.root.addHandler(file_handler)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from mcp.server.fastmcp import FastMCP
+from core.graph_manager import GraphManager
+from core.llm import get_llm_provider
+from core.perception import PerceptionModule
+from core.attention import AttentionModel
+from core.initiative import InitiativeEngine
+from workers.gardener import Gardener
+
+# Configuration
+def load_config():
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.yaml')
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+config = load_config()
+
+# Initialize Core
+gm = GraphManager(
+    config['graph']['uri'], 
+    config['graph']['user'], 
+    config['graph']['password']
+)
+llm = get_llm_provider(config)
+am = AttentionModel(gm, config=config.get('attention', {}))
+pm = PerceptionModule(gm, llm, am)
+ie = InitiativeEngine(gm, config=config.get('initiative', {}))
+gd = Gardener(gm, llm, am, config=config)
+
+# Create FastMCP Server
+mcp = FastMCP("Mnemosyne-Memory")
+
+@mcp.tool()
+def trigger_gardening_cycle() -> str:
+    """
+    Manually trigger a gardening cycle to clean up duplicates, 
+    apply temporal decay to thoughts, and check for urgent deadlines.
+    """
+    gd.run_once()
+    return "Gardening cycle completed successfully. Memory sanitized and updated."
+
+@mcp.tool()
+def query_knowledge(query: str, depth: int = 1) -> str:
+    """
+    Search the Mnemosyne knowledge graph for entities and their relationships.
+    Use this to retrieve context about specific people, projects, or concepts.
+    """
+    node = gm.get_node(query)
+    if not node:
+        return f"Concept '{query}' not found in memory."
+    
+    # Build a readable summary of the node and its neighbors
+    res = f"### [CONCEPT: {node['name']}]\n"
+    props = {k: v for k, v in dict(node).items() if k not in ['name', 'last_seen', 'activation_level', 'labels']}
+    if props:
+        res += "Properties:\n"
+        for k, v in props.items():
+            res += f"  - {k}: {v}\n"
+    
+    neighbors = gm.get_neighbors(query)
+    if neighbors:
+        res += "Related Context:\n"
+        for n in neighbors[:10]:
+            res += f"  - {n['node']['name']} ({n['rel_type']})\n"
+    
+    return res
+
+@mcp.tool()
+def add_observation(content: str) -> str:
+    """
+    Record a new piece of information into memory. 
+    This triggers entity extraction and relationship mapping automatically.
+    """
+    entities = pm.process_input(content)
+    if entities:
+        return f"Observation recorded. Extracted and linked entities: {', '.join(entities)}"
+    else:
+        return "Observation recorded, but no specific entities were extracted."
+
+@mcp.tool()
+def get_memory_briefing() -> str:
+    """
+    Get a briefing on currently active (hot) topics and proactive suggestions from Alfred.
+    Useful at the start of a session or when feeling lost.
+    """
+    active_nodes = gm.get_active_nodes(threshold=0.7)
+    hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
+    
+    briefing = "### MNEMOSYNE MEMORY BRIEFING\n"
+    if hot_topics:
+        briefing += f"Active topics of interest: {', '.join(hot_topics)}\n"
+    
+    # Alfred's Proactive Voice
+    proactive_context = ie.get_proactive_context()
+    if proactive_context:
+        briefing += f"\n#### Alfred's Internal Log:\n{proactive_context}\n"
+        
+    # Specific Suggestions
+    suggestions = ie.generate_initiatives()
+    if suggestions:
+        briefing += "\n#### Alfred's Suggestions:\n"
+        for s in suggestions:
+            briefing += f"- {s['message']} (Context: {s['reason']})\n"
+            
+    return briefing
+
+@mcp.tool()
+def get_system_status() -> str:
+    """
+    Checks the health of Mnemosyne's core components (Neo4j, Ollama).
+    Returns a JSON string with connection status and graph statistics.
+    """
+    status = {
+        "timestamp": datetime.now().isoformat(),
+        "components": {
+            "neo4j": "unknown",
+            "ollama": "unknown"
+        },
+        "graph_stats": {
+            "nodes": 0,
+            "relationships": 0
+        }
+    }
+    
+    # Check Neo4j
+    try:
+        gm.verify_connection()
+        status["components"]["neo4j"] = "connected"
+        stats = gm.get_stats()
+        status["graph_stats"] = stats
+    except Exception as e:
+        status["components"]["neo4j"] = f"error: {str(e)}"
+        
+    # Check Ollama/LLM
+    try:
+        # Simple generation check
+        llm.generate("test")
+        status["components"]["ollama"] = "connected" if config["llm"]["mode"] == "ollama" else "mock/start"
+    except Exception as e:
+        status["components"]["ollama"] = f"error: {str(e)}"
+        
+    return json.dumps(status, indent=2)
+
+@mcp.tool()
+def inspect_node_details(name: str) -> str:
+    """
+    Returns the raw internal metadata of a specific node in JSON format.
+    Useful for debugging entity properties and labels.
+    """
+    node = gm.get_node(name)
+    if not node:
+        return json.dumps({"error": f"Node '{name}' not found"}, indent=2)
+    
+    # Convert Neo4j node to dict
+    node_dict = dict(node)
+    node_dict["labels"] = list(node.labels)
+    return json.dumps(node_dict, indent=2)
+
+@mcp.tool()
+def get_recent_logs(lines: int = 20) -> str:
+    """
+    Retrieves the last N lines from the Mnemosyne debug log.
+    Returns plain text.
+    """
+    log_path = "/tmp/mnemosyne.log"
+    if not os.path.exists(log_path):
+        return "Log file not found."
+        
+    try:
+        # Simple tail implementation
+        with open(log_path, 'r') as f:
+            all_lines = f.readlines()
+            last_n = all_lines[-lines:]
+            return "".join(last_n)
+    except Exception as e:
+        return f"Error reading logs: {str(e)}"
+
+@mcp.tool()
+def provide_feedback(target_id: str, feedback_type: str, comment: str = "") -> str:
+    """
+    Log user or agent feedback about a specific entity or interaction.
+    target_id: The name of the node or ID of the interaction.
+    feedback_type: 'positive', 'negative', 'correction', 'missing_info'
+    """
+    # For now, just log it. Future: Store in a 'Feedback' node or dedicated DB.
+    logger.info(f"FEEDBACK [{feedback_type}] for '{target_id}': {comment}")
+    return json.dumps({"status": "received", "message": "Feedback logged successfully."}, indent=2)
+
+async def background_gardener():
+    """Periodically runs the gardener in the background."""
+    interval = config.get("gardener", {}).get("interval_seconds", 3600)
+    while True:
+        try:
+            logger.info("Background Gardener: Starting cycle...")
+            # Run blocking gardener in a separate thread to avoid freezing the MCP server
+            await asyncio.to_thread(gd.run_once)
+            logger.info(f"Background Gardener: Cycle complete. Sleeping for {interval}s")
+        except Exception as e:
+            logger.error(f"Background Gardener Error: {e}")
+        await asyncio.sleep(interval)
+
+if __name__ == "__main__":
+    async def run_server():
+        # Create background task and run MCP together
+        await asyncio.gather(
+            background_gardener(),
+            mcp.run_stdio_async()
+        )
+    
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        pass
