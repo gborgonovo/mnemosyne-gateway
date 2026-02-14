@@ -39,14 +39,14 @@ Parliamo di come potrebbe essere, tenendo i piedi per terra (è pur sempre tecno
     * **Mnemosyne (Il Cervello Silente):** È lo strato infrastrutturale. Gestisce il Grafo Relazionale (Connectome), il Modello di Attenzione e il Gardener. È il motore che "sente" le connessioni e accumula calore semantico.
     * **Alfred (Il Layer Relazionale):** È l'interfaccia universale di interazione umana, ora esposta tramite **MCP**. Alfred traduce le intuizioni del grafo in atti comunicativi dotati di tatto, stile e pertinenza, agendo come un filtro relazionale tra la complessità del sistema e l'utente OpenClaw.
 
-### Come Funziona Tecnicamente (Mnemosyne Standalone)
+### Come Funziona Tecnicamente (Mnemosyne Gateway)
 
-Mnemosyne è ora un **Headless MCP Middleware**. Non è più un'app con UI propria, ma un servizio di background.
+Mnemosyne è ora un **Cognitive Middleware Headless**. Non è più un'app con UI principale, ma un servizio di background accessibile via **HTTP Bridge** e **MCP**.
 
-* **Interfaccia MCP:** Espone tool standard per la lettura e scrittura della memoria.
+* **Interfaccia Universale:** Espone tool tramite **MCP** e un **HTTP Bridge (FastAPI)** per la massima compatibilità (Docker, WebUI, CLI).
 * **Memoria:** Ogni interazione è salvata, classificata e correlata nel Connectome (Neo4j).
 * **Motore di Iniziativa:** Un insieme di regole euristiche che osservano i livelli di attivazione del grafo e generano briefing.
-* **Integrazione Agente:** L'agente (OpenClaw) chiama i tool di Mnemosyne per arricchire il proprio contesto, rendendo la collaborazione proattiva e asincrona.
+* **Integrazione Agente:** Gli agenti (OpenClaw, Open WebUI) chiamano gli endpoint di Mnemosyne per arricchire il proprio contesto.
 
 ### La Postura del Partner (Come Si Comporterebbe)
 
@@ -705,6 +705,7 @@ A Gennaio 2026, Mnemosyne ha raggiunto lo stato di Prototipo Funzionale Avanzato
 
 ### Documentazione Correlata
 
-- [Guida all'Utente](user_guide.md): Istruzioni dettagliate sull'uso dell'interfaccia e delle funzionalità.
+* [Guida all'Utente](user_guide.md): Istruzioni dettagliate sull'uso dell'interfaccia e delle funzionalità.
+
 * [Specifiche Tecniche](technical_specifications.md): Dettagli sull'architettura e l'implementazione del sistema e del feedback.
 * [Whitepaper](mnemosyne_whitepaper.md): La visione filosofica e scientifica del progetto.

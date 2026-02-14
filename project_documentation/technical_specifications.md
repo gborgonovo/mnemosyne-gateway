@@ -11,25 +11,27 @@
 Mnemosyne is not a chatbot; it is a **Cognitive Partner**. It acts as an extension of the user's mind, maintaining long-term context, evolving relationships between concepts, and offering proactive cognitive support.
 Unlike traditional AI assistants that react to prompts, Mnemosyne maintains a persistent state of "attention" on the user's projects and life goals, intervening when it detects relevant connections or neglected areas.
 
-## 2. System Architecture (MCP-First)
+## 2. System Architecture (Gateway-First)
 
-Mnemosyne is now a standalone **MCP (Model Context Protocol)** server. It exposes its cognitive capabilities as tools that any MCP-compatible agent can use.
+Mnemosyne è ora un **Cognitive Middleware Headless**. Espone le sue capacità cognitive tramite un **HTTP Bridge (FastAPI)** e un server **MCP**, permettendo l'integrazione con agenti locali (OpenClaw), interfacce web (Open WebUI) e client CLI.
 
 ### 2.1 Technology Stack
 
 - **Core**: Python 3.10+
 - **Graph Engine**: Neo4j (via Docker)
-- **Interface**: FastMCP (stdio transport)
+- **API Engine**: FastAPI / Uvicorn
+- **Interface**: FastMCP (stdio transport) & HTTP REST
 - **Knowledge OS**: Mnemosyne Core (Attention + Initiative + Perception)
 
 ### 2.2 Functional Blocks
 
 1. **The Connectome (Core)**: The semantic graph storage.
-2. **MCP Gateway**: FastMCP server that exposes tools to the agent.
-3. **Attention Engine**: The mathematical model governing node activation.
-4. **Perception Module**: Input processing and entity extraction.
-5. **Initiative Engine (Mnemosyne)**: Decision engine for proactive support.
-6. **Alfred Persona (The Relational Layer)**: Integrated into the MCP tools output for consistent personality.
+2. **Mnemosyne Gateway**: Server FastAPI che espone gli endpoint REST.
+3. **MCP Interface**: Server FastMCP per integrazione contestuale diretta.
+4. **Attention Engine**: The mathematical model governing node activation.
+5. **Perception Module**: Input processing and entity extraction.
+6. **Initiative Engine (Mnemosyne)**: Decision engine for proactive support.
+7. **Alfred Persona (The Relational Layer)**: Integrated into the MCP tools output for consistent personality.
 
 ---
 
@@ -161,11 +163,13 @@ Mnemosyne communicates via a structured JSON protocol to remain client-agnostic.
 ## 5. Directory Structure
 
 ```
-/home/giorgio/Projects/Mnemosyne/
+/home/giorgio/Projects/Mnemosyne gateway/
 ├── config/             # YAML configuration (decay rates, thresholds)
 ├── core/               # Python modules for Graph and Attention
+├── gateway/            # FastAPI Server & CLI Bridge
+├── integrations/       # Application-specific connectors (OpenClaw)
 ├── workers/            # The Gardener implementation
-├── interface/          # Streamlit app
-├── docker/             # Docker compose files
+├── interface/          # Streamlit Dashboard (Visualizer)
+├── docker/             # Docker compose files & Neo4j data
 └── project_documentation/
 ```
