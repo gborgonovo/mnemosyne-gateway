@@ -36,10 +36,10 @@ importlib.reload(workers.gardener)
 
 from core.graph_manager import GraphManager
 from core.attention import AttentionModel
-from core.perception import PerceptionModule
-from core.initiative import InitiativeEngine
-from core.feedback import FeedbackManager
-from core.llm import get_llm_provider
+from butler.perception import PerceptionModule
+from butler.initiative import InitiativeEngine
+from butler.feedback import FeedbackManager
+from butler.llm import get_llm_provider
 from workers.gardener import Gardener
 
 st.set_page_config(page_title="Mnemosyne", layout="wide")
@@ -55,11 +55,11 @@ def load_config():
 def get_core_modules():
     # Force reload of core modules to pick up changes
     import core.graph_manager
-    import core.perception
+    import butler.perception
     import core.attention
-    import core.initiative
-    import core.llm
-    import core.feedback
+    import butler.initiative
+    import butler.llm
+    import butler.feedback
     
     importlib.reload(core.graph_manager)
     importlib.reload(core.perception)

@@ -13,6 +13,12 @@ class GraphManager:
     def __init__(self, uri, user, password):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
         self.verify_connection()
+        self.scope_hierarchy = {
+            "Private": ["Private", "Internal", "Public", "Global"],
+            "Internal": ["Internal", "Public", "Global"],
+            "Public": ["Public", "Global"],
+            "Global": ["Global"]
+        }
 
     def verify_connection(self):
         try:
@@ -25,11 +31,27 @@ class GraphManager:
     def close(self):
         self.driver.close()
 
-    def add_node(self, name: str, primary_label: str = "Topic", tags: list = None, properties: dict = None):
+    def _get_scope_filter(self, scopes: list[str], var_name: str = "n") -> str:
+        """
+        Generates a Cypher WHERE clause fragment for scope filtering.
+        """
+        if not scopes:
+            return "" # No filtering if no scopes provided (internal use)
+        
+        # Expand scopes based on hierarchy
+        all_allowed = set()
+        for s in scopes:
+            all_allowed.update(self.scope_hierarchy.get(s, [s]))
+        
+        condition = " OR ".join([f"{var_name}:{s}" for s in all_allowed])
+        return f"({condition})"
+
+    def add_node(self, name: str, primary_label: str = "Topic", tags: list = None, properties: dict = None, scope: str = "Public"):
         """
         Creates or updates a node.
         primary_label: Entity, Topic, Resource, Goal, Task, or Node.
-        tags: List of secondary labels (e.g., Project, Urgent).
+        tags: List of secondary labels.
+        scope: Public, Internal, Private.
         """
         if primary_label not in ["Entity", "Topic", "Resource", "Node", "Observation", "Goal", "Task"]:
             logger.warning(f"Unknown primary label '{primary_label}', falling back to 'Node'.")
@@ -38,19 +60,13 @@ class GraphManager:
         tags = tags or []
         properties = properties or {}
         
-        # Standard properties
         properties['name'] = name
         properties['last_seen'] = datetime.now().isoformat()
         if 'activation_level' not in properties:
-             properties['activation_level'] = 1.0 # New nodes are hot
+             properties['activation_level'] = 1.0
 
-        # Construct Cypher query
-        # STRATEGY: 
-        # 1. MERGE on generic property 'name' WITHOUT checking specific label 'Node' first, 
-        #    to catch nodes that might have been created without 'Node' label.
-        # 2. Then set the Labels.
-        
-        labels_cypher = f":{primary_label}"
+        # Construct Labels
+        labels_cypher = f":{primary_label}:{scope}"
         for tag in tags:
             labels_cypher += f":{tag}"
         
@@ -60,11 +76,6 @@ class GraphManager:
             f"RETURN n"
         )
         
-        if primary_label == "Observation":
-             # Observations are unique by ID/hash, so we don't merge on name "Obs_..." if we want purity,
-             # but actually they have unique names so it's fine.
-             pass
-
         with self.driver.session() as session:
             result = session.run(query, name=name, props=properties)
             return result.single()[0]
@@ -72,19 +83,13 @@ class GraphManager:
     def add_edge(self, source_name: str, target_name: str, relation_type: str, weight: float = None):
         """
         Creates a relationship between two nodes identified by name.
-        relation_type: LINKED_TO, DEPENDS_ON, EVOKES, IS_A
         """
         valid_relations = {
-            "LINKED_TO": 0.3,
-            "DEPENDS_ON": 0.9,
-            "EVOKES": 0.6,
-            "IS_A": 1.0,
-            "MENTIONED_IN": 0.1,
-            "MAYBE_SAME_AS": 0.0
+            "LINKED_TO": 0.3, "DEPENDS_ON": 0.9, "EVOKES": 0.6,
+            "IS_A": 1.0, "MENTIONED_IN": 0.1, "MAYBE_SAME_AS": 0.0
         }
 
         if relation_type not in valid_relations:
-            logger.warning(f"Unknown relationship type: {relation_type}. Defaulting to LINKED_TO")
             relation_type = "LINKED_TO"
 
         if weight is None:
@@ -101,44 +106,55 @@ class GraphManager:
             session.run(query, source=source_name, target=target_name, 
                         weight=weight, timestamp=datetime.now().isoformat())
 
-    def get_node(self, name: str):
+    def get_node(self, name: str, scopes: list[str] = None):
         """
-        Retrieves a node by name or by its aliases.
+        Retrieves a node by name, respecting scope filtering.
         """
-        # Try direct name match first
-        query = "MATCH (n {name: $name}) RETURN n"
+        scope_clause = self._get_scope_filter(scopes)
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+
+        # 1. Try exact match
+        query = f"MATCH (n {{name: $name}}) {where_clause} RETURN n"
         with self.driver.session() as session:
             result = session.run(query, name=name)
             record = result.single()
             if record:
                 return record[0]
             
-            # Fallback: Case-insensitive search
-            query_fallback = "MATCH (n) WHERE toLower(n.name) = toLower($name) RETURN n"
+            # 2. Case-insensitive fallback
+            fallback_where = f"WHERE toLower(n.name) = toLower($name) " + (f"AND {scope_clause}" if scope_clause else "")
+            query_fallback = f"MATCH (n) {fallback_where} RETURN n"
             result = session.run(query_fallback, name=name)
             record = result.single()
             if record:
                 return record[0]
             
-            # If not found, check aliases
-            alias_query = "MATCH (n) WHERE $name IN n.aliases RETURN n"
+            # 3. Alias check
+            alias_where = f"WHERE $name IN n.aliases " + (f"AND {scope_clause}" if scope_clause else "")
+            alias_query = f"MATCH (n) {alias_where} RETURN n"
             result = session.run(alias_query, name=name)
             record = result.single()
             return record[0] if record else None
 
-    def get_all_nodes(self):
-        query = "MATCH (n) RETURN n.name as name, labels(n) as labels, n.activation_level as activation, properties(n) as props"
+    def get_all_nodes(self, scopes: list[str] = None):
+        scope_clause = self._get_scope_filter(scopes)
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        query = f"MATCH (n) {where_clause} RETURN n.name as name, labels(n) as labels, n.activation_level as activation, properties(n) as props"
         with self.driver.session() as session:
             return [dict(record) for record in session.run(query)]
 
-    def get_active_nodes(self, threshold: float = 0.5):
-        query = """
+    def get_active_nodes(self, threshold: float = 0.5, scopes: list[str] = None):
+        scope_clause = self._get_scope_filter(scopes)
+        where_condition = f"n.activation_level > $threshold"
+        if scope_clause:
+            where_condition += f" AND {scope_clause}"
+        
+        query = f"""
         MATCH (n) 
-        WHERE n.activation_level > $threshold 
+        WHERE {where_condition}
         RETURN n.name as name, n.activation_level as activation, labels(n) as labels
         """
         with self.driver.session() as session:
-            # Normalize output to list of dicts
             return [dict(record) for record in session.run(query, threshold=threshold)]
 
     def update_activation(self, name: str, level: float):
@@ -147,21 +163,21 @@ class GraphManager:
             session.run(query, name=name, level=level)
 
     def add_alias(self, node_name: str, alias: str):
-        """
-        Adds a synonym to the aliases list of a node.
-        """
         query = """
         MATCH (n {name: $name})
         SET n.aliases = coalesce(n.aliases, []) + $alias
         """
         with self.driver.session() as session:
             session.run(query, name=node_name, alias=alias)
-            logger.info(f"Added alias '{alias}' to node '{node_name}'")
 
-    def get_neighbors(self, name: str):
+    def get_neighbors(self, name: str, scopes: list[str] = None):
         """Returns list of (neighbor_node, relationship_type, weight, direction, rel_props)"""
-        query = """
-        MATCH (n {name: $name})-[r]-(m) 
+        scope_clause = self._get_scope_filter(scopes, var_name="m")
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        query = f"""
+        MATCH (n {{name: $name}})-[r]-(m) 
+        {where_clause}
         RETURN m as node, labels(m) as labels, type(r) as rel_type, r.weight as weight, 
                properties(r) as rel_props, startNode(r) = n as is_outgoing
         """
@@ -169,13 +185,9 @@ class GraphManager:
         with self.driver.session() as session:
             results = session.run(query, name=name)
             for record in results:
-                # direction: 'out' if n -> m, 'in' if m -> n
                 direction = 'out' if record['is_outgoing'] else 'in'
-                
-                # Convert Node object to dict and merge labels
                 node_dict = dict(record['node'])
                 node_dict['labels'] = record['labels']
-                
                 neighbors.append({
                     'node': node_dict,
                     'rel_type': record['rel_type'],
@@ -184,15 +196,18 @@ class GraphManager:
                     'direction': direction
                 })
         return neighbors
-    def trace_dependencies(self, start_node_name: str, max_depth: int = 3):
+
+    def trace_dependencies(self, start_node_name: str, max_depth: int = 3, scopes: list[str] = None):
         """
-        Traces downstream dependencies (outgoing directional links).
-        Useful for Impact Analysis.
-        Returns a list of impact chains.
+        Traces downstream dependencies, filtered by scope.
         """
+        scope_clause = self._get_scope_filter(scopes, var_name="m")
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
         query = f"""
         MATCH (n {{name: $name}})
         MATCH path = (n)-[:DEPENDS_ON|IS_A|HA_VINCOLO*1..{max_depth}]->(m)
+        {where_clause}
         RETURN [x in nodes(path) | x.name] as chain, [r in relationships(path) | type(r)] as types
         """
         with self.driver.session() as session:
@@ -200,12 +215,7 @@ class GraphManager:
             return [dict(record) for record in results]
 
     def merge_nodes(self, keep_id: int, discard_id: int):
-        """
-        Merges node with discard_id into node with keep_id.
-        Moves all relationships and labels.
-        """
         with self.driver.session() as session:
-            # Using APOC to merge nodes is much safer and cleaner
             session.run("""
                 MATCH (k), (d)
                 WHERE id(k) = $keep_id AND id(d) = $discard_id
@@ -214,14 +224,19 @@ class GraphManager:
                 RETURN node
             """, keep_id=keep_id, discard_id=discard_id)
             
-    def get_stats(self) -> dict:
-        """Returns basic statistics about the graph."""
+    def get_stats(self, scopes: list[str] = None) -> dict:
+        """Returns basic statistics about the graph, filtered by scope."""
+        scope_clause = self._get_scope_filter(scopes)
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        query = f"""
+            MATCH (n)
+            {where_clause}
+            OPTIONAL MATCH (n)-[r]->(m)
+            RETURN count(DISTINCT n) as nodes, count(DISTINCT r) as relationships
+        """
         with self.driver.session() as session:
-            result = session.run("""
-                MATCH (n)
-                OPTIONAL MATCH ()-[r]->()
-                RETURN count(DISTINCT n) as nodes, count(DISTINCT r) as relationships
-            """)
+            result = session.run(query)
             record = result.single()
             if record:
                 return {"nodes": record["nodes"], "relationships": record["relationships"]}

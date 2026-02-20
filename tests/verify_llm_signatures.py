@@ -5,7 +5,7 @@ import os
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.llm import MockLLM, OllamaLLM, OpenAILLM
+from butler.llm import MockLLM, OllamaLLM, OpenAILLM
 
 def test_signatures():
     print("Testing LLM Provider signatures...")

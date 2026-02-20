@@ -3,7 +3,7 @@ import time
 import datetime
 from datetime import datetime
 from core.graph_manager import GraphManager
-from core.llm import LLMProvider
+from butler.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
 

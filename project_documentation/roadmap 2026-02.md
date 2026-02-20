@@ -34,6 +34,16 @@ Vogliamo un sistema che sia **Immortale** (i dati restano nel tuo grafo, non in 
 
 Mnemosyne diventa l'infrastruttura su cui poggia l'intelligenza, non l'intelligenza stessa.
 
+---
+**STATO ATTUALE: IMPLEMENTATO (Febbraio 2026)**
+
+- [x] Capitolo 1: Micro-Kernel (Core LLM-Free)
+- [x] Capitolo 2: Event Bus & Distributed RPC
+- [x] Capitolo 3: Framework Plugin & Workers
+- [x] Capitolo 4: Knowledge Scopes (Privacy Isolata)
+
+---
+
 # **Capitolo 1: Il Micro-Kernel (Core)**
 
 ## **1\. Definizione e Scopo**
@@ -48,16 +58,16 @@ Per massimizzare la portabilità e minimizzare l'uso di risorse, il Core è rigo
 
 È il modulo che si interfaccia direttamente con Neo4j. Non contiene logica di business, ma espone primitive per la manipolazione del grafo:
 
-* **Agnosticismo dei Dati:** Gestisce nodi e relazioni basandosi su label e proprietà, senza conoscerne il contenuto semantico.  
-* **Ottimizzazione delle Query:** Esegue le operazioni di ricerca topologica e filtraggio per "Scope" (visibilità), assicurando che le risposte del database siano già modellate per il contesto richiesto.
+- **Agnosticismo dei Dati:** Gestisce nodi e relazioni basandosi su label e proprietà, senza conoscerne il contenuto semantico.  
+- **Ottimizzazione delle Query:** Esegue le operazioni di ricerca topologica e filtraggio per "Scope" (visibilità), assicurando che le risposte del database siano già modellate per il contesto richiesto.
 
 ### **2.2 Attention Model (Il Motore Metabolico)**
 
 Gestisce la "vita" dei nodi attraverso il calcolo dell'attivazione. Le sue funzioni principali sono:
 
-* **Spreading Activation:** Quando un nodo viene toccato da un input, il calore si propaga ai nodi vicini.  
-* **Exponential Decay:** Riduce automaticamente l'energia dei nodi nel tempo per simulare l'oblio e mantenere il focus sul presente.  
-* **Energy Thresholds:** Determina quali nodi sono "caldi" a sufficienza per essere estratti e inviati ai plugin di analisi.
+- **Spreading Activation:** Quando un nodo viene toccato da un input, il calore si propaga ai nodi vicini.  
+- **Exponential Decay:** Riduce automaticamente l'energia dei nodi nel tempo per simulare l'oblio e mantenere il focus sul presente.  
+- **Energy Thresholds:** Determina quali nodi sono "caldi" a sufficienza per essere estratti e inviati ai plugin di analisi.
 
 ## **3\. Logica Operativa: "The State Machine"**
 
@@ -71,9 +81,9 @@ Il Micro-Kernel opera come una macchina a stati finiti che reagisce a stimoli nu
 
 Per garantire il funzionamento su hardware limitato, il Micro-Kernel deve rispettare i seguenti vincoli:
 
-* **Footprint di Memoria:** \< 256MB RAM (escludendo il DB Neo4j).  
-* **Latenza:** Le operazioni di aggiornamento dell'attenzione devono completarsi in \< 50ms.  
-* **Indipendenza:** Il crash di qualsiasi plugin non deve interrompere il ciclo di decadimento dell'attenzione del Core.
+- **Footprint di Memoria:** \< 256MB RAM (escludendo il DB Neo4j).  
+- **Latenza:** Le operazioni di aggiornamento dell'attenzione devono completarsi in \< 50ms.  
+- **Indipendenza:** Il crash di qualsiasi plugin non deve interrompere il ciclo di decadimento dell'attenzione del Core.
 
 # **Capitolo 2: L'Event Bus e il Protocollo di Comunicazione**
 
@@ -83,8 +93,8 @@ L'Event Bus è il meccanismo di disaccoppiamento che permette al Core di rimaner
 
 ### **Funzionamento**
 
-* **Asincronia:** Il Core emette un evento e prosegue la sua esecuzione senza attendere la risposta (Fire-and-forget), a meno che non sia richiesta una sincronizzazione esplicita.  
-* **Pub/Sub Pattern:** Più plugin possono ascoltare lo stesso evento. Ad esempio, un evento NEW\_OBSERVATION può attivare contemporaneamente il plugin di *Ingestione* e quello di *Notifica*.
+- **Asincronia:** Il Core emette un evento e prosegue la sua esecuzione senza attendere la risposta (Fire-and-forget), a meno che non sia richiesta una sincronizzazione esplicita.  
+- **Pub/Sub Pattern:** Più plugin possono ascoltare lo stesso evento. Ad esempio, un evento NEW\_OBSERVATION può attivare contemporaneamente il plugin di *Ingestione* e quello di *Notifica*.
 
 ---
 
@@ -147,8 +157,8 @@ Per essere riconosciuto dal Micro-Kernel, un plugin (anche se remoto) deve esegu
 
 ## **5\. Gestione della Latenza e Failover**
 
-* **Timeout:** Il Core non attende mai un plugin per più di $500ms$ nelle operazioni sincrone.  
-* **Dead Letter Queue:** Se un plugin remoto non risponde, l'evento viene archiviato localmente e riproposto appena il plugin torna online, garantendo la coerenza del grafo.
+- **Timeout:** Il Core non attende mai un plugin per più di $500ms$ nelle operazioni sincrone.  
+- **Dead Letter Queue:** Se un plugin remoto non risponde, l'evento viene archiviato localmente e riproposto appena il plugin torna online, garantendo la coerenza del grafo.
 
 # **Capitolo 3: Framework dei Plugin e Distributed Workers**
 
@@ -160,9 +170,9 @@ Per garantire l'estensibilità, ogni nuova funzionalità di Mnemosyne deve esser
 
 Ogni plugin deve implementare un'interfaccia standard che ne definisce il ciclo di vita:
 
-* **Identity**: Nome unico, versione e requisiti hardware (es. "Richiede GPU").  
-* **Handshake**: Procedura di registrazione presso il Gateway.  
-* **Subscription**: Lista degli eventi dell'Event Bus a cui il plugin è interessato.
+- **Identity**: Nome unico, versione e requisiti hardware (es. "Richiede GPU").  
+- **Handshake**: Procedura di registrazione presso il Gateway.  
+- **Subscription**: Lista degli eventi dell'Event Bus a cui il plugin è interessato.
 
 ---
 
@@ -184,9 +194,9 @@ Il sistema supporta la distribuzione del carico su macchine diverse per ottimizz
 
 Non tutti i compiti richiedono la stessa potenza. Gli sviluppatori devono mappare i plugin su diversi **Tier**:
 
-* **Tier 1 (Light/CPU)**: Plugin deterministici (es. Regex, matching di stringhe, calcolo di date). Girano sul Core (Arch Linux).  
-* **Tier 2 (Medium/GPU-Local)**: Estrazione veloce di entità tramite modelli LLM piccoli (es. 1B-3B parametri). Girano su hardware locale.  
-* **Tier 3 (Heavy/Distributed)**: Analisi profonda, sintesi storiche o ragionamento complesso. Girano su workstation dedicate o server (Ubuntu) usando modelli Large (es. 30B+ parametri).
+- **Tier 1 (Light/CPU)**: Plugin deterministici (es. Regex, matching di stringhe, calcolo di date). Girano sul Core (Arch Linux).  
+- **Tier 2 (Medium/GPU-Local)**: Estrazione veloce di entità tramite modelli LLM piccoli (es. 1B-3B parametri). Girano su hardware locale.  
+- **Tier 3 (Heavy/Distributed)**: Analisi profonda, sintesi storiche o ragionamento complesso. Girano su workstation dedicate o server (Ubuntu) usando modelli Large (es. 30B+ parametri).
 
 ---
 
@@ -194,8 +204,8 @@ Non tutti i compiti richiedono la stessa potenza. Gli sviluppatori devono mappar
 
 I plugin distribuiti utilizzano un meccanismo di **Service Discovery** gestito dal Gateway:
 
-* Il Core mantiene una tabella dei plugin attivi e del loro stato di salute (Health Check).  
-* Se un plugin Tier 3 (remoto) non è disponibile, il Core può decidere di eseguire una versione "degradata" del task su un plugin Tier 1 locale, garantendo la continuità operativa anche in assenza di risorse pesanti.
+- Il Core mantiene una tabella dei plugin attivi e del loro stato di salute (Health Check).  
+- Se un plugin Tier 3 (remoto) non è disponibile, il Core può decidere di eseguire una versione "degradata" del task su un plugin Tier 1 locale, garantendo la continuità operativa anche in assenza di risorse pesanti.
 
 ---
 
@@ -203,8 +213,8 @@ I plugin distribuiti utilizzano un meccanismo di **Service Discovery** gestito d
 
 Per proteggere l'integrità del sistema:
 
-* **Sandbox**: I plugin non hanno accesso diretto alla memoria del Core o al file system del database, ma interagiscono solo tramite API JSON.  
-* **Circuit Breaker**: Se un plugin genera errori ripetuti o latenze eccessive, il Gateway lo disconnette automaticamente (Shunning) per proteggere la stabilità del Micro-Kernel.
+- **Sandbox**: I plugin non hanno accesso diretto alla memoria del Core o al file system del database, ma interagiscono solo tramite API JSON.  
+- **Circuit Breaker**: Se un plugin genera errori ripetuti o latenze eccessive, il Gateway lo disconnette automaticamente (Shunning) per proteggere la stabilità del Micro-Kernel.
 
 # **Capitolo 4: Knowledge Scopes (Visibilità Dinamica)**
 
@@ -222,9 +232,9 @@ La visibilità è gestita a livello atomico direttamente nel Connectome (Neo4j) 
 
 Ogni nodo e ogni relazione deve possedere almeno una label di Scope. Le label predefinite sono:
 
-* :Public: Informazioni destinate all'esterno (prodotti, servizi, contatti).  
-* :Internal: Procedure aziendali, metodologie, documentazione tecnica riservata.  
-* :Private: Riflessioni personali, dati sensibili, bozze di progetto (es. il tuo "Sogno del B\&B").
+- :Public: Informazioni destinate all'esterno (prodotti, servizi, contatti).  
+- :Internal: Procedure aziendali, metodologie, documentazione tecnica riservata.  
+- :Private: Riflessioni personali, dati sensibili, bozze di progetto (es. il tuo "Sogno del B\&B").
 
 ---
 
@@ -264,9 +274,9 @@ Per evitare la duplicazione dei dati, il sistema supporta una gerarchia di visib
 
 Lo Scope viene definito nel momento in cui il dato entra nel sistema:
 
-* **Plugin-Driven**: Un plugin di "Ingestione Documenti Tecnici" assegnerà di default la label :Internal.  
-* **Interface-Driven**: I dati inseriti tramite la tua chat privata su Arch Linux riceveranno la label :Private.  
-* **Promozione Manuale**: Alfred può suggerirti di "promuovere" un'informazione (es. una decisione presa in privato che deve diventare una procedura per i collaboratori).
+- **Plugin-Driven**: Un plugin di "Ingestione Documenti Tecnici" assegnerà di default la label :Internal.  
+- **Interface-Driven**: I dati inseriti tramite la tua chat privata su Arch Linux riceveranno la label :Private.  
+- **Promozione Manuale**: Alfred può suggerirti di "promuovere" un'informazione (es. una decisione presa in privato che deve diventare una procedura per i collaboratori).
 
 ---
 
@@ -284,9 +294,9 @@ Mnemosyne deve poter girare su qualsiasi distribuzione Linux (Arch, Ubuntu, Debi
 
 Per mantenere il sistema "pulito" e portabile, utilizziamo un approccio ibrido:
 
-* **Database (Neo4j)**: Distribuito esclusivamente via **Docker**. Questo evita conflitti con le versioni della JVM e permette di gestire i dati (il Connectome) come volumi persistenti facilmente migrabili.  
-* **Micro-Kernel (Core)**: Eseguito in un **Python Virtual Environment (venv)**. A differenza di Docker, l'esecuzione nativa in venv riduce la latenza di I/O e l'overhead di memoria, fattore critico per macchine con meno di 8GB di RAM.  
-* **Plugin**: Possono essere eseguiti in container, venv o come servizi di sistema (systemd), a seconda della necessità di accesso all'hardware (GPU).
+- **Database (Neo4j)**: Distribuito esclusivamente via **Docker**. Questo evita conflitti con le versioni della JVM e permette di gestire i dati (il Connectome) come volumi persistenti facilmente migrabili.  
+- **Micro-Kernel (Core)**: Eseguito in un **Python Virtual Environment (venv)**. A differenza di Docker, l'esecuzione nativa in venv riduce la latenza di I/O e l'overhead di memoria, fattore critico per macchine con meno di 8GB di RAM.  
+- **Plugin**: Possono essere eseguiti in container, venv o come servizi di sistema (systemd), a seconda della necessità di accesso all'hardware (GPU).
 
 ---
 
@@ -308,8 +318,8 @@ Il Core rileva le capacità del plugin registrato e gli assegna i compiti compat
 
 In una configurazione multi-macchina (es. il tuo setup Arch Linux \+ Server Ubuntu), la comunicazione avviene tramite il **Gateway**:
 
-* **Discovery**: I plugin remoti si connettono all'indirizzo IP del Gateway. In reti locali, si consiglia l'uso di nomi host mDNS (es. mnemosyne-core.local).  
-* **Proxying**: Il Gateway agisce come ponte. Se l'utente su Arch chiede un'analisi complessa, il Gateway invia il task al Worker su Ubuntu e restituisce il risultato al grafo locale.
+- **Discovery**: I plugin remoti si connettono all'indirizzo IP del Gateway. In reti locali, si consiglia l'uso di nomi host mDNS (es. mnemosyne-core.local).  
+- **Proxying**: Il Gateway agisce come ponte. Se l'utente su Arch chiede un'analisi complessa, il Gateway invia il task al Worker su Ubuntu e restituisce il risultato al grafo locale.
 
 ---
 
@@ -317,9 +327,9 @@ In una configurazione multi-macchina (es. il tuo setup Arch Linux \+ Server Ubun
 
 Dato che Mnemosyne trasporta dati potenzialmente sensibili (Scope :Private), l'infrastruttura deve prevedere:
 
-* **Token di Autenticazione**: Ogni plugin (anche locale) deve autenticarsi presso il Gateway tramite una API\_KEY univoca.  
-* **Network Binding**: Per default, il Gateway deve ascoltare solo su localhost. L'apertura alla rete esterna deve essere un'azione esplicita dell'utente nelle impostazioni di configurazione.  
-* **Data Sovereignty**: Il database Neo4j risiede idealmente sulla macchina più sicura dell'utente; i Worker remoti ricevono solo i chunk di dati necessari all'elaborazione temporanea e non conservano copie locali del grafo.
+- **Token di Autenticazione**: Ogni plugin (anche locale) deve autenticarsi presso il Gateway tramite una API\_KEY univoca.  
+- **Network Binding**: Per default, il Gateway deve ascoltare solo su localhost. L'apertura alla rete esterna deve essere un'azione esplicita dell'utente nelle impostazioni di configurazione.  
+- **Data Sovereignty**: Il database Neo4j risiede idealmente sulla macchina più sicura dell'utente; i Worker remoti ricevono solo i chunk di dati necessari all'elaborazione temporanea e non conservano copie locali del grafo.
 
 ---
 
@@ -329,4 +339,3 @@ Dato che Mnemosyne trasporta dati potenzialmente sensibili (Scope :Private), l'i
 2. **Storage**: Creazione della directory per il volume Neo4j (persistenza).  
 3. **Kernel**: Setup del venv e installazione delle dipendenze del Micro-Kernel.  
 4. **Plugin**: Registrazione dei plugin locali o remoti tramite il file plugins.json.
-

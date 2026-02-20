@@ -22,10 +22,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from mcp.server.fastmcp import FastMCP
 from core.graph_manager import GraphManager
-from core.llm import get_llm_provider
-from core.perception import PerceptionModule
+from butler.llm import get_llm_provider
+from butler.perception import PerceptionModule
 from core.attention import AttentionModel
-from core.initiative import InitiativeEngine
+from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 
 # Configuration
@@ -61,14 +61,16 @@ def trigger_gardening_cycle() -> str:
     return "Gardening cycle completed successfully. Memory sanitized and updated."
 
 @mcp.tool()
-def query_knowledge(query: str, depth: int = 1) -> str:
+def query_knowledge(query: str, scopes: str = "Public", depth: int = 1) -> str:
     """
     Search the Mnemosyne knowledge graph for entities and their relationships.
     Use this to retrieve context about specific people, projects, or concepts.
+    scopes: Comma-separated list of scopes to search (e.g., 'Private,Public').
     """
-    node = gm.get_node(query)
+    scope_list = scopes.split(",") if scopes else ["Public"]
+    node = gm.get_node(query, scopes=scope_list)
     if not node:
-        return f"Concept '{query}' not found in memory."
+        return f"Concept '{query}' not found in memory (Scopes: {scopes})."
     
     # Build a readable summary of the node and its neighbors
     res = f"### [CONCEPT: {node['name']}]\n"
@@ -78,7 +80,7 @@ def query_knowledge(query: str, depth: int = 1) -> str:
         for k, v in props.items():
             res += f"  - {k}: {v}\n"
     
-    neighbors = gm.get_neighbors(query)
+    neighbors = gm.get_neighbors(query, scopes=scope_list)
     if neighbors:
         limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
         res += "Related Context:\n"
@@ -87,35 +89,42 @@ def query_knowledge(query: str, depth: int = 1) -> str:
     
     return res
 
-@mcp.tool()
-def add_observation(content: str) -> str:
-    """
-    Record a new piece of information into memory. 
-    This triggers entity extraction and relationship mapping automatically.
-    """
-    entities = pm.process_input(content)
-    if entities:
-        return f"Observation recorded. Extracted and linked entities: {', '.join(entities)}"
-    else:
-        return "Observation recorded, but no specific entities were extracted."
+from butler.knowledge_queue import KnowledgeQueue
+kq = KnowledgeQueue()
 
 @mcp.tool()
-def get_memory_briefing() -> str:
+def add_observation(content: str, scope: str = "Public") -> str:
+    """
+    Record a new piece of information into memory. 
+    This triggers entity extraction and relationship mapping automatically via background workers.
+    scope: The privacy scope for this observation (Private, Internal, Public).
+    """
+    try:
+        obs_name = pm.create_observation(content, scope=scope)
+        job_id = kq.enqueue(content, obs_name, scope=scope)
+        return f"Observation recorded in scope '{scope}' and queued for semantic enrichment (Job ID: {job_id})."
+    except Exception as e:
+        return f"Error recording observation: {e}"
+
+@mcp.tool()
+def get_memory_briefing(scopes: str = "Public") -> str:
     """
     Get a briefing on currently active (hot) topics and proactive suggestions from The Butler.
     Useful at the start of a session or when feeling lost.
+    scopes: Comma-separated list of scopes (e.g., 'Private,Public').
     """
-    active_nodes = gm.get_active_nodes(threshold=0.7)
+    scope_list = scopes.split(",") if scopes else ["Public"]
+    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=scope_list)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
     
     # The Butler's Proactive Voice
     briefing = f"Current active entities: {', '.join(hot_topics) if hot_topics else 'None'}\n"
-    proactive_context = ie.get_proactive_context()
+    proactive_context = ie.get_proactive_context(scopes=scope_list)
     if proactive_context:
         briefing += f"\n#### The Butler's Internal Log:\n{proactive_context}\n"
         
     # Specific Suggestions
-    suggestions = ie.generate_initiatives()
+    suggestions = ie.generate_initiatives(scopes=scope_list)
     if suggestions:
         briefing += "\n#### The Butler's Suggestions:\n"
         for s in suggestions:

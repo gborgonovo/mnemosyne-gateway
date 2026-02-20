@@ -1,9 +1,9 @@
 from typing import Dict, Any
 from core.graph_manager import GraphManager
 from core.attention import AttentionModel
-from core.perception import PerceptionModule
-from core.initiative import InitiativeEngine
-from core.feedback import FeedbackManager
+from butler.perception import PerceptionModule
+from butler.initiative import InitiativeEngine
+from butler.feedback import FeedbackManager
 
 class MnemosyneState:
     gm: GraphManager = None

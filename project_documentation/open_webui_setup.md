@@ -36,9 +36,9 @@ Per rendere l'assistente capace di decidere cosa salvare, aggiungi questa frase 
 
 Prima di impazzire con la configurazione di Open WebUI, puoi verificare se il Gateway funziona correttamente aprendo questi indirizzi nel tuo browser (assumendo la porta 4001):
 
-- **Stato Core**: [http://localhost:4001/status](http://localhost:4001/status) (Verifica connessione Neo4j e LLM)
-- **Briefing**: [http://localhost:4001/briefing](http://localhost:4001/briefing) (Vedi i temi caldi e i suggerimenti del Butler)
-- **Documentazione API**: [http://localhost:4001/docs](http://localhost:4001/docs) (Interfaccia Swagger per testare tutti i comandi)
+- **Stato Core**: [http://localhost:4001/status](http://localhost:4001/status) (Verifica connessione Neo4j ed EventBus)
+- **Briefing**: [http://localhost:4001/briefing](http://localhost:4001/briefing) (Vedi i temi caldi generati dal `BriefingWorker`)
+- **Documentazione API**: [http://localhost:4001/docs](http://localhost:4001/docs) (Interfaccia Swagger per testare scopes e promotion)
 
 Se questi link non funzionano, il problema è nel Gateway. Se funzionano ma Open WebUI non vede nulla, il problema è nella rete/Docker.
 

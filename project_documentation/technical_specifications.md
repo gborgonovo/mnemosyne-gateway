@@ -15,23 +15,24 @@ Unlike traditional AI assistants that react to prompts, Mnemosyne maintains a pe
 
 Mnemosyne è ora un **Cognitive Middleware Headless**. Espone le sue capacità cognitive tramite un **HTTP Bridge (FastAPI)** e un server **MCP**, permettendo l'integrazione con agenti locali (OpenClaw), interfacce web (Open WebUI) e client CLI.
 
-### 2.1 Technology Stack
-
-- **Core**: Python 3.10+
+- **Core**: Python 3.10+ (LLM-Free Micro-Kernel)
 - **Graph Engine**: Neo4j (via Docker)
-- **API Engine**: FastAPI / Uvicorn
+- **API Engine**: FastAPI / Uvicorn (Distributed Gateway)
+- **Communication Protocol**: Mnemosyne-RPC (Event-driven over REST)
 - **Interface**: FastMCP (stdio transport) & HTTP REST
-- **Knowledge OS**: Mnemosyne Core (Attention + Initiative + Perception)
+- **Storage Pools**: Knowledge Scopes (Private, Internal, Public)
 
 ### 2.2 Functional Blocks
 
-1. **The Connectome (Core)**: The semantic graph storage.
-2. **Mnemosyne Gateway**: Server FastAPI che espone gli endpoint REST.
-3. **MCP Interface**: Server FastMCP per integrazione contestuale diretta.
-4. **Attention Engine**: The mathematical model governing node activation.
-5. **Perception Module**: Input processing and entity extraction.
-6. **Initiative Engine (Mnemosyne)**: Decision engine for proactive support.
-7. **The Butler Persona (The Relational Layer)**: Integrated into the MCP tools output for consistent personality.
+1. **The Connectome (Core)**: The semantic graph storage (LLM-Free).
+2. **Mnemosyne Gateway**: Distributed FastAPI server and Event Bus hub.
+3. **MCP Interface**: Server FastMCP for direct tool integration.
+4. **Attention Engine**: Mathematical model for activation & decay.
+5. **Knowledge Scopes**: Hierarchical visibility filtering (Private/Public).
+6. **Distributed Workers**:
+    - **LLMWorker**: Asynchronous entity extraction and enrichment.
+    - **BriefingWorker**: Plugin-based proactive initiative generation.
+7. **The Butler Persona**: Relational layer for user interaction.
 
 ---
 
@@ -72,8 +73,9 @@ This module gives the graph "life" by simulating heat (activation) flow.
 
 #### Decay Model
 
-Decadimento temporale lineare potenziato da un **Fattore di Obsolescenza**: i dati più vecchi perdono attivazione più velocemente se non rinforzati, per dare priorità alla pertinenza attuale.
-$$ A_{t} = A_{t-1} - ( \Delta t \times K_{decay} \times \omega_{age} ) $$
+Decadimento temporale **esponenziale discreto**: i dati perdono attivazione in base a cicli periodici, simulando la dimenticanza naturale.
+$$ A_{t} = A_{t-1} \times (1 - K_{decay}) $$
+dove $K_{decay}$ è il tasso di decadimento configurabile.
 
 #### Modificatore "Pedanteria" (Persistence)
 
@@ -97,13 +99,23 @@ A background process responsible for "Graph Hygiene".
 - **Action**: It does **not** auto-merge. It creates a special `MAYBE_SAME_AS` edge.
 - **User Interaction**: The Dashboard visualizes these edges and allows manual merging/dismissal.
 
-### 3.4 Semantic Harmonization & Entity Resolution
+### 3.4 Knowledge Scopes (Visibility & Privacy)
 
-To prevent the rigidity of string matching (e.g., failing to link "Veranda" and "Terrazzo"), Mnemosyne employs a multi-layered resolution strategy:
+Mnemosyne implementa un modello di visibilità gerarchico direttamente a livello di query database.
 
-1. **Contextual Extraction (Input Stage)**: The Perception Module provides the LLM with a list of "hot" nodes (currently active topics). The LLM is instructed to map synonyms to existing nodes if the context is unambiguous.
-2. **Alias Registry**: Nodes support an `aliases` property (e.g., `Veranda` -> `["terrazzo", "balcone"]`). The `GraphManager` lookups are performed across both the Primary Name and the Alias list.
-3. **Post-Process Consolidation (Gardener)**: The Gardener identifies nodes with high co-occurrence or similar semantic proximity and proposes `MAYBE_SAME_AS` relationships for user-approved merging.
+- **Private**: Visibile solo all'istanza/utente proprietario.
+- **Internal**: Visibile internamente al sistema (es. per analisi cross-progetto).
+- **Public**: Esponibile ad agenti esterni o alla conoscenza globale.
+
+**Ereditarietà**: Uno scope superiore (es. `Private`) ha accesso a tutta la conoscenza degli scope inferiori (`Internal`, `Public`), ma non viceversa. Questo garantisce che i "segreti" non trapelino mai nelle interazioni pubbliche.
+
+### 3.5 Mnemosyne-RPC Protocol (Plugin System)
+
+Il sistema supporta l'estensione tramite worker distribuiti che comunicano tramite il protocollo **Mnemosyne-RPC**.
+
+1. **Registrazione**: I worker si registrano al Gateway tramite `/register`.
+2. **Pub/Sub**: Il Gateway pubblica eventi (es. `NODE_ENERGIZED`, `NEW_OBSERVATION`).
+3. **Risposta**: I worker elaborano e restituiscono risultati (es. `INITIATIVE_READY`, `ENRICHMENT_RESULT`).
 
 ### 3.5 Asynchronous Learning Pipeline
 

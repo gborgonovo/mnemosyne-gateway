@@ -8,8 +8,8 @@ from typing import List
 sys.path.append(os.getcwd())
 
 from core.graph_manager import GraphManager
-from core.perception import PerceptionModule
-from core.llm import get_llm_provider
+from butler.perception import PerceptionModule
+from butler.llm import get_llm_provider
 
 # Mocking the state for testing
 class MockState:

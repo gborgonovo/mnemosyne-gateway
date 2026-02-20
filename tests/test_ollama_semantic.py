@@ -7,8 +7,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.graph_manager import GraphManager
-from core.llm import get_llm_provider
-from core.perception import PerceptionModule
+from butler.llm import get_llm_provider
+from butler.perception import PerceptionModule
 from core.attention import AttentionModel
 
 def test_semantic_context():

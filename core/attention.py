@@ -9,11 +9,13 @@ class AttentionModel:
     Handles Decay and Propagation logic.
     """
 
-    def __init__(self, graph_manager: GraphManager, config: dict):
+    def __init__(self, graph_manager: GraphManager, config: dict, event_bus=None):
         self.gm = graph_manager
+        self.eb = event_bus
         self.decay_rate = config.get("decay_rate", 0.05)
         self.dampening = config.get("propagation_dampening", {"forward": 1.0, "backward": 0.5})
         self.activation_threshold = config.get("activation_threshold", 0.1)
+        self.peak_threshold = config.get("peak_threshold", 0.7)
 
     def propagate_activation(self, source_node_name: str, initial_boost: float = 0.0):
         """
@@ -57,6 +59,10 @@ class AttentionModel:
             if n_new_val > n_current_val: # Only update if it increases
                 self.gm.update_activation(n_name, n_new_val)
                 logger.debug(f"Propagated {transfer_amount:.2f} from {source_node_name} to {n_name} ({direction})")
+                
+                # Peak Detection
+                if n_new_val >= self.peak_threshold and self.eb:
+                    self.eb.publish("NODE_ENERGIZED", {"name": n_name, "level": n_new_val})
 
     def apply_decay(self):
         """
@@ -75,8 +81,9 @@ class AttentionModel:
                 continue
 
             if current_val > 0.01: # Optimization: ignore dead nodes
-                new_val = max(current_val - self.decay_rate, 0.0)
-                if new_val != current_val:
+                # Exponential Decay: new_val = current_val * (1 - decay_rate)
+                new_val = max(current_val * (1 - self.decay_rate), 0.0)
+                if abs(new_val - current_val) > 0.001:
                     self.gm.update_activation(name, new_val)
                     count += 1
         logger.info(f"Decay applied to {count} nodes (persistent nodes skipped).")

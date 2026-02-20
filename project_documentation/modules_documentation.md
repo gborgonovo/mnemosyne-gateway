@@ -8,17 +8,14 @@ This document provides a technical overview of the python modules and workers th
 
 ### 1.1 `graph_manager.py` (The Connectome Interface)
 
-**Purpose**: Manages all direct interactions with the Neo4j graph database. It handles node creation, relationship mapping, and retrieval of active context.
+**Purpose**: Manages all direct interactions with the Neo4j graph database. È ora rigorosamente **LLM-Free**, occupandosi solo della gestione dei nodi, delle relazioni e del filtraggio degli Scopes.
 
 - **Main Class**: `GraphManager`
 - **Key Methods**:
-  - `add_node(name, primary_label, properties)`: Creates or updates a node in the graph.
-  - `get_node(name)`: Retrieves a node by name or its `aliases`.
-  - `add_alias(node_name, alias)`: Appends an alias to a node for semantic harmonization.
-  - `get_active_nodes(threshold)`: Returns nodes with activation levels above a certain value.
-  - `update_activation(name, value)`: Directly modifies a node's heat level.
-  - `trace_dependencies(start_node_name, max_depth)`: Traces downstream `DEPENDS_ON` or `IS_A` links for Impact Analysis (Sandbox Reasoning).
-  - `get_neighbors(name)`: Returns all nodes connected to a specific entry.
+  - `add_node(name, primary_label, properties, scope)`: Creates or updates a node within a specific Knowledge Scope.
+  - `get_node(name, scopes)`: Retrieves a node, respecting hierarchical visibility.
+  - `get_neighbors(name, scopes)`: Returns connected nodes within the allowed scopes.
+  - `get_active_nodes(threshold, scopes)`: Returns active context filtered by scope.
 
 ### 1.2 `attention.py` (The Metabolic Engine)
 
@@ -30,49 +27,33 @@ This document provides a technical overview of the python modules and workers th
   - `propagate()`: Conducts activation from hot nodes to their neighbors, attenuated by relationship weights.
   - `apply_decay()`: Gradually lowers activation levels across all nodes (forgetting). Note: Nodes with `persistence: high` are exempt from decay.
 
-### 1.3 `initiative.py` (The Decision Layer)
+## 2. Butler Layer (`/butler`)
 
-**Purpose**: Analyzes the current state of the graph to determine when the system should proactively intervene through The Butler.
+Il package `butler/` contiene la logica relazionale e perceptiva che un tempo risiedeva nel core.
 
-- **Main Class**: `InitiativeEngine`
-- **Key Methods**:
-  - `get_proactive_context()`: Identifies "hot" topics that haven't been discussed recently and returns a summary for the LLM.
-  - `generate_initiatives()`: Evaluates specific strategies (e.g., Goal Decomposition) to suggest actions to the user.
-  - `get_initiatives(limit)`: Returns a list of formatted suggestions based on graph triggers.
+### 2.1 `perception.py` (The Input Gateway)
 
-### 1.4 `perception.py` (The Input Gateway)
+**Purpose**: Gestisce l'integrazione iniziale delle osservazioni. Crea il nodo `Observation` e mette in coda il caricamento per l'arricchimento asincrono.
 
-**Purpose**: Processes raw user input into structured graph data. It acts as the "eyes and ears" of the system.
+### 2.2 `knowledge_queue.py` (The Persistence Buffer)
 
-- **Main Class**: `PerceptionModule`
-- **Key Methods**:
-  - `process_input(text)`:
-        1. Creates an `Observation` node.
-        2. Uses the LLM to extract entities/topics (mentioning existing active nodes as context).
-        3. Updates or creates nodes in the Connectome.
-        4. Links entities to the Observation.
-        5. Stimulates the mentioned nodes via the `AttentionModel`.
+**Purpose**: Gestisce una coda JSON su disco (`data/queue/`) per i compiti di arricchimento semantico.
 
-### 1.5 `llm.py` (The Linguistic & Semantic Gland)
+### 2.3 `initiative.py` (The Initiative Engine)
 
-**Purpose**: Provides an abstraction layer for LLM providers (Ollama, OpenAI, Mock). It is used for text generation, entity extraction, and semantic comparisons.
+**Purpose**: Versione specializzata per la gestione delle proattività, ora integrata nel flusso a eventi del Gateway.
 
-- **Key Classes**: `LLMProvider` (Abstract), `OpenAILLM`, `OllamaLLM`, `MockLLM`.
-- **LLM Router**: (Prossima implementazione) Gestirà il routing dei compiti *interni e di arricchimento contesto* su diversi Tier di modelli (locali, remoti o misti) in base alla complessità e alla configurazione dell'utente.
-- **Key Methods**:
-  - `generate_response(user_text, proactive_context, impact_context, semantic_context)`: Generates The Butler's response.
-  - `extract_entities(text, context_nodes)`: Identifies `Entity`, `Topic`, `Goal`, and `Task` items in raw text. Uses JSON mode for reliability.
-  - `compare_entities(e1, e2)`: Deep semantic comparison used by the Gardener for deduplication.
+## 3. Distributed Workers (`/workers`)
 
-### 1.6 `knowledge_queue.py` (The Persistence Buffer)
+I worker sono processi indipendenti che estendono le capacità di Mnemosyne tramite il protocollo RPC.
 
-**Purpose**: Manages a disk-based JSON queue for asynchronous tasks.
+### 3.1 `llm_worker.py` (The Knowledge Enricher)
 
-- **Main Class**: `KnowledgeQueue`
-- **Key Methods**:
-  - `enqueue(content, obs_name)`: Adds a new processing job.
-  - `get_pending_jobs()`: Retrieves unprocessed or failed tasks.
-  - `mark_done(job_id)` / `mark_failed(job_id)`: Updates job status.
+**Purpose**: Consuma la `KnowledgeQueue` per estrarre entità e topic tramite LLM (Ollama) e reintegrarli nel grafo tramite il Gateway.
+
+### 3.2 `briefing_worker.py` (The Proactive Plugin)
+
+**Purpose**: Sottoscrive l'evento `NODE_ENERGIZED` e genera suggestioni proattive quando un concetto supera le soglie di attivazione.
 
 ### 1.6 `feedback.py` (The Learning Layer)
 
@@ -86,20 +67,9 @@ This document provides a technical overview of the python modules and workers th
 
 ## 2. Background Workers (`/workers`)
 
-### 2.1 `gardener.py` (The Hygiene Worker)
+### 4.1 `gardener.py` (The Hygiene Worker)
 
 **Purpose**: Operates as a "Timid Gardener" in the background, performing maintenance tasks that don't require immediate user attention but are vital for long-term health.
-
-- **Main Class**: `Gardener`
-- **Key Methods**:
-  - `apply_temporal_decay()`: Calls the Attention Engine's decay cycle.
-  - `find_and_mark_duplicates()`: Scans the graph for potential duplicate nodes using string heuristics and LLM comparison, creating `MAYBE_SAME_AS` links.
-  - `check_deadlines()`: Scans for `Task` nodes with upcoming or overdue deadlines and injects massive activation boosts to grab The Butler's attention.
-  - `run_once()`: Orchestrates one full cycle of maintenance.
-
-### 2.2 `learning_worker.py` (The Knowledge Ingestor)
-
-**Purpose**: A dedicated background thread that processes the `KnowledgeQueue`, ensuring that LLM extraction tasks don't block the main API.
 
 ---
 
@@ -110,11 +80,14 @@ This document provides a technical overview of the python modules and workers th
 **Purpose**: Exposes Mnemosyne core functionality as a REST API using FastAPI. This allows remote applications (like OpenClaw in Docker or Open WebUI) to interact with the memory.
 
 - **Endpoints**:
-  - `GET /status`: Health check for Neo4j and LLM.
-  - `POST /add`: Submits a new observation.
-  - `GET /search`: Semantic search on the graph.
-  - `GET /briefing`: Fetches the proactive context from the Initiative Engine.
-  - `GET /history`: Retrieves the audit trail of recent memories.
+  - `GET /status`: Health check for Neo4j and EventBus.
+  - `POST /add`: Submits a new observation into a specific scope.
+  - `GET /search`: Semantic search with scope-aware filtering.
+  - `GET /briefing`: Fetches suggestions generated by `BriefingWorker`.
+  - `POST /rpc`: Gateway for internal signaling between workers.
+  - `POST /register`: Handshake for external plugins/workers.
+  - `POST /share`: Promotes a node from one scope to another.
+  - `GET /stats`: Real-time graph statistics.
 
 ### 3.2 `legacy_cli.py` (The Command Line Bridge)
 

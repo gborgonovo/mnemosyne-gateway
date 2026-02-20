@@ -37,11 +37,10 @@ Implements a **Knowledge Graph architecture** that goes beyond simple text files
 
 ### 1. Configure Connection
 
-Edit `config.sh` to point to your Mnemosyne installation:
+Edit `config.sh` to point to your Mnemosyne Gateway (default is port `4001`):
 
 ```bash
-MNEMOSYNE_PYTHON="/path/to/venv/python"
-MNEMOSYNE_CLI="/path/to/legacy_cli.py"
+MNEMOSYNE_HOST="http://localhost:4001"
 ```
 
 ### 2. Record Observations
@@ -64,10 +63,11 @@ MNEMOSYNE_CLI="/path/to/legacy_cli.py"
 
 ## Commands
 
-**`add.sh <content>`** - Store new observations (triggers extraction)
-**`query.sh <query>`** - Search the Knowledge Graph for entities
-**`briefing.sh`** - Get Situational awareness and proactive suggestions
-**`history.sh`** - Audit recent activity (last 10 memories updated)
+**`add.sh <content> [scope]`** - Store observations (default scope: `Public`)
+**`query.sh <query> [scopes]`** - Search the Graph (default scopes: `Public`)
+**`briefing.sh [scopes]`** - Get Situational awareness (filtered by scope)
+**`share.sh <node> <to_scope>`** - Promote knowledge between scopes
+**`history.sh`** - Audit recent activity (last 10 memories)
 **`status.sh`** - Check system health and graph statistics
 
 ## Why This Architecture?
@@ -90,11 +90,15 @@ MNEMOSYNE_CLI="/path/to/legacy_cli.py"
 - Privacy-first: Your agent's memory is your data.
 - Works offline, zero latency.
 
-## Roadmap
+## Knowledge Scopes & Privacy
 
-- **v1.1**: Multi-agent shared graph memory.
-- **v1.2**: Direct cross-linking with OpenClaw episodic logs.
-- **v2.0**: Neural-Symbolic integration for complex reasoning.
+Mnemosyne now supports hierarchical visibility:
+
+- **Private**: Exclusive personal knowledge.
+- **Internal**: Team/System shared knowledge.
+- **Public**: Knowledge visible to all agents.
+
+Use the `scope` parameter in `add.sh` to keep your secrets safe!
 
 ---
 Built by Mnemosyne Team for the agentic economy.

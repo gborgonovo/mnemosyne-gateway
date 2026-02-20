@@ -1,8 +1,8 @@
 import logging
 import time
 import threading
-from core.knowledge_queue import KnowledgeQueue
-from core.perception import PerceptionModule
+from butler.knowledge_queue import KnowledgeQueue
+from butler.perception import PerceptionModule
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +36,15 @@ class LearningWorker(threading.Thread):
                     job_id = job["id"]
                     content = job["content"]
                     obs_name = job["obs_name"]
+                    scope = job.get("scope", "Public")
                     
-                    logger.info(f"LearningWorker: Processing job {job_id} for {obs_name}")
+                    logger.info(f"LearningWorker: Processing job {job_id} for {obs_name} (Scope: {scope})")
                     
                     try:
-                        # Perform the heavy lifting
-                        self.perception.extract_and_integrate(content, obs_name)
+                        # Request enrichment (asynchronous)
+                        self.perception.request_enrichment(content, obs_name, scope=scope)
                         self.queue.mark_done(job_id)
-                        logger.info(f"LearningWorker: Job {job_id} completed successfully.")
+                        logger.info(f"LearningWorker: Enrichment requested for {obs_name}.")
                     except Exception as e:
                         logger.error(f"LearningWorker: Job {job_id} failed: {e}")
                         self.queue.mark_failed(job_id, str(e))

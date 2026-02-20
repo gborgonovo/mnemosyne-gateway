@@ -6,6 +6,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-curl -s -X POST "${MNEMOSYNE_HOST}/add" \
+scope=${2:-"Public"}
+curl -s -X POST "${MNEMOSYNE_HOST}/add?scope=${scope}" \
      -H "Content-Type: application/json" \
-     -d "{\"content\": \"$1\"}" | jq . || curl -s -X POST "${MNEMOSYNE_HOST}/add" -H "Content-Type: application/json" -d "{\"content\": \"$1\"}"
+     -d "{\"content\": \"$1\"}" | jq . || curl -s -X POST "${MNEMOSYNE_HOST}/add?scope=${scope}" -H "Content-Type: application/json" -d "{\"content\": \"$1\"}"

@@ -7,7 +7,7 @@ import yaml
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.graph_manager import GraphManager
-from core.llm import get_llm_provider
+from butler.llm import get_llm_provider
 
 def load_config():
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.yaml')

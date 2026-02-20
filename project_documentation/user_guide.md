@@ -8,25 +8,25 @@ L'applicazione si basa su componenti core che devono essere attivi:
 
 1. **Neo4j**: Il database a grafo (Connectome).
 2. **Ollama**: Il motore di inferenza locale.
-3. **Mnemosyne Gateway**: Il server FastAPI che fa da bridge.
+3. **Mnemosyne Gateway**: Il server FastAPI che fa da hub distribuito.
 
-Per avviare il Gateway (necessario per OpenClaw e altre app):
-
-```bash
-PYTHONPATH=. .venv/bin/python3 gateway/http_server.py
-```
-
-Per avviare la Dashboard di visualizzazione (opzionale):
+Mnemosyne è ora un sistema distribuito. Per avviare il Gateway e tutti i worker in background in modo sicuro (senza che si chiudano con il terminale), esegui dalla cartella principale:
 
 ```bash
-streamlit run interface/app.py
+./scripts/start.sh
 ```
 
----
+Questo avvierà:
 
-## 🔌 Modalità di Utilizzo
+1. **Il Gateway** (in ascolto sulla porta 4001).
+2. **L'LLM Worker** (per l'estensione semantica asincrona).
+3. **Il Briefing Worker** (per le iniziative proattive).
 
-Mnemosyne è un **Middleware**. Puoi interagirci in diversi modi:
+Per fermare il sistema, esegui:
+
+```bash
+./scripts/stop.sh
+```
 
 ### A. Tramite App Esterne (OpenClaw, Open WebUI)
 
@@ -114,7 +114,35 @@ Sulla sidebar troverai la sezione **"Mnemosyne Says..."**. Qui The Butler prende
 - **Associazioni Inattese**: Se parli di un argomento, Mnemosyne potrebbe riproporti un tema correlato che non tocchi da tempo.
 - **Domande Aperte**: The Butler ti ricorderà dubbi o decisioni in sospeso legati ai temi caldi del momento.
 
+**Nota sugli Scope**: Le iniziative sono rigorosamente filtrate. Non riceverai mai suggerimenti basati su conoscenza `Private` se stai operando in uno scope `Public`.
+
 ---
+
+## 🛡️ 5. Knowledge Scopes (Privacy e Visibilità)
+
+Mnemosyne protegge la tua conoscenza tramite pool di visibilità isolati.
+
+- **Public**: Conoscenza condivisibile con agenti esterni.
+- **Internal**: Procedure e documentazione tecnica interna.
+- **Private**: I tuoi pensieri, segreti e bozze di progetto.
+
+### Come usare gli Scopes
+
+Quando aggiungi un'informazione tramite il Gateway, puoi specificare lo scope:
+
+```url
+POST /add?scope=Private
+```
+
+Per cercare informazioni in ambiti specifici:
+
+```url
+GET /search?q=progetto&scopes=Private,Public
+```
+
+### Knowledge Promotion (Condivisione)
+
+Se un'idea nata in `Private` è pronta per essere condivisa, puoi usare l'endpoint `/share` per spostare il nodo nello scope `Public`.
 
 ## 🌫️ 5. Focalizzazione e Oblio: Cambiare Argomento
 
@@ -129,6 +157,36 @@ Mnemosyne è progettata per seguire l'evoluzione dei tuoi interessi. Cosa succed
 ### Il Valore dei Ponti
 
 La vera potenza del sistema emerge quando Mnemosyne identifica un **ponte** tra argomenti distanti. Se trovi un punto di contatto tra i due mondi, The Butler ti aiuterà a integrare le nuove scoperte nei tuoi progetti esistenti, creando connessioni proattive che non avresti considerato.
+
+---
+
+## 🛠️ Manutenzione e Backup
+
+Per garantire la sicurezza del tuo Connectome, Mnemosyne include un'utility di gestione del database.
+
+### Eseguire un Backup
+
+Esegui questo comando periodicamente o prima di aggiornamenti importanti:
+
+```bash
+.venv/bin/python3 scripts/manage_db.py backup --file data/backup_memoria.json
+```
+
+### Ripristinare da un Backup
+
+Per recuperare il grafo da un file JSON precedentemente esportato:
+
+```bash
+.venv/bin/python3 scripts/manage_db.py restore --file data/backup_memoria.json
+```
+
+### Svuotare il Grafo
+
+Se vuoi ricominciare da zero in modo pulito:
+
+```bash
+.venv/bin/python3 scripts/manage_db.py clear
+```
 
 ---
 

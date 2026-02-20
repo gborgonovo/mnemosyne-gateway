@@ -7,4 +7,5 @@ if [ -z "$1" ]; then
 fi
 
 encoded_q=$(urlencode "$1")
-curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}" | jq . || curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}"
+scopes=${2:-"Public"}
+curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}&scopes=${scopes}" | jq . || curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}&scopes=${scopes}"

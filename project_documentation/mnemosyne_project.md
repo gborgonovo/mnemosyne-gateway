@@ -41,12 +41,15 @@ Parliamo di come potrebbe essere, tenendo i piedi per terra (è pur sempre tecno
 
 ### Come Funziona Tecnicamente (Mnemosyne Gateway)
 
-Mnemosyne è ora un **Cognitive Middleware Headless**. Non è più un'app con UI principale, ma un servizio di background accessibile via **HTTP Bridge** e **MCP**.
+Mnemosyne è ora un **Cognitive Middleware Headless** distribuito. Non è più un'app con UI principale, ma un ecosistema di servizi coordinati tramite un **Gateway Centralizzato** accessibile via **HTTP REST** e **MCP**.
 
+* **Core Agnostico (LLM-Free):** Il nucleo centrale gestisce esclusivamente la dinamica dei grafi, l'attenzione e il bus degli eventi, senza dipendenze dirette da modelli linguistici.
+* **Distributed Workers:** L'intelligenza (estrazione entità, generazione briefing) è delegata a worker separati (`LLMWorker`, `BriefingWorker`) che comunicano asincronamente tramite code persistenti e segnali RPC.
+* **Knowledge Scopes:** Supporto nativo per pool di conoscenza isolati (`Private`, `Internal`, `Public`) con ereditarietà gerarchica.
 * **Interfaccia Universale:** Espone tool tramite **MCP** e un **HTTP Bridge (FastAPI)** per la massima compatibilità (Docker, WebUI, CLI).
 * **Memoria:** Ogni interazione è salvata, classificata e correlata nel Connectome (Neo4j).
-* **Motore di Iniziativa:** Un insieme di regole euristiche che osservano i livelli di attivazione del grafo e generano briefing.
-* **Integrazione Agente:** Gli agenti (OpenClaw, Open WebUI) chiamano gli endpoint di Mnemosyne per arricchire il proprio contesto.
+* **Motore di Iniziativa Distribuito:** Un sistema a eventi che attiva suggerimenti proattivi basandosi sui picchi di attivazione del grafo, rispettando rigorosamente gli ambiti di visibilità (Scopes).
+* **Integrazione Agente:** Gli agenti (OpenClaw, Open WebUI) chiamano gli endpoint di Mnemosyne per arricchire il proprio contesto, mantenendo la separazione tra identità dell'agente e conoscenza dell'utente.
 
 ### La Postura del Partner (Come Si Comporterebbe)
 
@@ -688,9 +691,10 @@ A Gennaio 2026, Mnemosyne ha raggiunto lo stato di Prototipo Funzionale Avanzato
     * Background worker per la pulizia del grafo.
     * Deduplicazione assistita da LLM (Semantic Comparison).
     * Decadimento temporale automatizzato (attuato via Attention Model).
-5. **Integrazione Locale Ollama**:
-    * Transizione completa dalle API esterne (OpenAI) all'inferenza locale tramite Ollama.
-    * Ottimizzazione per hardware dedicato (GPU locale), garantendo privacy assoluta e latenza ridotta.
+5. **Distribuzione e Scalabilità (Gennaio-Febbraio 2026)**:
+    * Transizione a un'architettura a micro-servizi/worker.
+    * Implementazione del protocollo **Mnemosyne-RPC** per la registrazione di plugin esterni.
+    * Supporto per **Knowledge Scopes** (Private/Public) con isolamento garantito.
 
 ### **Stato Tecnologico:**
 
@@ -699,7 +703,7 @@ A Gennaio 2026, Mnemosyne ha raggiunto lo stato di Prototipo Funzionale Avanzato
 * **Frontend**: Dashboard Streamlit con Heatmap in tempo reale, archivio storico e strumenti di manutenzione.
 * **Persona**: Sistema di prompt engineering raffinato per garantire un tono professionale e non pedante.
 
-**Mnemosyne è ora un "Secondo Cervello" attivo e locale, pronto per supportare la gestione di progetti complessi attraverso la memoria semantica e l'iniziativa proattiva.** 🚀🧠
+**Mnemosyne è ora un "Secondo Cervello" attivo, locale e distribuito, pronto per supportare la gestione di progetti complessi attraverso la memoria semantica, l'iniziativa proattiva e la privacy multi-livello.** 🚀🧠
 
 ---
 

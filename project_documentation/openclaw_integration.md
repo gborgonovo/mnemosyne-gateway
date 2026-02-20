@@ -10,15 +10,15 @@ Mnemosyne è ora un server **MCP (Model Context Protocol)** standalone. Questo d
 
 Il metodo più semplice per integrare Mnemosyne è usare lo **HTTP Bridge**. Questo permette a OpenClaw (dentro Docker) di comunicare con la tua istanza locale di Mnemosyne.
 
-### A. Avvio del Server (sull'Host)
+### A. Avvio del Gateway (sull'Host)
 
-Prima di avviare OpenClaw, devi avviare il bridge sulla tua macchina:
+Prima di avviare OpenClaw, devi avviare il Gateway sulla tua macchina:
 
 ```bash
 PYTHONPATH=. .venv/bin/python3 gateway/http_server.py
 ```
 
-Il server sarà in ascolto su `http://localhost:8000`.
+Il server sarà in ascolto sulla porta configurata (es. `4001`).
 
 ### B. Installazione Skill
 
@@ -54,9 +54,10 @@ Indipendentemente dal metodo, le funzionalità principali sono:
 
 ### Funzioni Core
 
-- **`query(query)`**: Cerca nel grafo della memoria per concetti, persone o progetti.
-- **`add(content)`**: Salva nuove informazioni, estraendo entità e collegandole automaticamente.
-- **`briefing()`**: Riassunto dei temi caldi e suggerimenti proattivi di The Butler.
+- **`query(query, scopes)`**: Cerca nel grafo, rispettando la visibilità degli Scope (es. `Public`, `Private`).
+- **`add(content, scope)`**: Salva nuove informazioni in uno scope specifico.
+- **`briefing(scopes)`**: Riassunto dei temi caldi e suggerimenti filtrati per visibilità.
+- **`share(node_name, to_scope)`**: Promuove conoscenza tra pool (es. da Private a Public).
 
 ### Diagnostica (Solo MCP)
 

@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.graph_manager import GraphManager
-from core.llm import get_llm_provider
-from core.perception import PerceptionModule
+from butler.llm import get_llm_provider
+from butler.perception import PerceptionModule
 from core.attention import AttentionModel
-from core.initiative import InitiativeEngine
+from butler.initiative import InitiativeEngine
 
 def load_config():
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.yaml')
