@@ -31,7 +31,7 @@ Mnemosyne è ora un **Cognitive Middleware Headless**. Espone le sue capacità c
 4. **Attention Engine**: The mathematical model governing node activation.
 5. **Perception Module**: Input processing and entity extraction.
 6. **Initiative Engine (Mnemosyne)**: Decision engine for proactive support.
-7. **Alfred Persona (The Relational Layer)**: Integrated into the MCP tools output for consistent personality.
+7. **The Butler Persona (The Relational Layer)**: Integrated into the MCP tools output for consistent personality.
 
 ---
 
@@ -44,8 +44,8 @@ Il Connectome implementa la visione del **"Grafo Liquido"**: la conoscenza non �
 #### Filosofia: Emergenza vs. Struttura
 
 - **Emergenza**: Il sistema permette a nuove connessioni di formarsi liberamente tramite le `Observation` e il feedback dell'utente.
-- **Struttura (Micro-Types)**: I tipi fondamentali aiutano Alfred a capire *come* usare le informazioni:
-  - `Entity`: Nodi-ancora (Persone, Strumenti, Luoghi). Alfred li usa per estrarre fatti univoci.
+- **Struttura (Micro-Types)**: I tipi fondamentali aiutano The Butler a capire *come* usare le informazioni:
+  - `Entity`: Nodi-ancora (Persone, Strumenti, Luoghi). The Butler li usa per estrarre fatti univoci.
   - `Topic`: Nodi-tema. Rappresentano il "colore" del discorso e guidano le iniziative proattive.
   - `Resource`: Collegamenti a dati esterni (Files, Links).
   - `Observation`: La memoria episodica. Ogni frase che scrivi è una "osservazione" collegata al tempo.
@@ -105,7 +105,16 @@ To prevent the rigidity of string matching (e.g., failing to link "Veranda" and 
 2. **Alias Registry**: Nodes support an `aliases` property (e.g., `Veranda` -> `["terrazzo", "balcone"]`). The `GraphManager` lookups are performed across both the Primary Name and the Alias list.
 3. **Post-Process Consolidation (Gardener)**: The Gardener identifies nodes with high co-occurrence or similar semantic proximity and proposes `MAYBE_SAME_AS` relationships for user-approved merging.
 
-### 3.5 Feedback & Relevance Tuning
+### 3.5 Asynchronous Learning Pipeline
+
+To ensure a non-blocking user experience and handle potential local LLM latencies (cold starts), the learning process is decoupled from the main request cycle.
+
+- **Immediate Action**: The system creates the `Observation` node and returns a success response to the client instantly.
+- **Persistent Queue**: A job is created in a persistent disk-based queue (`data/queue/`) containing the raw text and metadata.
+- **Background Worker**: A dedicated `LearningWorker` thread monitors the queue and performs the heavy LLM extraction and graph integration tasks.
+- **Resilience**: If the LLM provider is unavailable or slow, jobs are retried automatically without data loss.
+
+### 3.6 Feedback & Relevance Tuning
 
 The system uses a binary feedback mechanism (👍/👎) to refine its proactive behavior and semantic retrieval.
 
@@ -119,7 +128,7 @@ Feedback is stored directly on the relationships (Edges) between nodes as a `fee
 #### 3.5.2 Impact on Interaction
 
 1. **Initiative Engine (Sidebar)**: Negative feedback hides the suggestion immediately and permanently for the current relationship.
-2. **Contextual Retrieval (Alfred)**: Alfred's responses are grounded in "hot" semantic paths. High feedback scores act as a preference signal during the selection of which facts to retrieve from the Connectome.
+2. **Contextual Retrieval (The Butler)**: The Butler's responses are grounded in "hot" semantic paths. High feedback scores act as a preference signal during the selection of which facts to retrieve from the Connectome.
 
 ---
 
@@ -143,7 +152,7 @@ Mnemosyne communicates via a structured JSON protocol to remain client-agnostic.
 
 ```json
 {
-  "response": "string (Alfred's answer)",
+  "response": "string (The Butler's answer)",
   "metadata": {
     "active_nodes": ["list"],
     "attention_delta": "float"

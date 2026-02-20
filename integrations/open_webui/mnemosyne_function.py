@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 class Filter:
     class Valves(BaseModel):
         mnemosyne_url: str = Field(
-            default="http://host.docker.internal:8000",
+            default="http://host.docker.internal:4001",
             description="The URL of the Mnemosyne Gateway API."
         )
         enable_search: bool = Field(
@@ -36,20 +36,30 @@ class Filter:
         self.valves = self.Valves()
 
     def inlet(self, body: dict, __user__: Optional[dict] = None) -> dict:
+        print(f"DEBUG: Mnemosyne Inlet triggered. URL: {self.valves.mnemosyne_url}")
         if not self.valves.enable_search:
+            print("DEBUG: Search is disabled in valves.")
             return body
 
         messages = body.get("messages", [])
         if not messages:
+            print("DEBUG: No messages found in body.")
             return body
 
         last_user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), None)
         if not last_user_message:
+            print("DEBUG: No user message detected.")
             return body
 
         try:
+            # 0. Debug message for visual confirmation
+            messages.insert(-1, {"role": "system", "content": "🔍 Mnemosyne is searching..."})
+            
             # 1. Fetch Briefing/Context
+            print(f"DEBUG: Calling {self.valves.mnemosyne_url}/briefing")
             response = requests.get(f"{self.valves.mnemosyne_url}/briefing", timeout=5)
+            print(f"DEBUG: Briefing response status: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 context_parts = []
@@ -57,8 +67,8 @@ class Filter:
                 if data.get("hot_topics"):
                     context_parts.append(f"Hot Topics: {', '.join(data['hot_topics'])}")
                 
-                if data.get("alfred_log"):
-                    context_parts.append(f"Alfred's Insight: {data['alfred_log']}")
+                if data.get("butler_log"):
+                    context_parts.append(f"The Butler's Insight: {data['butler_log']}")
 
                 if context_parts:
                     context_msg = {
@@ -67,15 +77,12 @@ class Filter:
                     }
                     messages.insert(-1, context_msg)
             
-            # 2. Targeted Search for specific keywords
-            # We use a simple keyword extraction for now (splitting by spaces)
-            # but in the future, we could call an endpoint that extracts semantic entities.
+            # 2. Targeted Search
             keywords = last_user_message.split()
             found_concepts = []
 
-            # Search for the top 3 potential concepts to avoid bloating context
             for word in keywords:
-                if len(word) < 4: continue # Skip short words
+                if len(word) < 4: continue
                 try:
                     search_resp = requests.get(f"{self.valves.mnemosyne_url}/search", params={"q": word}, timeout=2)
                     if search_resp.status_code == 200:
@@ -89,6 +96,7 @@ class Filter:
                     continue
 
             if found_concepts:
+                print(f"DEBUG: Found {len(found_concepts)} concepts.")
                 search_msg = {
                     "role": "system",
                     "content": f"[SPECIFIC MEMORIES FOUND]\n" + "\n".join(found_concepts)
@@ -97,6 +105,7 @@ class Filter:
             
         except Exception as e:
             print(f"Mnemosyne Inlet Error: {e}")
+            messages.insert(-1, {"role": "system", "content": f"⚠️ Mnemosyne Connection Error: {e}"})
 
         body["messages"] = messages
         return body

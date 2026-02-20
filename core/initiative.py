@@ -13,8 +13,10 @@ class InitiativeEngine:
     def __init__(self, graph_manager: GraphManager, config: dict = None):
         self.gm = graph_manager
         config = config or {}
-        self.threshold = config.get("initiative_threshold", 0.7)
-        self.explanation_threshold = config.get("explanation_threshold", 0.5)
+        init_config = config.get("initiative", {})
+        self.threshold = init_config.get("initiative_threshold", 0.7)
+        self.explanation_threshold = init_config.get("explanation_threshold", 0.5)
+        self.retrieval_config = config.get("retrieval", {})
         self.blacklist = {"interessante", "utile", "importante", "bene", "ciao", "ok"}
 
     def get_proactive_context(self) -> str:
@@ -44,7 +46,7 @@ class InitiativeEngine:
                 rel_props = neighbor.get('rel_props', {})
                 feedback = rel_props.get('feedback_score', 0)
                 
-                # Rule: If feedback is negative (< 0), Alfred should NOT mention it.
+                # Rule: If feedback is negative (< 0), The Butler should NOT mention it.
                 if feedback < 0:
                     continue
 
@@ -59,7 +61,8 @@ class InitiativeEngine:
         if not suggestions:
             return ""
             
-        return "Relevant but currently neglected topics in the user's mind:\n" + "\n".join(suggestions[:3])
+        limit = self.retrieval_config.get("initiative_limit", 3)
+        return "Relevant but currently neglected topics in the user's mind:\n" + "\n".join(suggestions[:limit])
 
     def generate_initiatives(self) -> list[dict]:
         """
@@ -109,7 +112,7 @@ class InitiativeEngine:
                     })
                     seen_targets.add(n_name)
                     
-                    if len(initiatives) >= 3: # Limit sidebar noise
+                    if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3): # Limit sidebar noise
                         return initiatives
         
         # New: Strategic Planning - Goal Decomposition
@@ -127,7 +130,7 @@ class InitiativeEngine:
                         "message": f"Il tuo obiettivo **{name}** sembra complesso. Vuoi che proviamo a scomporlo in passi azionabili?",
                         "reason": f"Goal '{name}' is active but has no linked Tasks."
                     })
-                    if len(initiatives) >= 3:
+                    if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3):
                         return initiatives
 
         return initiatives

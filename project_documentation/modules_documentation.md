@@ -32,7 +32,7 @@ This document provides a technical overview of the python modules and workers th
 
 ### 1.3 `initiative.py` (The Decision Layer)
 
-**Purpose**: Analyzes the current state of the graph to determine when the system should proactively intervene through Alfred.
+**Purpose**: Analyzes the current state of the graph to determine when the system should proactively intervene through The Butler.
 
 - **Main Class**: `InitiativeEngine`
 - **Key Methods**:
@@ -58,10 +58,21 @@ This document provides a technical overview of the python modules and workers th
 **Purpose**: Provides an abstraction layer for LLM providers (Ollama, OpenAI, Mock). It is used for text generation, entity extraction, and semantic comparisons.
 
 - **Key Classes**: `LLMProvider` (Abstract), `OpenAILLM`, `OllamaLLM`, `MockLLM`.
+- **LLM Router**: (Prossima implementazione) Gestirà il routing dei compiti *interni e di arricchimento contesto* su diversi Tier di modelli (locali, remoti o misti) in base alla complessità e alla configurazione dell'utente.
 - **Key Methods**:
-  - `generate_response(user_text, proactive_context, impact_context, semantic_context)`: Generates Alfred's response.
+  - `generate_response(user_text, proactive_context, impact_context, semantic_context)`: Generates The Butler's response.
   - `extract_entities(text, context_nodes)`: Identifies `Entity`, `Topic`, `Goal`, and `Task` items in raw text. Uses JSON mode for reliability.
   - `compare_entities(e1, e2)`: Deep semantic comparison used by the Gardener for deduplication.
+
+### 1.6 `knowledge_queue.py` (The Persistence Buffer)
+
+**Purpose**: Manages a disk-based JSON queue for asynchronous tasks.
+
+- **Main Class**: `KnowledgeQueue`
+- **Key Methods**:
+  - `enqueue(content, obs_name)`: Adds a new processing job.
+  - `get_pending_jobs()`: Retrieves unprocessed or failed tasks.
+  - `mark_done(job_id)` / `mark_failed(job_id)`: Updates job status.
 
 ### 1.6 `feedback.py` (The Learning Layer)
 
@@ -83,8 +94,12 @@ This document provides a technical overview of the python modules and workers th
 - **Key Methods**:
   - `apply_temporal_decay()`: Calls the Attention Engine's decay cycle.
   - `find_and_mark_duplicates()`: Scans the graph for potential duplicate nodes using string heuristics and LLM comparison, creating `MAYBE_SAME_AS` links.
-  - `check_deadlines()`: Scans for `Task` nodes with upcoming or overdue deadlines and injects massive activation boosts to grab Alfred's attention.
+  - `check_deadlines()`: Scans for `Task` nodes with upcoming or overdue deadlines and injects massive activation boosts to grab The Butler's attention.
   - `run_once()`: Orchestrates one full cycle of maintenance.
+
+### 2.2 `learning_worker.py` (The Knowledge Ingestor)
+
+**Purpose**: A dedicated background thread that processes the `KnowledgeQueue`, ensuring that LLM extraction tasks don't block the main API.
 
 ---
 

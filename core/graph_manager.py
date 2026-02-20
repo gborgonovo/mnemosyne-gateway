@@ -190,12 +190,11 @@ class GraphManager:
         Useful for Impact Analysis.
         Returns a list of impact chains.
         """
-        query = """
-        MATCH (n {name: $name})
-        MATCH path = (n)-[:DEPENDS_ON|IS_A|HA_VINCOLO*1..3]->(m)
+        query = f"""
+        MATCH (n {{name: $name}})
+        MATCH path = (n)-[:DEPENDS_ON|IS_A|HA_VINCOLO*1..{max_depth}]->(m)
         RETURN [x in nodes(path) | x.name] as chain, [r in relationships(path) | type(r)] as types
         """
-        # Note: We limit depth to 3 to prevent complexity explosion in MVP
         with self.driver.session() as session:
             results = session.run(query, name=start_node_name)
             return [dict(record) for record in results]

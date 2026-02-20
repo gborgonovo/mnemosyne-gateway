@@ -32,9 +32,24 @@ Per rendere l'assistente capace di decidere cosa salvare, aggiungi questa frase 
 
 > "Se ritieni che questa conversazione contenga informazioni importanti, progetti o decisioni da ricordare a lungo termine, inserisci alla fine della tua risposta il tag `#memo`. Mnemosyne salverà automaticamente queste informazioni nel tuo Connectome."
 
-## 4. Risultato
+## 5. Verifica Manuale via Browser
 
-Quando il tag `#memo` viene rilevato:
+Prima di impazzire con la configurazione di Open WebUI, puoi verificare se il Gateway funziona correttamente aprendo questi indirizzi nel tuo browser (assumendo la porta 4001):
 
-1. Mnemosyne Gateway riceve il testo e lo indicizza nel Grafo.
-2. Il tag `#memo` viene **rimosso** dalla risposta visualizzata, lasciando l'interfaccia pulita.
+- **Stato Core**: [http://localhost:4001/status](http://localhost:4001/status) (Verifica connessione Neo4j e LLM)
+- **Briefing**: [http://localhost:4001/briefing](http://localhost:4001/briefing) (Vedi i temi caldi e i suggerimenti del Butler)
+- **Documentazione API**: [http://localhost:4001/docs](http://localhost:4001/docs) (Interfaccia Swagger per testare tutti i comandi)
+
+Se questi link non funzionano, il problema è nel Gateway. Se funzionano ma Open WebUI non vede nulla, il problema è nella rete/Docker.
+
+## 6. Risoluzione dei Problemi
+
+Se Open WebUI non riceve il contesto:
+
+1. **Verifica il Log**: Controlla il file `/tmp/mnemosyne.log` sul server Mnemosyne. Dovresti vedere le chiamate `GET /briefing` ogni volta che invii un messaggio.
+2. **Porta del Gateway**: Assicurati che il Gateway stia girando sulla porta **4001** (come definito in `settings.yaml`).
+3. **Indirizzo di Rete**: Se Open WebUI gira in Docker, usa `http://host.docker.internal:4001`.
+   - **Fix per Linux**: Su Linux, `host.docker.internal` non è risolto automaticamente. Devi avviare il container di Open WebUI aggiungendo questa opzione al comando `docker run`:
+     `--add-host=host.docker.internal:host-gateway`
+     (O se usi `docker-compose`, aggiungi `extra_hosts: ["host.docker.internal:host-gateway"]`).
+4. **Enable Search**: Verifica che l'interruttore "Enable Search" nelle impostazioni della funzione su Open WebUI sia attivo.

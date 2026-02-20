@@ -65,10 +65,10 @@ def test_semantic_context():
     print("-" * 20)
 
     # 3. Generate Response
-    print("\nGenerating Alfred's Response via Ollama...")
+    print("\nGenerating The Butler's Response via Ollama...")
     response = llm.generate_response(user_input, semantic_context=semantic_context)
     
-    print("\nAlfred's Response:")
+    print("\nThe Butler's Response:")
     print("=" * 20)
     print(response)
     print("=" * 20)

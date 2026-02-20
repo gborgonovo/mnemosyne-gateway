@@ -4,7 +4,19 @@ import os
 from datetime import datetime
 import yaml
 import importlib
+import logging
 from dotenv import load_dotenv
+
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/tmp/mnemosyne.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -71,7 +83,7 @@ def get_core_modules():
     pm = core.perception.PerceptionModule(gm, llm, am)
     
     # 5. Initiative & Feedback
-    ie = core.initiative.InitiativeEngine(gm, config=config.get('initiative', {}))
+    ie = core.initiative.InitiativeEngine(gm, config=config)
     fm = core.feedback.FeedbackManager(gm)
     
     # 6. Gardener
@@ -157,14 +169,15 @@ with tab1:
         if any(kw in user_input.lower() for kw in trigger_keywords) and entities:
             # Assume first entity is the target of simulation
             target = entities[0]
-            chains = gm.trace_dependencies(target)
+            depth = config.get("retrieval", {}).get("impact_depth", 3)
+            chains = gm.trace_dependencies(target, max_depth=depth)
             if chains:
                 impact_context = f"L'impatto di una modifica a '{target}' coinvolgerebbe:\n"
                 for c in chains:
                     impact_context += f"- {' -> '.join(c['chain'])}\n"
 
         # 1c. Get Semantic Context (Knowledge Retrieval)
-        # Fetch details for the nodes touched by perception to ground Alfred's response
+        # Fetch details for the nodes touched by perception to ground The Butler's response
         semantic_context = ""
         
         # DEBUG: Show extracted entities in sidebar
@@ -182,24 +195,27 @@ with tab1:
                 # Get Neighbors
                 neighbors = gm.get_neighbors(entity_name)
                 if neighbors:
+                    limit = config.get("retrieval", {}).get("neighbors_limit", 5)
                     semantic_context += f"   Connected to: "
-                    semantic_context += ", ".join([f"{n['node']['name']}" for n in neighbors[:5]]) 
+                    semantic_context += ", ".join([f"{n['node']['name']}" for n in neighbors[:limit]]) 
                     semantic_context += "\n"
                 
                 # Get OBSERVATIONS (user's original text)
                 with gm.driver.session() as session:
-                    obs_query = """
+                    obs_limit = config.get("retrieval", {}).get("observation_limit", 3)
+                    text_limit = config.get("retrieval", {}).get("observation_text_limit", 150)
+                    obs_query = f"""
                     MATCH (n)-[:MENTIONED_IN]->(o:Observation)
                     WHERE toLower(n.name) = toLower($name)
                     RETURN o.content as content
-                    ORDER BY o.timestamp DESC LIMIT 3
+                    ORDER BY o.timestamp DESC LIMIT {obs_limit}
                     """
                     results = session.run(obs_query, name=entity_name)
                     observations = [record['content'] for record in results]
                     if observations:
                         semantic_context += f"   📝 User said:\n"
                         for obs in observations:
-                            semantic_context += f"      - \"{obs[:150]}...\"\n" if len(obs) > 150 else f"      - \"{obs}\"\n"
+                            semantic_context += f"      - \"{obs[:text_limit]}...\"\n" if len(obs) > text_limit else f"      - \"{obs}\"\n"
                 semantic_context += "\n"
         
         # DEBUG: Show in persistent expander
@@ -211,7 +227,7 @@ with tab1:
         # 2. Get Proactive Context (Initiative)
         proactive_context = ie.get_proactive_context()
         
-        # 3. Generate Alfred's Response (LLM)
+        # 3. Generate The Butler's Response (LLM)
         with st.chat_message("assistant"):
             response = pm.llm.generate_response(user_input, proactive_context, impact_context, semantic_context)
             st.write(response)

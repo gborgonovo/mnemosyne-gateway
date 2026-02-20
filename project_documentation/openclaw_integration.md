@@ -56,7 +56,7 @@ Indipendentemente dal metodo, le funzionalità principali sono:
 
 - **`query(query)`**: Cerca nel grafo della memoria per concetti, persone o progetti.
 - **`add(content)`**: Salva nuove informazioni, estraendo entità e collegandole automaticamente.
-- **`briefing()`**: Riassunto dei temi caldi e suggerimenti proattivi di Alfred.
+- **`briefing()`**: Riassunto dei temi caldi e suggerimenti proattivi di The Butler.
 
 ### Diagnostica (Solo MCP)
 

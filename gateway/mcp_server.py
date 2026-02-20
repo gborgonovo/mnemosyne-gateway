@@ -7,12 +7,14 @@ import json
 from datetime import datetime
 
 # Setup Logging
-# Configure file handler for get_recent_logs tool
-file_handler = logging.FileHandler('/tmp/mnemosyne.log')
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-logging.root.addHandler(file_handler)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/tmp/mnemosyne.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Add project root to path
@@ -43,7 +45,7 @@ gm = GraphManager(
 llm = get_llm_provider(config)
 am = AttentionModel(gm, config=config.get('attention', {}))
 pm = PerceptionModule(gm, llm, am)
-ie = InitiativeEngine(gm, config=config.get('initiative', {}))
+ie = InitiativeEngine(gm, config=config)
 gd = Gardener(gm, llm, am, config=config)
 
 # Create FastMCP Server
@@ -78,8 +80,9 @@ def query_knowledge(query: str, depth: int = 1) -> str:
     
     neighbors = gm.get_neighbors(query)
     if neighbors:
+        limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
         res += "Related Context:\n"
-        for n in neighbors[:10]:
+        for n in neighbors[:limit]:
             res += f"  - {n['node']['name']} ({n['rel_type']})\n"
     
     return res
@@ -99,25 +102,22 @@ def add_observation(content: str) -> str:
 @mcp.tool()
 def get_memory_briefing() -> str:
     """
-    Get a briefing on currently active (hot) topics and proactive suggestions from Alfred.
+    Get a briefing on currently active (hot) topics and proactive suggestions from The Butler.
     Useful at the start of a session or when feeling lost.
     """
     active_nodes = gm.get_active_nodes(threshold=0.7)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
     
-    briefing = "### MNEMOSYNE MEMORY BRIEFING\n"
-    if hot_topics:
-        briefing += f"Active topics of interest: {', '.join(hot_topics)}\n"
-    
-    # Alfred's Proactive Voice
+    # The Butler's Proactive Voice
+    briefing = f"Current active entities: {', '.join(hot_topics) if hot_topics else 'None'}\n"
     proactive_context = ie.get_proactive_context()
     if proactive_context:
-        briefing += f"\n#### Alfred's Internal Log:\n{proactive_context}\n"
+        briefing += f"\n#### The Butler's Internal Log:\n{proactive_context}\n"
         
     # Specific Suggestions
     suggestions = ie.generate_initiatives()
     if suggestions:
-        briefing += "\n#### Alfred's Suggestions:\n"
+        briefing += "\n#### The Butler's Suggestions:\n"
         for s in suggestions:
             briefing += f"- {s['message']} (Context: {s['reason']})\n"
             

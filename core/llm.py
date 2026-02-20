@@ -16,7 +16,7 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
-        """Generates a response in Alfred's persona."""
+        """Generates a response in The Butler's persona."""
         pass
 
     @abstractmethod
@@ -78,9 +78,9 @@ class OpenAILLM(LLMProvider):
 
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
         """
-        Generates a response in Alfred's persona, optionally weaving in proactive or impact context.
+        Generates a response in The Butler's persona, optionally weaving in proactive or impact context.
         """
-        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("alfred", "You are a helpful assistant.")
+        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler", "You are a helpful assistant.")
         
         full_user_prompt = f"User said: {user_text}\n"
         
@@ -175,27 +175,27 @@ class OllamaLLM(LLMProvider):
         self.model = model
         self.config = config or {}
 
-    def _call_ollama(self, endpoint: str, data: dict) -> dict:
+    def _call_ollama(self, endpoint: str, data: dict, timeout: int = 30) -> dict:
         url = f"{self.base_url.rstrip('/')}/api/{endpoint}"
         try:
-            response = requests.post(url, json=data)
+            response = requests.post(url, json=data, timeout=timeout)
             response.raise_for_status()
             return response.json()
         except Exception as e:
             logger.error(f"Ollama API error ({url}): {e}")
             raise
 
-    def generate(self, prompt: str, context: dict = None) -> str:
+    def generate(self, prompt: str, context: dict = None, timeout: int = 30) -> str:
         data = {
             "model": self.model,
             "prompt": prompt,
             "stream": False
         }
-        res = self._call_ollama("generate", data)
+        res = self._call_ollama("generate", data, timeout=timeout)
         return res.get("response", "")
 
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
-        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("alfred", "You are a helpful assistant.")
+        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler", "You are a helpful assistant.")
         
         full_user_prompt = f"User said: {user_text}\n"
         

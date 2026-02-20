@@ -4,6 +4,18 @@ import os
 import yaml
 import json
 import asyncio
+import logging
+
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/tmp/mnemosyne.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -55,7 +67,7 @@ async def main():
         llm = get_llm_provider(config)
         am = AttentionModel(gm, config=config.get('attention', {}))
         pm = PerceptionModule(gm, llm, am)
-        ie = InitiativeEngine(gm, config=config.get('initiative', {}))
+        ie = InitiativeEngine(gm, config=config)
     except Exception as e:
         print(f"Error initializing Mnemosyne: {e}", file=sys.stderr)
         sys.exit(1)
@@ -71,8 +83,9 @@ async def main():
             
             neighbors = gm.get_neighbors(args.query)
             if neighbors:
+                limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
                 print("\nRelated Context:")
-                for n in neighbors[:10]:
+                for n in neighbors[:limit]:
                     print(f"  - {n['node']['name']} ({n['rel_type']})")
         else:
             print(f"Concept '{args.query}' not found in memory.")
@@ -96,7 +109,7 @@ async def main():
         
         proactive_context = ie.get_proactive_context()
         if proactive_context:
-            print(f"\n#### Alfred's Log:\n{proactive_context}")
+            print(f"\n#### The Butler's Log:\n{proactive_context}")
             
         suggestions = ie.generate_initiatives()
         if suggestions:
@@ -125,16 +138,17 @@ async def main():
             print(f"❌ LLM: Error - {e}")
 
     elif args.command == "history":
-        print("🕒 Recent Memory Activity (Last 10 entries)")
+        history_limit = config.get("retrieval", {}).get("history_limit", 10)
+        print(f"🕒 Recent Memory Activity (Last {history_limit} entries)")
         print("-" * 45)
         
         # Query for most recently seen nodes
-        query = """
+        query = f"""
         MATCH (n) 
         WHERE n.last_seen IS NOT NULL
         RETURN n.name as name, labels(n)[0] as label, n.last_seen as last_seen
         ORDER BY n.last_seen DESC 
-        LIMIT 10
+        LIMIT {history_limit}
         """
         try:
             with gm.driver.session() as session:

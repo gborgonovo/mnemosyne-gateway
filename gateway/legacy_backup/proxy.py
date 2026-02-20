@@ -223,7 +223,7 @@ async def forward_request(request: ChatCompletionRequest):
             
             payload = request.model_dump(exclude_none=True)
             # OVERRIDE: Ensure we use the real model name for the upstream LLM
-            # (Clients might send the display name 'Alfred')
+            # (Clients might send the display name 'The Butler')
             payload['model'] = llm_config.get('model_name', 'qwen2.5:7b')
             # FORCE non-streaming for MVP (streaming requires SSE handling)
             payload['stream'] = False

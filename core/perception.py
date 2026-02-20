@@ -16,33 +16,35 @@ class PerceptionModule:
         self.llm = llm
         self.am = attention_model
 
-    def process_input(self, user_text: str) -> list[str]:
-        logger.info(f"PERCEPTION: Processing input text: {user_text}")
-        
-        # 1. Create Observation Node (Context) - ALWAYS DO THIS FIRST
-        # Even if extraction fails, we want the text in our history.
+    def create_observation(self, user_text: str) -> str:
+        """Creates an Observation node and returns its name."""
         obs_id = hashlib.md5(f"{user_text}{datetime.now()}".encode()).hexdigest()[:8]
         obs_name = f"Obs_{obs_id}"
         self.gm.add_node(obs_name, primary_label="Observation", properties={
             "content": user_text,
             "timestamp": datetime.now().isoformat()
         })
-        
-        touched_node_names = []
+        return obs_name
 
-        # 2. Extract entities using LLM (with context for semantic resolution)
+    def process_input(self, user_text: str) -> list[str]:
+        """Synchronous processing: creates observation AND extracts entities immediately."""
+        logger.info(f"PERCEPTION: Synchronous processing input: {user_text}")
+        obs_name = self.create_observation(user_text)
+        return self.extract_and_integrate(user_text, obs_name)
+
+    def extract_and_integrate(self, text: str, obs_name: str) -> list[str]:
+        """Does the heavy lifting: LLM extraction and graph integration."""
+        touched_node_names = []
         try:
             active_nodes = self.gm.get_active_nodes(threshold=0.2)
             active_names = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
-
             
-            entities = self.llm.extract_entities(user_text, context_nodes=active_names)
+            entities = self.llm.extract_entities(text, context_nodes=active_names)
             
             # 3. Ingest into Graph
             for ent in entities:
                 name = ent.get('name')
                 if not name: continue
-                
                 ent_type = ent.get('type', 'Topic')
                 
                 # Create/Merge the node
@@ -67,7 +69,7 @@ class PerceptionModule:
                             "LINKED_TO"
                         )
         except Exception as e:
-            logger.error(f"PERCEPTION: LLM extraction failed: {e}")
-            # We don't raise here, we just return empty so the chat continues
+            logger.error(f"PERCEPTION: LLM extraction failed for {obs_name}: {e}")
+            raise # Raise so the worker can catch and retry
         
         return touched_node_names

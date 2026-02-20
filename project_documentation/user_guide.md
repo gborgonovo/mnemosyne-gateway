@@ -1,6 +1,6 @@
-# Guida all'Utente: Mnemosyne & Alfred
+# Guida all'Utente: Mnemosyne & The Butler
 
-Benvenuto in **Mnemosyne**, il tuo partner cognitivo locale. Questa guida ti aiuterà a navigare nell'interfaccia e a sfruttare al meglio le capacità di Alfred, il layer relazionale del sistema.
+Benvenuto in **Mnemosyne**, il tuo partner cognitivo locale. Questa guida ti aiuterà a navigare nell'interfaccia e a sfruttare al meglio le capacità di The Butler, il layer relazionale del sistema.
 
 ## 🚀 Avvio Rapido
 
@@ -57,10 +57,10 @@ python3 gateway/legacy_cli.py add "Nuova osservazione"
 In questa sezione puoi osservare e influenzare lo stato "termico" della tua memoria digitale. Il Connectome non è un archivio statico, ma un sistema dinamico che dà la priorità a ciò che è rilevante *ora*.
 
 - **Heatmap delle Attivazioni**: Visualizza i concetti attualmente nella tua "faci di attenzione". Le barre di progresso indicano quanto un argomento è "caldo":
-  - **Barra Piena**: Argomento focale. Alfred lo userà come contesto principale e genererà iniziative su questo tema.
-  - **Barra Media**: Argomento latente. Alfred lo "ricorda" ma non ci si sofferma a meno che tu non lo nomini.
-- **Stimolazione Manuale**: Se desideri che Alfred inizi a considerare un vecchio progetto, puoi selezionarlo e premere **Stimulate**. Questo inietta "calore" artificiale nel nodo, riportandolo al centro del discorso.
-- **Reset All Heat (Cold Start)**: Utile quando cambi drasticamente argomento (es. passi dal lavoro al tempo libero) e vuoi che Alfred smetta di suggerire temi della sessione precedente.
+  - **Barra Piena**: Argomento focale. The Butler lo userà come contesto principale e genererà iniziative su questo tema.
+  - **Barra Media**: Argomento latente. The Butler lo "ricorda" ma non ci si sofferma a meno che tu non lo nomini.
+- **Stimolazione Manuale**: Se desideri che The Butler inizi a considerare un vecchio progetto, puoi selezionarlo e premere **Stimulate**. Questo inietta "calore" artificiale nel nodo, riportandolo al centro del discorso.
+- **Reset All Heat (Cold Start)**: Utile quando cambi drasticamente argomento (es. passi dal lavoro al tempo libero) e vuoi che The Butler smetta di suggerire temi della sessione precedente.
 - **🌫️ Forgotten Topics (Dormant)**: Qui finiscono i concetti che non vengono nominati o stimolati da tempo. Non sono cancellati, ma sono in uno stato di "sonno profondo". Possono essere risvegliati in qualsiasi momento semplicemente nominandoli in chat.
 
 ---
@@ -74,7 +74,7 @@ Il **Gardener** (Giardiniere) assicura che Mnemosyne rimanga efficiente, prevene
 Cliccando su **"Esegui Ciclo Manutenzione"**, il sistema esegue:
 
 - **Temporal Decay**: Applica l'invecchiamento alle attivazioni dei nodi (oblio).
-- **Deadline Monitoring**: I `Task` con scadenze imminenti o superate ricevono un boost automatico di calore per essere riportati all'attenzione di Alfred.
+- **Deadline Monitoring**: I `Task` con scadenze imminenti o superate ricevono un boost automatico di calore per essere riportati all'attenzione di The Butler.
 - **Analisi Semantica**: Scansiona il grafo alla ricerca di potenziali duplicati.
 
 ### Gestione dei Duplicati
@@ -88,7 +88,7 @@ Se Mnemosyne individua concetti simili (es. *"Bed & Breakfast"* e *"B&B"*):
 **Cosa implica il Merge?**
 
 - **Struttura**: Tutte le relazioni (collegamenti) e le etichette (labels) di entrambi i nodi vengono unite sul nodo principale. Il doppione viene eliminato per pulire la memoria.
-- **Cognizione**: Alfred smette di avere "visione doppia". I ricordi e le osservazioni di entrambi i nodi ora puntano a un unico concetto, permettendo ad Alfred di unire i puntini in modo più intelligente.
+- **Cognizione**: The Butler smette di avere "visione doppia". I ricordi e le osservazioni di entrambi i nodi ora puntano a un unico concetto, permettendo a The Butler di unire i puntini in modo più intelligente.
 - **Attenzione**: Invece di avere due nodi "tiepidi", avrai un unico nodo solido che accumula calore più velocemente, facilitando la generazione di iniziative proattive coerenti.
 
 ### ⚖️ Merge vs. Ignora: Guida Decisionale
@@ -109,10 +109,10 @@ Il Gardener è un assistente, ma sei tu il custode del significato. Segui questa
 
 ## 💡 4. Iniziative Proattive
 
-Sulla sidebar troverai la sezione **"Mnemosyne Says..."**. Qui Alfred prende l'iniziativa senza essere interrogato:
+Sulla sidebar troverai la sezione **"Mnemosyne Says..."**. Qui The Butler prende l'iniziativa senza essere interrogato:
 
 - **Associazioni Inattese**: Se parli di un argomento, Mnemosyne potrebbe riproporti un tema correlato che non tocchi da tempo.
-- **Domande Aperte**: Alfred ti ricorderà dubbi o decisioni in sospeso legati ai temi caldi del momento.
+- **Domande Aperte**: The Butler ti ricorderà dubbi o decisioni in sospeso legati ai temi caldi del momento.
 
 ---
 
@@ -123,12 +123,12 @@ Mnemosyne è progettata per seguire l'evoluzione dei tuoi interessi. Cosa succed
 ### Lo "Spostamento del Calore" (Attention Shift)
 
 - **Nuovi Cluster**: Mnemosyne creerà una nuova "isola" di concetti nel grafo, inizialmente scollegata dai tuoi progetti precedenti.
-- **Decadimento Attivo**: Man mano che parli del nuovo argomento, i vecchi nodi (B&B, PHP, ecc.) inizieranno a "raffreddarsi" (Decay). Alfred sentirà questo spostamento e smetterà gradualmente di proporti iniziative sul vecchio tema.
-- **Memoria Silente**: Mnemosyne non dimentica. Se dopo mesi nomini un vecchio vincolo, Alfred riattiverà istantaneamente quel cluster ("evocazione"), dimostrando di avere ancora il filo della tua storia.
+- **Decadimento Attivo**: Man mano che parli del nuovo argomento, i vecchi nodi (B&B, PHP, ecc.) inizieranno a "raffreddarsi" (Decay). The Butler sentirà questo spostamento e smetterà gradualmente di proporti iniziative sul vecchio tema.
+- **Memoria Silente**: Mnemosyne non dimentica. Se dopo mesi nomini un vecchio vincolo, The Butler riattiverà istantaneamente quel cluster ("evocazione"), dimostrando di avere ancora il filo della tua storia.
 
 ### Il Valore dei Ponti
 
-La vera potenza del sistema emerge quando Mnemosyne identifica un **ponte** tra argomenti distanti. Se trovi un punto di contatto tra i due mondi, Alfred ti aiuterà a integrare le nuove scoperte nei tuoi progetti esistenti, creando connessioni proattive che non avresti considerato.
+La vera potenza del sistema emerge quando Mnemosyne identifica un **ponte** tra argomenti distanti. Se trovi un punto di contatto tra i due mondi, The Butler ti aiuterà a integrare le nuove scoperte nei tuoi progetti esistenti, creando connessioni proattive che non avresti considerato.
 
 ---
 

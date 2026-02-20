@@ -35,9 +35,9 @@ Parliamo di come potrebbe essere, tenendo i piedi per terra (è pur sempre tecno
     * **Dall'Entusiasmo alla Sostenibilità:** Frena la tua corsa quando necessario: "So che vuoi implementare un sistema di prenotazione AI, ma forse possiamo partire con un modulo semplice e robusto. Il tuo tempo ora è più prezioso sul cantiere."
     * **Dal Tecnico all'Umano:** Ti ricorda le dimensioni non tecniche: "Hai considerato come gestirai la colazione quando tuo nipote viene a trovarti? La doppia veste di nonno e gestore è delicata."
 
-5. **La Dualità: Mnemosyne vs Alfred (Il Cervello e la Relazione):**
+5. **La Dualità: Mnemosyne vs The Butler (Il Cervello e la Relazione):**
     * **Mnemosyne (Il Cervello Silente):** È lo strato infrastrutturale. Gestisce il Grafo Relazionale (Connectome), il Modello di Attenzione e il Gardener. È il motore che "sente" le connessioni e accumula calore semantico.
-    * **Alfred (Il Layer Relazionale):** È l'interfaccia universale di interazione umana, ora esposta tramite **MCP**. Alfred traduce le intuizioni del grafo in atti comunicativi dotati di tatto, stile e pertinenza, agendo come un filtro relazionale tra la complessità del sistema e l'utente OpenClaw.
+    * **The Butler (Il Layer Relazionale):** È l'interfaccia universale di interazione umana, ora esposta tramite **MCP**. The Butler traduce le intuizioni del grafo in atti comunicativi dotati di tatto, stile e pertinenza, agendo come un filtro relazionale tra la complessità del sistema e l'utente OpenClaw.
 
 ### Come Funziona Tecnicamente (Mnemosyne Gateway)
 
@@ -672,7 +672,7 @@ Il progetto ha completato la **Fase 3: Memoria Epistemica**. Ecco i traguardi ra
 
 ---
 
-## **8. Milestone: Gennaio 2026 - MVP "Alfred" Implementato**
+## **8. Milestone: Gennaio 2026 - MVP "The Butler" Implementato**
 
 A Gennaio 2026, Mnemosyne ha raggiunto lo stato di Prototipo Funzionale Avanzato (MVP). Il sistema non è più solo una specifica tecnica, ma un'entità operativa con le seguenti capacità consolidate:
 
@@ -680,9 +680,9 @@ A Gennaio 2026, Mnemosyne ha raggiunto lo stato di Prototipo Funzionale Avanzato
 
 1. **Memoria Epistemica Funzionante**: Ogni interazione viene trasformata in `Observation` e collegata semanticamente a entità e topic nel grafo Neo4j.
 2. **Attention Model Dinamico**: Implementazione di algoritmi di propagazione e decadimento dell'attivazione. Il Connectome "scalda" i temi caldi e "raffredda" quelli dimenticati.
-3. **Collaborazione Adattiva (L'Iniziativa di Mnemosyne, la Voce di Alfred)**:
-    * Integrazione di una personalità (Alfred) come ponte comunicativo.
-    * Sistema di iniziativa proattiva: Mnemosyne monitora le soglie di attivazione e incarica Alfred di intervenire.
+3. **Collaborazione Adattiva (L'Iniziativa di Mnemosyne, la Voce di The Butler)**:
+    * Integrazione di una personalità (The Butler) come ponte comunicativo.
+    * Sistema di iniziativa proattiva: Mnemosyne monitora le soglie di attivazione e incarica The Butler di intervenire.
     * Ciclo di feedback 👍/👎 che influenza direttamente la visibilità futura dei suggerimenti.
 4. **Il Giardiniere Intelligente**:
     * Background worker per la pulizia del grafo.

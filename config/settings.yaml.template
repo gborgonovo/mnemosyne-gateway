@@ -21,12 +21,12 @@ initiative:
 llm:
   mode: "ollama"
   model_name: "qwen2.5-coder:7b-instruct-q5_K_M"
-  display_name: "Alfred (Mnemosyne)"
+  display_name: "The Butler (Mnemosyne)"
   ollama_url: "http://127.0.0.1:11434"
   api_key: ""
   
   prompts:
-    alfred: |
+    butler: |
       [Insert your prompt here]
 
 gardener:

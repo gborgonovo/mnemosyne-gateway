@@ -27,10 +27,10 @@ Implements a **Knowledge Graph architecture** that goes beyond simple text files
 - Low-relevance facts decay over time, keeping context windows clean.
 - "What are the hot topics right now?"
 
-### Initiative (Alfred)
+### Initiative (The Butler)
 
-- A proactive layer that analyzes the graph to suggest next steps.
-- Predictive retrieval: Alfred prepares context before you ask for it.
+- Associative reach: The system suggests related topics based on current conversation heat.
+- Predictive retrieval: The Butler prepares context before you ask for it.
 - "I noticed you're discussing Neo4j; should I retrieve the latest schema?"
 
 ## Quick Start
