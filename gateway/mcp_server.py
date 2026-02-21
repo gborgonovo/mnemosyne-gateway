@@ -214,6 +214,63 @@ def provide_feedback(target_id: str, feedback_type: str, comment: str = "") -> s
     logger.info(f"FEEDBACK [{feedback_type}] for '{target_id}': {comment}")
     return json.dumps({"status": "received", "message": "Feedback logged successfully."}, indent=2)
 
+@mcp.tool()
+def forget_knowledge_node(name: str, scopes: str = "Private,Public") -> str:
+    """
+    Completely erases a specific entity or concept from Mnemosyne's memory.
+    Use this only when explicitly requested by the user to forget something, 
+    or to remove completely erroneous information.
+    scopes: Comma-separated list of scopes (e.g., 'Private,Public').
+    """
+    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
+    logger.info(f"MCP forget_knowledge_node request for '{name}' in scopes {scope_list}")
+    
+    success = gm.delete_node(name, scopes=scope_list)
+    
+    if success:
+        return json.dumps({
+            "status": "success", 
+            "message": f"Entity '{name}' has been completely forgotten from memory."
+        }, indent=2)
+    else:
+        return json.dumps({
+            "status": "error", 
+            "message": f"Entity '{name}' not found or could not be deleted in the specified scopes."
+        }, indent=2)
+
+@mcp.tool()
+def update_knowledge_node(name: str, updates: str, scopes: str = "Public") -> str:
+    """
+    Updates or corrects the properties of an existing entity in memory.
+    'updates' must be a valid JSON string of key-value pairs.
+    Example updates: '{"description": "New info", "status": "resolved"}'
+    scopes: Comma-separated list of scopes (e.g., 'Public').
+    """
+    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
+    logger.info(f"MCP update_knowledge_node request for '{name}'")
+    
+    try:
+        properties_dict = json.loads(updates)
+    except json.JSONDecodeError:
+         return json.dumps({
+            "status": "error", 
+            "message": "The 'updates' argument must be a valid JSON string."
+        }, indent=2)
+         
+    result = gm.update_node_properties(name, properties_dict, scopes=scope_list)
+    
+    if result:
+        return json.dumps({
+            "status": "success", 
+            "message": f"Entity '{name}' updated successfully.",
+            "new_properties": result
+        }, indent=2)
+    else:
+         return json.dumps({
+            "status": "error", 
+            "message": f"Entity '{name}' not found in the specified scopes."
+        }, indent=2)
+
 async def background_gardener():
     """Periodically runs the gardener in the background."""
     interval = config.get("gardener", {}).get("interval_seconds", 3600)

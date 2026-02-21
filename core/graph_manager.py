@@ -143,6 +143,53 @@ class GraphManager:
         with self.driver.session() as session:
             return [dict(record) for record in session.run(query)]
 
+    def delete_node(self, name: str, scopes: list[str] = None) -> bool:
+        """
+        Deletes a node and all its relationships, respecting scope filtering.
+        Returns True if a node was actually deleted.
+        """
+        scope_clause = self._get_scope_filter(scopes)
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        query = f"""
+        MATCH (n {{name: $name}}) 
+        {where_clause}
+        WITH n LIMIT 1
+        DETACH DELETE n
+        RETURN count(n) as deleted_count
+        """
+        with self.driver.session() as session:
+            result = session.run(query, name=name)
+            record = result.single()
+            return record["deleted_count"] > 0 if record else False
+
+    def update_node_properties(self, name: str, properties: dict, scopes: list[str] = None) -> dict:
+        """
+        Updates properties of a node, respecting scope filtering.
+        Returns the updated properties dictionary or None if not found.
+        """
+        if not properties:
+            return None
+            
+        scope_clause = self._get_scope_filter(scopes)
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        # Don't allow changing core identifier via property update
+        if 'name' in properties:
+            del properties['name']
+            
+        query = f"""
+        MATCH (n {{name: $name}})
+        {where_clause}
+        WITH n LIMIT 1
+        SET n += $props
+        RETURN properties(n) as updated_props
+        """
+        with self.driver.session() as session:
+            result = session.run(query, name=name, props=properties)
+            record = result.single()
+            return dict(record["updated_props"]) if record else None
+
     def get_active_nodes(self, threshold: float = 0.5, scopes: list[str] = None):
         scope_clause = self._get_scope_filter(scopes)
         where_condition = f"n.activation_level > $threshold"
