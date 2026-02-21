@@ -49,11 +49,11 @@ class GraphManager:
     def add_node(self, name: str, primary_label: str = "Topic", tags: list = None, properties: dict = None, scope: str = "Public"):
         """
         Creates or updates a node.
-        primary_label: Entity, Topic, Resource, Goal, Task, or Node.
+        primary_label: Entity, Topic, Resource, Goal, Task, Document, DocumentChunk, or Node.
         tags: List of secondary labels.
         scope: Public, Internal, Private.
         """
-        if primary_label not in ["Entity", "Topic", "Resource", "Node", "Observation", "Goal", "Task"]:
+        if primary_label not in ["Entity", "Topic", "Resource", "Node", "Observation", "Goal", "Task", "Document", "DocumentChunk"]:
             logger.warning(f"Unknown primary label '{primary_label}', falling back to 'Node'.")
             primary_label = "Node"
 
@@ -288,3 +288,71 @@ class GraphManager:
             if record:
                 return {"nodes": record["nodes"], "relationships": record["relationships"]}
             return {"nodes": 0, "relationships": 0}
+
+    def get_all_aliases(self, scopes: list[str] = None) -> dict[str, str]:
+        """
+        Returns a dictionary mapping lowercased aliases/names to their canonical node names.
+        Used for selective fuzzy matching against existing Entities/Topics.
+        """
+        scope_clause = self._get_scope_filter(scopes)
+        where_clause = f"({scope_clause}) AND ('Entity' IN labels(n) OR 'Topic' IN labels(n))" if scope_clause else "('Entity' IN labels(n) OR 'Topic' IN labels(n))"
+        query = f"""
+        MATCH (n) WHERE {where_clause}
+        RETURN n.name as canonical_name, coalesce(n.aliases, []) as aliases
+        """
+        alias_map = {}
+        with self.driver.session() as session:
+            for record in session.run(query):
+                canonical = record["canonical_name"]
+                alias_map[canonical.lower()] = canonical
+                for alias in record["aliases"]:
+                    alias_map[alias.lower()] = canonical
+        return alias_map
+
+    def _fuzzy_link_chunk(self, chunk_name: str, text: str, alias_map: dict[str, str]):
+        """
+        Searches the text for known aliases and creates MENTIONED_IN relationships
+        only for highly relevant matches (explicit chunk linking with attenuation).
+        """
+        import re
+        text_lower = text.lower()
+        
+        # We look for explicit mentions of aliases.
+        for alias, canonical_name in alias_map.items():
+            if alias in text_lower:
+                # Count explicit boundaries
+                count = len(re.findall(r'\b' + re.escape(alias) + r'\b', text_lower))
+                
+                # Threshold for relevance: short words need more mentions.
+                threshold = 3 if len(alias) <= 4 else 1
+                
+                if count >= threshold:
+                    # Create attenuated relationship (backward weight will be handled by attention model)
+                    self.add_edge(chunk_name, canonical_name, "MENTIONED_IN", weight=0.1)
+
+    def add_document(self, title: str, chunks: list[str], scope: str = "Public"):
+        """
+        Ingests a document as a 'Document' node and links its 'DocumentChunk' children.
+        Performs selective fuzzy matching contextually.
+        """
+        doc_node = self.add_node(title, primary_label="Document", scope=scope)
+        alias_map = self.get_all_aliases(scopes=[scope])
+        
+        prev_chunk_name = None
+        for i, text in enumerate(chunks):
+            chunk_name = f"{title}_chunk_{i}"
+            props = {"text": text, "index": i}
+            
+            # 1. Create Chunk node
+            self.add_node(chunk_name, primary_label="DocumentChunk", properties=props, scope=scope)
+            
+            # 2. Link to Document
+            self.add_edge(doc_node["name"], chunk_name, "CONTAINS")
+            
+            # 3. Link sequence
+            if prev_chunk_name:
+                self.add_edge(prev_chunk_name, chunk_name, "NEXT_CHUNK")
+            prev_chunk_name = chunk_name
+            
+            # 4. Selective Fuzzy Matching
+            self._fuzzy_link_chunk(chunk_name, text, alias_map)

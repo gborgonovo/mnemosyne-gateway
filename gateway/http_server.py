@@ -4,7 +4,7 @@ import yaml
 import uvicorn
 import requests
 import threading
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
@@ -39,6 +39,7 @@ from butler.perception import PerceptionModule
 from butler.initiative import InitiativeEngine
 from butler.knowledge_queue import KnowledgeQueue
 from workers.learning_worker import LearningWorker
+from core.chunking import HeuristicChunker
 
 # Load Configuration
 def load_config():
@@ -67,6 +68,8 @@ try:
     kq = KnowledgeQueue()
     worker = LearningWorker(kq, pm)
     worker.start()
+    
+    chunker = HeuristicChunker()
 
     def forward_event_to_plugins(event_type: str, payload: Dict[str, Any]):
         """
@@ -179,6 +182,41 @@ def add_observation(obs: Observation, scope: Optional[str] = "Public"):
         "message": "Observation recorded and enqueued for learning",
         "obs_name": obs_name,
         "job_id": job_id
+    }
+
+def background_ingest(title: str, text: str, scope: str):
+    """Background task for heavy document ingestion."""
+    try:
+        logger.info(f"INGESTION: Starting background ingestion for '{title}'...")
+        chunks = chunker.chunk_text(text)
+        gm.add_document(title, chunks, scope=scope)
+        logger.info(f"INGESTION: Complete. '{title}' processed into {len(chunks)} chunks.")
+    except Exception as e:
+        logger.error(f"INGESTION FAILED for '{title}': {e}")
+
+@app.post("/ingest")
+async def ingest_document(
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...), 
+    scope: Optional[str] = "Public"
+):
+    """
+    Ingests a massive document (txt, md) bypassing the LLM via Heuristic Chanking.
+    """
+    content = await file.read()
+    try:
+         text = content.decode('utf-8')
+    except UnicodeDecodeError:
+         raise HTTPException(status_code=400, detail="Only UTF-8 text files are supported for now.")
+         
+    title = file.filename
+    # Queue the background task to avoid blocking the Gateway
+    background_tasks.add_task(background_ingest, title, text, scope)
+    
+    return {
+        "status": "processing",
+        "message": f"Document '{title}' queued for massive ingestion in background.",
+        "scope": scope
     }
 
 @app.post("/share")

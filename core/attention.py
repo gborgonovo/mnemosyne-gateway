@@ -47,6 +47,10 @@ class AttentionModel:
             else:
                 factor = self.dampening.get('backward', 0.5)
 
+            # Apply attenuation for explicit chunk linking
+            if neighbor.get('rel_type') == 'MENTIONED_IN' and direction == 'in':
+                factor *= 0.1 # Severe penalty to prevent document chunks from flaring up unconditionally
+
             # Formula: Transfer = SourceActivation * RelWeight * DirectionFactor
             # We don't want cascading infinite loops in this MVP, so we only do 1-hop propagation 
             # or simply boost neighbors based on the Source's *boost*, not total level (to be safer).
