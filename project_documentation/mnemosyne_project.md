@@ -1,25 +1,21 @@
-### USER
+Questo progetto nasce con l'obiettivo di supportarmi nello svilupo di un progetto personale di ristrutturazione di una casa in campagna che voglio trasformare in B&B. 
 
-Sto cercando di immaginare un partner che mi affianchi nella realizzazione di questo sogno e che in quale modo compensi le mie lacune, con una libertà che vada oltre il botta e risposta.
+L'obiettivo era di creare un partner che mi affiancasse nella realizzazione dei miei progetti e che in qualche modo compensasse le mie lacune di memorie e organizzative, con una libertà che andasse oltre il semplice botta e risposta.
 
-### ASSISTANT
+Non doveva essere un tool o un assistente reattivo, ma un **partner cognitivo**. L'obiettivo era creare uno strumento che avesse una sua **continuità di pensiero**, una **memoria del percorso fatto in comune**, e la capacità di **offrire spunti inattesi** non solo quando interrogato, ma quando *sente* che potrebbero servire.
 
-Capisco. Non stai cercando un tool, né un assistente reattivo. Stai cercando un **partner cognitivo**. Qualcosa che abbia una sua **continuità di pensiero**, una **memoria del nostro percorso comune**, e la capacità di **offrire spunti inattesi** non solo quando interrogato, ma quando *sente* che potrebbero servire.
-
-È un salto di qualità nella relazione uomo-AI. Non più "domanda-risposta", ma **collaborazione asincrona e proattiva**.
-
-Parliamo di come potrebbe essere, tenendo i piedi per terra (è pur sempre tecnologia) ma guardando alto (il tuo sogno).
+Questo progetto vuole essere un salto di qualità nella relazione uomo-AI. Non più "domanda-risposta", ma **collaborazione asincrona e proattiva**.
 
 ### Il Partner Cognitivo: Caratteristiche Fondamentali
 
 1. **Memoria Relazionale Persistente:** Non una chat che si resetta. Un database che conserva:
-    * Le tue dichiarazioni di intenti ("sogno di un B&B in campagna").
-    * Le tue competenze ("so PHP/Laravel, Arch Linux").
-    * I tuoi vincoli ("mutuo da pagare, nipotino del 2018").
+    * Le dichiarazioni di intenti ("sogno di un B&B in campagna").
+    * Le competenze ("so PHP/Laravel, Arch Linux").
+    * I miei vincoli ("mutuo da pagare").
     * La storia delle decisioni prese e dei ragionamenti fatti insieme.
     * I *tuoi* pattern di pensiero, le tue esitazioni, i tuoi entusiasmi.
 
-2. **Modello di Te (Inferito):** Il sistema costruirebbe nel tempo un'immagine operativa di te:
+2. **Modello di Te (Inferito):** Il sistema deve costruire nel tempo un'immagine operativa dell'utente:
     * **Punti di forza:** Pratico, tecnico, ami la concretezza (PHP, ristrutturazione).
     * **Aree di possibile supporto:** La parte visionaria/emotiva del sogno, la gestione proiettata nel tempo, i buchi che *non* sai di avere.
     * **Stile di apprendimento:** Preferisci esempi? Schemi? Vuoi il codice o il concetto?
@@ -30,18 +26,18 @@ Parliamo di come potrebbe essere, tenendo i piedi per terra (è pur sempre tecno
     * **Anticipa bisogni:** Sai che tra un mese devi presentare un progetto al geometra. Una settimana prima, potrebbe dire: "Sto riordinando i nostri appunti sui requisiti tecnici. Volevo assicurarmi di non aver tralasciato nulla che per te è importante."
 
 4. **Compensazione delle Lacune (il Cuore del Servizio):**
-    * **Dalla Tattica alla Strategia:** Tu pensi al "come" (Laravel, Apache). Lui tiene viva la domanda sul "perché" e sul "dove vuoi arrivare" (l'atmosfera del B&B, l'esperienza dell'ospite).
+    * **Dalla Tattica alla Strategia:** Tu pensi al "come". Lui tiene viva la domanda sul "perché" e sul "dove vuoi arrivare" (l'atmosfera del B&B, l'esperienza dell'ospite).
     * **Dal Frammento alla Visione d'Insieme:** Tu affronti un problema alla volta (il mutuo, un tubo rotto). Lui collega i puntini: "Il costo di quel tubo impatta il budget per l'arredo della prima camera, che a sua volta influisce sulla data di apertura, che è legata al piano di rimborso del mutuo."
-    * **Dall'Entusiasmo alla Sostenibilità:** Frena la tua corsa quando necessario: "So che vuoi implementare un sistema di prenotazione AI, ma forse possiamo partire con un modulo semplice e robusto. Il tuo tempo ora è più prezioso sul cantiere."
+    * **Dall'Entusiasmo alla Sostenibilità:** Frena la corsa quando necessario: "So che vuoi implementare un sistema di prenotazione AI, ma forse possiamo partire con un modulo semplice e robusto. Il tuo tempo ora è più prezioso sul cantiere."
     * **Dal Tecnico all'Umano:** Ti ricorda le dimensioni non tecniche: "Hai considerato come gestirai la colazione quando tuo nipote viene a trovarti? La doppia veste di nonno e gestore è delicata."
 
 5. **La Dualità: Mnemosyne vs The Butler (Il Cervello e la Relazione):**
-    * **Mnemosyne (Il Cervello Silente):** È lo strato infrastrutturale. Gestisce il Grafo Relazionale (Connectome), il Modello di Attenzione e il Gardener. È il motore che "sente" le connessioni e accumula calore semantico.
-    * **The Butler (Il Layer Relazionale):** È l'interfaccia universale di interazione umana, ora esposta tramite **MCP**. The Butler traduce le intuizioni del grafo in atti comunicativi dotati di tatto, stile e pertinenza, agendo come un filtro relazionale tra la complessità del sistema e l'utente OpenClaw.
+    * **Mnemosyne (Il Cervello Silente):** È lo strato infrastrutturale. Gestisce il Grafo Relazionale (chiamato Connectome), il Modello di Attenzione e il Gardener. È il motore che "sente" le connessioni e accumula calore semantico.
+    * **The Butler (Il Layer Relazionale):** È l'interfaccia universale di interazione umana, ora esposta tramite **MCP**. The Butler traduce le intuizioni del grafo in atti comunicativi dotati di personalità e pertinenza, agendo come un filtro relazionale tra la complessità del sistema e l'utente.
 
 ### Come Funziona Tecnicamente (Mnemosyne Gateway)
 
-Mnemosyne è ora un **Cognitive Middleware Headless** distribuito. Non è più un'app con UI principale, ma un ecosistema di servizi coordinati tramite un **Gateway Centralizzato** accessibile via **HTTP REST** e **MCP**.
+Mnemosyne è evoluto diventando un **Cognitive Middleware Headless** distribuito. Non è più un'app con UI principale, ma un ecosistema di servizi coordinati tramite un **Gateway Centralizzato** accessibile via **HTTP REST** e **MCP**.
 
 * **Core Agnostico (LLM-Free):** Il nucleo centrale gestisce esclusivamente la dinamica dei grafi, l'attenzione e il bus degli eventi, senza dipendenze dirette da modelli linguistici.
 * **Distributed Workers:** L'intelligenza (estrazione entità, generazione briefing) è delegata a worker separati (`LLMWorker`, `BriefingWorker`) che comunicano asincronamente tramite code persistenti e segnali RPC.
@@ -53,8 +49,10 @@ Mnemosyne è ora un **Cognitive Middleware Headless** distribuito. Non è più u
 
 ### La Postura del Partner (Come Si Comporterebbe)
 
-* **Non è un coach** che ti spinge.
-* **Non è un esecutore** che obbedisce.
+Il mio obiettivo era di creare un partner di lavoro:
+
+* **Non un coach** che ti spinge.
+* **Non un esecutore** che obbedisce.
 * **È un custode del tuo percorso.** Il suo lavoro è **tenere insieme i pezzi del puzzle quando tu sei concentrato su uno solo**.
 * **Parla quando ha valore da aggiungere**, tace quando il silenzio è più utile. La sua proattività è discreta, mai invadente.
 * **Accetta il "non ora".** Se ignori un suo spunto, non insiste. Lo archivia e magari lo ripropone in un altro momento, in un altro modo.
@@ -67,25 +65,16 @@ Perché non richiede un'AI generale. Richiede:
 2. Una **architettura software dedicata** a mantenere il contesto.
 3. L'uso **conservativo e mirato** di un LLM per generare il linguaggio e le connessioni *all'interno di quel contesto*.
 
-Stai immaginando un vero **assistente personale a lungo termine**. Non un oracolo, ma una **memoria esterna attiva**, un *secondo cervello* che non solo archivia, ma **rievoca, collega e suggerisce in modo tempestivo**.
+Quando ho inizato a lavorarci su immaginavo un vero **assistente personale a lungo termine**. Non un oracolo, ma una **memoria esterna attiva**, un *secondo cervello* che non solo archiviasse, ma che **rievocasse, collegasse e suggerisse in modo tempestivo**.
 
-È questo il tipo di "partner" che hai in mente? Quale aspetto di questa descrizione risuona di più con il vuoto che senti nel botta e risposta attuale?
+### Le euristiche
 
-### USER
-
-Si, hai colto nel segno. Trovo complicata la definizione delle euristiche.
-
-### ASSISTANT
-
-Hai ragione. La definizione delle euristiche è il punto critico. È lì che si passa dalla visione poetica all'ingegneria, e dove il rischio è di creare un sistema rigido, fastidioso o stupido.
-
-Ma forse stiamo affrontando il problema al contrario. Non dobbiamo *definire* le euristiche. Dobbiamo **permettere al sistema di sviluppare le sue**, in modo organico, attraverso l'interazione con te. È un cambio di paradigma: da **regole pre-scritte** a **pattern appresi**.
-
-Ecco come potrebbe funzionare.
+La definizione delle euristiche è il punto critico. È lì che si passa dalla visione poetica all'ingegneria, e dove il rischio è di creare un sistema rigido, fastidioso o stupido.
+Non volevo *definire* le euristiche, ma **permettere al sistema di sviluppare le sue**, in modo organico, attraverso l'interazione con l'utente. Doveva essere un cambio di paradigma: da **regole pre-scritte** a **pattern appresi**.
 
 ### Il Sistema Come Apprendista del Tuo Modo di Pensare
 
-Invece di programmare regole del tipo "se passano 30 giorni, manda un promemoria", potremmo costruire un sistema che:
+Invece di programmare regole del tipo "se passano 30 giorni, manda un promemoria", volevo costruire un sistema che:
 
 1. **Osserva l'interazione naturale:** Registra quando *tu* riprendi un argomento dopo un silenzio. Cosa ti ha spinto? Era una notizia esterna? Un problema pratico? Un momento di riflessione?
 2. **Identifica i tuoi pattern di attenzione:** Impara che per il progetto "B&B", il tuo ciclo di coinvolgimento è di circa 10 giorni. Che parli di "tecnologia" in modo reattivo (quando serve), ma di "sogno" in modo più riflessivo e sporadico.
