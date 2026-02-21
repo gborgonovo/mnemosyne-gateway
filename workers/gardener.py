@@ -17,9 +17,9 @@ class Gardener:
         self.gm = graph_manager
         self.llm = llm
         self.am = attention_model
-        config = config or {}
-        self.interval = config.get("gardener", {}).get("interval_seconds", 3600)
-        self.threshold = config.get("gardener", {}).get("similarity_threshold", 0.85)
+        self.config = config or {}
+        self.interval = self.config.get("gardener", {}).get("interval_seconds", 3600)
+        self.threshold = self.config.get("gardener", {}).get("similarity_threshold", 0.85)
         self.last_decay = 0
 
     def run_once(self):
@@ -64,12 +64,19 @@ class Gardener:
     def check_deadlines(self):
         """
         Scans for Tasks and Goals with deadlines and boosts them if approaching or overdue.
-        Acts as the TimeWatcher component of Phase 7 Intentionality.
+        Acts as the TimeWatcher component of Proactive Planning.
         """
-        logger.info("Gardener checking deadlines...")
+        intentionality_cfg = getattr(self, 'config', {}).get('intentionality', {})
+        if not intentionality_cfg.get('enabled', True) or not intentionality_cfg.get('time_watcher', True):
+            return
+
+        logger.info("Gardener checking deadlines (TimeWatcher)...")
         nodes = self.gm.get_all_nodes()
         now = datetime.now()
         
+        deadline_boost = intentionality_cfg.get('deadline_boost', 0.8)
+        warning_boost = intentionality_cfg.get('warning_boost', 0.5)
+
         for node in nodes:
             labels = node.get('labels', [])
             if "Task" in labels or "Goal" in labels:
@@ -94,13 +101,13 @@ class Gardener:
                         # Case 1: Overdue
                         if delta.total_seconds() < 0:
                             # Boost significantly to grab attention
-                            self.am.stimulate([node['name']], boost_amount=0.8)
+                            self.am.stimulate([node['name']], boost_amount=deadline_boost)
                             logger.info(f"[{node['name']}] is OVERDUE. TimeWatcher applied massive boost.")
                             
                         # Case 2: Approaching (within 48 hours for goals, 24 for tasks)
                         elif ("Goal" in labels and delta.total_seconds() < 172800) or \
                              ("Task" in labels and delta.total_seconds() < 86400):
-                            self.am.stimulate([node['name']], boost_amount=0.5)
+                            self.am.stimulate([node['name']], boost_amount=warning_boost)
                             logger.info(f"[{node['name']}] is due soon. TimeWatcher applied warning boost.")
                             
                     except ValueError:

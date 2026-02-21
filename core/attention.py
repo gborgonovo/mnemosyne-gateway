@@ -16,6 +16,7 @@ class AttentionModel:
         self.dampening = config.get("propagation_dampening", {"forward": 1.0, "backward": 0.5})
         self.activation_threshold = config.get("activation_threshold", 0.1)
         self.peak_threshold = config.get("peak_threshold", 0.7)
+        self.intentionality_config = config.get("intentionality", {})
 
     def propagate_activation(self, source_node_name: str, initial_boost: float = 0.0):
         """
@@ -87,23 +88,26 @@ class AttentionModel:
                 # Differential Decay Logic
                 effective_decay_rate = self.decay_rate
                 
-                if "Goal" in labels:
-                    # Goals decay 50% slower than normal topics
-                    effective_decay_rate *= 0.5
-                elif "Task" in labels:
-                    status = props.get('status', 'todo')
-                    if status == 'in_progress':
-                        # Active tasks decay very slowly (20% of normal rate)
-                        effective_decay_rate *= 0.2
-                    elif status == 'done':
-                        # Completed tasks decay 5x faster to clear the mind
-                        effective_decay_rate *= 5.0
-                elif "Observation" in labels:
-                    # Raw observations decay 2x faster than normal topics
-                    effective_decay_rate *= 2.0
-                    
-                # Cap the decay rate to 1.0 to avoid weird math
-                effective_decay_rate = min(effective_decay_rate, 1.0)
+                diff_decay_enabled = self.intentionality_config.get("enabled", True) and self.intentionality_config.get("differential_decay", True)
+                
+                if diff_decay_enabled:
+                    if "Goal" in labels:
+                        # Goals decay 50% slower than normal topics
+                        effective_decay_rate *= 0.5
+                    elif "Task" in labels:
+                        status = props.get('status', 'todo')
+                        if status == 'in_progress':
+                            # Active tasks decay very slowly (20% of normal rate)
+                            effective_decay_rate *= 0.2
+                        elif status == 'done':
+                            # Completed tasks decay 5x faster to clear the mind
+                            effective_decay_rate *= 5.0
+                    elif "Observation" in labels:
+                        # Raw observations decay 2x faster than normal topics
+                        effective_decay_rate *= 2.0
+                        
+                    # Cap the decay rate to 1.0 to avoid weird math
+                    effective_decay_rate = min(effective_decay_rate, 1.0)
                 
                 # Exponential Decay: new_val = current_val * (1 - decay_rate)
                 new_val = max(current_val * (1 - effective_decay_rate), 0.0)
