@@ -67,6 +67,7 @@ class AttentionModel:
     def apply_decay(self):
         """
         Reduces activation of all nodes in the graph unless marked as persistent.
+        Implements differential decay for Intentionality (Goals/Tasks).
         Should be called periodically (e.g., hourly).
         """
         all_nodes = self.gm.get_all_nodes()
@@ -75,18 +76,41 @@ class AttentionModel:
             name = node['name']
             current_val = node['activation']
             props = node.get('props', {})
+            labels = node.get('labels', [])
             
             # Skip decay for persistent nodes (Pedanteria)
             if props.get('persistence') == 'high':
                 continue
 
             if current_val > 0.01: # Optimization: ignore dead nodes
+                
+                # Differential Decay Logic
+                effective_decay_rate = self.decay_rate
+                
+                if "Goal" in labels:
+                    # Goals decay 50% slower than normal topics
+                    effective_decay_rate *= 0.5
+                elif "Task" in labels:
+                    status = props.get('status', 'todo')
+                    if status == 'in_progress':
+                        # Active tasks decay very slowly (20% of normal rate)
+                        effective_decay_rate *= 0.2
+                    elif status == 'done':
+                        # Completed tasks decay 5x faster to clear the mind
+                        effective_decay_rate *= 5.0
+                elif "Observation" in labels:
+                    # Raw observations decay 2x faster than normal topics
+                    effective_decay_rate *= 2.0
+                    
+                # Cap the decay rate to 1.0 to avoid weird math
+                effective_decay_rate = min(effective_decay_rate, 1.0)
+                
                 # Exponential Decay: new_val = current_val * (1 - decay_rate)
-                new_val = max(current_val * (1 - self.decay_rate), 0.0)
+                new_val = max(current_val * (1 - effective_decay_rate), 0.0)
                 if abs(new_val - current_val) > 0.001:
                     self.gm.update_activation(name, new_val)
                     count += 1
-        logger.info(f"Decay applied to {count} nodes (persistent nodes skipped).")
+        logger.info(f"Differential decay applied to {count} nodes.")
 
     def stimulate(self, node_names: list[str], boost_amount: float = 0.3):
         """

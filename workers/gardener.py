@@ -63,38 +63,48 @@ class Gardener:
 
     def check_deadlines(self):
         """
-        Scans for Tasks with deadlines and boosts them if approaching or overdue.
+        Scans for Tasks and Goals with deadlines and boosts them if approaching or overdue.
+        Acts as the TimeWatcher component of Phase 7 Intentionality.
         """
         logger.info("Gardener checking deadlines...")
         nodes = self.gm.get_all_nodes()
         now = datetime.now()
         
         for node in nodes:
-            if "Task" in node['labels']:
+            labels = node.get('labels', [])
+            if "Task" in labels or "Goal" in labels:
                 props = node.get('props', {})
-                deadline_str = props.get('deadline')
+                # Check for either 'deadline' (Goals) or 'due_date' (Tasks)
+                deadline_str = props.get('deadline') or props.get('due_date')
                 status = props.get('status', 'todo')
                 
-                if deadline_str and status != 'done':
+                # Active/todo/in_progress tasks should be checked
+                if deadline_str and status not in ['done', 'completed', 'discarded']:
                     try:
-                        # Assuming ISO format for simplicity, or flexible parsing in real impl
-                        # For this MVP, we'll try basic ISO
-                        deadline = datetime.fromisoformat(deadline_str)
-                        delta = deadline - now
+                        # Handle basic ISO formats including Z UTC marker
+                        clean_date_str = deadline_str.replace('Z', '+00:00')
+                        deadline = datetime.fromisoformat(clean_date_str)
+                        # Strip timezone for simple comparison if 'now' is naive
+                        if deadline.tzinfo is not None:
+                            now_aware = datetime.now(deadline.tzinfo)
+                            delta = deadline - now_aware
+                        else:
+                            delta = deadline - now
                         
                         # Case 1: Overdue
                         if delta.total_seconds() < 0:
                             # Boost significantly to grab attention
                             self.am.stimulate([node['name']], boost_amount=0.8)
-                            logger.info(f"Task '{node['name']}' is OVERDUE. Boosted.")
+                            logger.info(f"[{node['name']}] is OVERDUE. TimeWatcher applied massive boost.")
                             
-                        # Case 2: Approaching (within 24 hours)
-                        elif delta.total_seconds() < 86400:
+                        # Case 2: Approaching (within 48 hours for goals, 24 for tasks)
+                        elif ("Goal" in labels and delta.total_seconds() < 172800) or \
+                             ("Task" in labels and delta.total_seconds() < 86400):
                             self.am.stimulate([node['name']], boost_amount=0.5)
-                            logger.info(f"Task '{node['name']}' is due soon. Boosted.")
+                            logger.info(f"[{node['name']}] is due soon. TimeWatcher applied warning boost.")
                             
                     except ValueError:
-                        logger.warning(f"Could not parse deadline '{deadline_str}' for node '{node['name']}'")
+                        logger.warning(f"Could not parse date '{deadline_str}' for node '{node['name']}'")
 
     def apply_temporal_decay(self):
         """

@@ -271,6 +271,78 @@ def update_knowledge_node(name: str, updates: str, scopes: str = "Public") -> st
             "message": f"Entity '{name}' not found in the specified scopes."
         }, indent=2)
 
+@mcp.tool()
+def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public") -> str:
+    """
+    Creates a new high-level strategic Goal.
+    name: Short, unique name (e.g., 'Launch Mnemosyne')
+    description: Longer explanation of the goal
+    deadline: Optional ISO 8601 date (e.g., '2026-06-01T00:00:00')
+    """
+    scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
+    props = {"status": "active"}
+    if description:
+        props["description"] = description
+    if deadline:
+        props["deadline"] = deadline
+        
+    gm.add_node(name, primary_label="Goal", properties=props, scope=scope_list[0])
+    
+    return json.dumps({
+        "status": "success",
+        "message": f"Goal '{name}' created successfully.",
+        "details": props
+    }, indent=2)
+
+@mcp.tool()
+def create_task(name: str, goal_name: str, due_date: str = "", scopes: str = "Private,Public") -> str:
+    """
+    Creates an actionable Task and links it to an existing Goal.
+    name: Short task description (e.g., 'Write README')
+    goal_name: The exact name of the parent Goal this task REQUIRES.
+    due_date: Optional ISO 8601 date.
+    """
+    scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
+    props = {"status": "todo"}
+    if due_date:
+        props["due_date"] = due_date
+        
+    # Create the task node
+    gm.add_node(name, primary_label="Task", properties=props, scope=scope_list[0])
+    
+    # Link to Goal
+    if goal_name:
+        gm.add_edge(goal_name, name, "REQUIRES", weight=0.8)
+        
+    return json.dumps({
+        "status": "success",
+        "message": f"Task '{name}' created and linked to '{goal_name}'.",
+    }, indent=2)
+
+@mcp.tool()
+def update_task_status(name: str, status: str, scopes: str = "Private,Public") -> str:
+    """
+    Updates the status of a Task or Goal.
+    status: 'todo', 'in_progress', 'done', 'discarded'
+    """
+    valid_statuses = ['todo', 'in_progress', 'done', 'completed', 'active', 'discarded']
+    if status not in valid_statuses:
+         return json.dumps({"error": f"Invalid status. Use one of {valid_statuses}."})
+         
+    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
+    result = gm.update_node_properties(name, {"status": status}, scopes=scope_list)
+    
+    if result:
+        return json.dumps({
+            "status": "success", 
+            "message": f"Status of '{name}' updated to '{status}'.",
+        }, indent=2)
+    else:
+         return json.dumps({
+            "status": "error", 
+            "message": f"Task or Goal '{name}' not found."
+        }, indent=2)
+
 async def background_gardener():
     """Periodically runs the gardener in the background."""
     interval = config.get("gardener", {}).get("interval_seconds", 3600)
