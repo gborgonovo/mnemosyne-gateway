@@ -107,18 +107,35 @@ Il Gardener è un assistente, ma sei tu il custode del significato. Segui questa
 
 ---
 
-## 💡 4. Iniziative Proattive
+## 💡 4. Iniziative Proattive e Pianificazione (Proactive Planning)
 
 Sulla sidebar troverai la sezione **"Mnemosyne Says..."**. Qui The Butler prende l'iniziativa senza essere interrogato:
 
 - **Associazioni Inattese**: Se parli di un argomento, Mnemosyne potrebbe riproporti un tema correlato che non tocchi da tempo.
-- **Domande Aperte**: The Butler ti ricorderà dubbi o decisioni in sospeso legati ai temi caldi del momento.
-
-**Nota sugli Scope**: Le iniziative sono rigorosamente filtrate. Non riceverai mai suggerimenti basati su conoscenza `Private` se stai operando in uno scope `Public`.
+- **Pianificazione**: Mnemosyne monitora i tuoi `Goal` e `Task`. Grazie al **TimeWatcher**, verrai avvisato tramite suggerimenti proattivi se un obiettivo ha una scadenza imminente o superata.
 
 ---
 
-## 🛡️ 5. Knowledge Scopes (Privacy e Visibilità)
+## 🛠️ 5. Controllo Manuale tramite MCP (Model Context Protocol)
+
+Se utilizzi un client compatibile con MCP (come Claude Desktop o OpenClaw), The Butler ha accesso a strumenti di gestione diretta della memoria:
+
+### Gestione Conoscenza
+
+- `forget_knowledge_node`: Permette di eliminare fisicamente un nodo dal grafo.
+- `update_knowledge_node`: Per correggere proprietà o dettagli di un concetto esistente.
+
+### Pianificazione
+
+- `create_goal`: Crea un nuovo obiettivo strategico con una deadline.
+- `create_task`: Crea un'azione collegata a un Goal.
+- `update_task_status`: Per segnare un task come `done`, `in_progress` o `discarded`.
+
+**Consiglio**: Puoi chiedere a voce a The Butler: *"Crea un nuovo obiettivo per il lancio del sito entro Giugno e aggiungi il task di scrivere i testi"*. Lui userà questi tool per te.
+
+---
+
+## 🛡️ 6. Knowledge Scopes (Privacy e Visibilità)
 
 Mnemosyne protegge la tua conoscenza tramite pool di visibilità isolati.
 

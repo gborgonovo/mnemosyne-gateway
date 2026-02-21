@@ -14,6 +14,8 @@ This document provides a technical overview of the python modules and workers th
 - **Key Methods**:
   - `add_node(name, primary_label, properties, scope)`: Creates or updates a node within a specific Knowledge Scope.
   - `get_node(name, scopes)`: Retrieves a node, respecting hierarchical visibility.
+  - `update_node_properties(name, properties, scopes)`: Safely updates properties on a node.
+  - `delete_node(name, scopes)`: Physically removes a node and its relationships from the graph.
   - `get_neighbors(name, scopes)`: Returns connected nodes within the allowed scopes.
   - `get_active_nodes(threshold, scopes)`: Returns active context filtered by scope.
 
@@ -25,7 +27,8 @@ This document provides a technical overview of the python modules and workers th
 - **Key Methods**:
   - `stimulate(node_names, boost_amount)`: Injects "heat" into specific nodes (e.g., when mentioned).
   - `propagate()`: Conducts activation from hot nodes to their neighbors, attenuated by relationship weights.
-  - `apply_decay()`: Gradually lowers activation levels across all nodes (forgetting). Note: Nodes with `persistence: high` are exempt from decay.
+  - `apply_decay()`: Gradually lowers activation levels across all nodes (forgetting).
+    - Features **Differential Decay**: Goals and active Tasks decay slower than standard topics.
 
 ## 2. Butler Layer (`/butler`)
 
@@ -69,7 +72,13 @@ I worker sono processi indipendenti che estendono le capacità di Mnemosyne tram
 
 ### 4.1 `gardener.py` (The Hygiene Worker)
 
-**Purpose**: Operates as a "Timid Gardener" in the background, performing maintenance tasks that don't require immediate user attention but are vital for long-term health.
+**Purpose**: Operates as a "Timid Gardener" in the background, performing maintenance tasks that don't require immediate user attention but are vital for long-term health. It also implements the **TimeWatcher** logic for Proactive Planning.
+
+- **Main Methods**:
+  - `run_once()`: Executes a full gardening cycle.
+  - `sanitize_duplicates()`: Merges nodes with identical names.
+  - `check_deadlines()`: Scans for overdue/approaching tasks and goals, applying heat boosts to bring them to focus.
+  - `apply_temporal_decay()`: Triggers the attention model's decay.
 
 ---
 

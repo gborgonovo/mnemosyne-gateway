@@ -1,8 +1,8 @@
 # Mnemosyne - Technical Specifications
 
-**Version:** 1.0 (Draft)
-**Date:** 2026-01-12
-**Status:** Approved for Implementation
+**Version:** 1.1
+**Date:** 2026-02-21
+**Status:** Implemented
 
 ---
 
@@ -26,12 +26,12 @@ Mnemosyne è ora un **Cognitive Middleware Headless**. Espone le sue capacità c
 
 1. **The Connectome (Core)**: The semantic graph storage (LLM-Free).
 2. **Mnemosyne Gateway**: Distributed FastAPI server and Event Bus hub.
-3. **MCP Interface**: Server FastMCP for direct tool integration.
-4. **Attention Engine**: Mathematical model for activation & decay.
-5. **Knowledge Scopes**: Hierarchical visibility filtering (Private/Public).
+3. **MCP Interface**: Server FastMCP for direct tool integration and proactive planning.
+4. **Attention Engine**: Mathematical model for activation & decay (with Differential Decay).
+5. **Knowledge Scopes**: Hierarchical visibility filtering (Private/Public) and selective deletion.
 6. **Distributed Workers**:
     - **LLMWorker**: Asynchronous entity extraction and enrichment.
-    - **BriefingWorker**: Plugin-based proactive initiative generation.
+    - **Gardener**: Background worker for hygiene and **TimeWatcher** logic.
 7. **The Butler Persona**: Relational layer for user interaction.
 
 ---
@@ -47,11 +47,11 @@ Il Connectome implementa la visione del **"Grafo Liquido"**: la conoscenza non �
 - **Emergenza**: Il sistema permette a nuove connessioni di formarsi liberamente tramite le `Observation` e il feedback dell'utente.
 - **Struttura (Micro-Types)**: I tipi fondamentali aiutano The Butler a capire *come* usare le informazioni:
   - `Entity`: Nodi-ancora (Persone, Strumenti, Luoghi). The Butler li usa per estrarre fatti univoci.
-  - `Topic`: Nodi-tema. Rappresentano il "colore" del discorso e guidano le iniziative proattive.
+  - `Topic`: Nodi-tema. Rappresentano il "colore" del discorso.
+  - `Goal`: Obiettivi strategici ad alto livello (es. "Lanciare Mnemosyne"). Possiedono `deadline` e `priority`.
+  - `Task`: Azioni concrete collegate ai Goal. Possiedono `due_date` e `status` (todo, in_progress, done).
   - `Resource`: Collegamenti a dati esterni (Files, Links).
   - `Observation`: La memoria episodica. Ogni frase che scrivi è una "osservazione" collegata al tempo.
-  - `Goal & Task`: Nodi teleologici. Rappresentano la direzione del sistema e godono di "boost" preferenziali dal Gardener.
-  - `Node`: Tipo generico per concetti ancora in fase di definizione.
 
 *Note: Qualsiasi altro descrittore (es. "Progetto", "Urgente", "Sogno") viene applicato come etichetta secondaria o proprietà, permettendo al grafo di evolvere organicamente senza rompere la logica di base.*
 
@@ -60,26 +60,30 @@ Il Connectome implementa la visione del **"Grafo Liquido"**: la conoscenza non �
 To allow heuristic emergence, relationships are mapped to four fundamental vectors:
 
 1. `LINKED_TO` (Weight: **Low**, Bidirectional): Generic semantic association.
-2. `DEPENDS_ON` (Weight: **High**, Directional): Structural blockage or requirement (e.g., Roof -> Walls).
-3. `EVOKES` (Weight: **Medium**, Bidirectional): Emotional or mnemonic trigger.
-4. `IS_A` (Weight: **Technical**, Directional): Taxonomic classification.
-5. `MENTIONED_IN` (Weight: **Low**, Directional): Link between an Entity/Topic and an Observation.
-6. `MAYBE_SAME_AS` (Weight: **Gardener**, Bidirectional): Suggested merge by the Gardener.
-7. `FEEDBACK` (Property): Each relationship can store a `feedback_score` (negative scores hide initiatives).
+2. `DEPENDS_ON` (Weight: **High**, Directional): Structural blockage or requirement.
+3. `REQUIRES` (Weight: **High**, Directional): Used for (Goal)->(Task) decomposition.
+4. `EVOKES` (Weight: **Medium**, Bidirectional): Emotional or mnemonic trigger.
+5. `IS_A` (Weight: **Technical**, Directional): Taxonomic classification.
+6. `MENTIONED_IN` (Weight: **Low**, Directional): Link between an Entity/Topic and an Observation.
+7. `MAYBE_SAME_AS` (Weight: **Gardener**, Bidirectional): Suggested merge by the Gardener.
+8. `FEEDBACK` (Property): Each relationship can store a `feedback_score` (negative scores hide initiatives).
 
-### 3.2 The Attention Engine
+### 3.2 The Attention Engine (Proactive Planning)
 
 This module gives the graph "life" by simulating heat (activation) flow.
 
-#### Decay Model
+#### Differential Decay Model
 
-Decadimento temporale **esponenziale discreto**: i dati perdono attivazione in base a cicli periodici, simulando la dimenticanza naturale.
-$$ A_{t} = A_{t-1} \times (1 - K_{decay}) $$
-dove $K_{decay}$ è il tasso di decadimento configurabile.
+Per supportare il **Proactive Planning**, il decadimento temporale non è uniforme:
+
+- **Standard**: $A_{t} = A_{t-1} \times (1 - K_{decay})$
+- **Goals**: Decadimento dimezzato ($0.5 \times K_{decay}$) per mantenere la visione a lungo termine.
+- **Active Tasks**: Decadimento drasticamente ridotto ($0.2 \times K_{decay}$) per i task `in_progress`.
+- **Done Tasks**: Decadimento accelerato ($5 \times K_{decay}$) per "pulire" lo spazio cognitivo dopo il completamento.
 
 #### Modificatore "Pedanteria" (Persistence)
 
-I nodi marcati con `persistence: high` (Pedanteria) hanno un coefficiente $K_{decay} \approx 0$ e un moltiplicatore di priorità nell'Initiative Engine, garantendo che rimangano "caldi" e visibili fino alla rimozione del tag.
+I nodi marcati con `persistence: high` hanno un coefficiente $K_{decay} \approx 0$ e un moltiplicatore di priorità nell'Initiative Engine, garantendo che rimangano "caldi" fino alla rimozione del tag.
 
 #### Propagation Model
 
@@ -87,27 +91,28 @@ I nodi marcati con `persistence: high` (Pedanteria) hanno un coefficiente $K_{de
 
 - **Forward (A $\to$ B)**: Full strength transfer. If A is active, B becomes relevant.
 - **Backward (B $\to$ A)**: Attenuated transfer (e.g., 50%). If B is discussed, A is "remembered" faintly.
-  - *Example*: Discussing "Permits" (B) faintly activates "Veranda" (A), triggering the system to check if the permits are for the veranda.
 
-### 3.3 The Gardener (Hygiene Worker)
+### 3.3 The Gardener (Hygiene & TimeWatcher)
 
-A background process responsible for "Graph Hygiene".
+A background process responsible for "Graph Hygiene" and temporal awareness.
 
-- **Strategy**: "Timid Suggestion" (creates `MAYBE_SAME_AS`) + Automated Maintenance.
-- **Temporal Decay**: Automatically triggers the Attention Engine decay cycle to simulate long-term forgetfulness.
-- **Smart Analysis**: Combines string heuristics with **LLM Semantic Comparison** to find non-obvious duplicates (e.g., "IA" vs "Artificial Intelligence").
-- **Action**: It does **not** auto-merge. It creates a special `MAYBE_SAME_AS` edge.
-- **User Interaction**: The Dashboard visualizes these edges and allows manual merging/dismissal.
+- **Temporal Awareness (TimeWatcher)**: Scans the Connectome for `Goal.deadline` and `Task.due_date`.
+  - **Approaching**: If a deadline is within 24-48h, the TimeWatcher injects a Heat Boost (+0.5).
+  - **Overdue**: If a deadline is passed, it injects a Massive Boost (+0.8), triggering proactive warnings from The Butler.
+- **Deduplication**: Combines string heuristics with LLM Semantic Comparison to find non-obvious duplicates.
+- **Automated Sanitization**: Merges nodes with exact same names to prevent graph fragmentation.
 
-### 3.4 Knowledge Scopes (Visibility & Privacy)
+### 3.4 Knowledge Scopes (Visibility & Deletion)
 
 Mnemosyne implementa un modello di visibilità gerarchico direttamente a livello di query database.
 
 - **Private**: Visibile solo all'istanza/utente proprietario.
-- **Internal**: Visibile internamente al sistema (es. per analisi cross-progetto).
-- **Public**: Esponibile ad agenti esterni o alla conoscenza globale.
+- **Internal**: Visibile internamente al sistema.
+- **Public**: Esponibile ad agenti esterni.
 
-**Ereditarietà**: Uno scope superiore (es. `Private`) ha accesso a tutta la conoscenza degli scope inferiori (`Internal`, `Public`), ma non viceversa. Questo garantisce che i "segreti" non trapelino mai nelle interazioni pubbliche.
+**Explicit Control**: Oltre alla dimenticanza passiva (decay), il sistema supporta l'eliminazione fisica (`delete_node`) e l'aggiornamento delle proprietà, permettendo la rettifica dei ricordi.
+
+**Ereditarietà**: Uno scope superiore (es. `Private`) ha accesso a tutta la conoscenza degli scope inferiori (`Internal`, `Public`), ma non viceversa.
 
 ### 3.5 Mnemosyne-RPC Protocol (Plugin System)
 

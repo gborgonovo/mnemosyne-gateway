@@ -41,6 +41,8 @@ Mnemosyne diventa l'infrastruttura su cui poggia l'intelligenza, non l'intellige
 - [x] Capitolo 2: Event Bus & Distributed RPC
 - [x] Capitolo 3: Framework Plugin & Workers
 - [x] Capitolo 4: Knowledge Scopes (Privacy Isolata)
+- [x] Capitolo 6: Proactive Planning (Intentionalità)
+- [x] Capitolo 7: Memory Sovereignty (Manutenzione Esplicita)
 
 ---
 
@@ -339,3 +341,36 @@ Dato che Mnemosyne trasporta dati potenzialmente sensibili (Scope :Private), l'i
 2. **Storage**: Creazione della directory per il volume Neo4j (persistenza).  
 3. **Kernel**: Setup del venv e installazione delle dipendenze del Micro-Kernel.  
 4. **Plugin**: Registrazione dei plugin locali o remoti tramite il file plugins.json.
+
+---
+
+# **Capitolo 6: Proactive Planning (Intentionalità)**
+
+## **1. Oltre la Memoria Passiva**
+Mnemosyne evolve da semplice archivio a **Partner Proattivo**. Il sistema ora non solo ricorda il passato, ma monitora la direzione del futuro attraverso nodi teleologici (`Goal` e `Task`).
+
+## **2. Dinamiche Temporali Avanzate**
+
+### **2.1 Decadimento Differenziale**
+Per mantenere il focus, il Micro-Kernel implementa un metabolismo differenziato:
+- **Resilienza**: Gli Obiettivi e i Task attivi decadono molto più lentamente dei Topic generici.
+- **Effetto Sollievo**: I Task completati decadranno 5 volte più velocemente, simulando lo scarico cognitivo.
+
+### **2.2 TimeWatcher (Gardener Integration)**
+Il Gardener agisce come un osservatore del tempo:
+- Se un nodo possiede una `deadline` o `due_date`, il TimeWatcher inietta stimoli termici artificiali all'avvicinarsi della scadenza.
+- Questo garantisce che i nodi critici raggiungano il picco di attenzione (`Peak`), innescando suggestioni proattive tramite The Butler senza intervento dell'utente.
+
+---
+
+# **Capitolo 7: Memory Sovereignty (Gestione Esplicita)**
+
+## **1. Il Diritto alla Rettifica**
+In un middleware cognitivo, l'utente deve essere il sovrano assoluto della propria memoria. Abbiamo esteso le primitive del Core per permettere manipolazioni che vanno oltre il naturale decadimento dell'attenzione.
+
+## **2. Strumenti di Sovranità (MCP Tools)**
+
+- **Oblio Esplicito (`delete_node`)**: Permette di rimuovere fisicamente porzioni di conoscenza dal Connectome, troncando ogni associazione indesiderata.
+- **Rettifica dei Fatti (`update_node_properties`)**: Consente di aggiornare lo stato di un concetto o correggere errori semantici nati da osservazioni imprecise.
+
+Questi strumenti, esposti via **FastMCP**, permettono a The Butler di agire come un vero archivista personale, operando su istruzione diretta o identificando autonomamente la necessità di pulizia.
