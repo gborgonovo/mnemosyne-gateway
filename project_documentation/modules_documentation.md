@@ -18,6 +18,8 @@ This document provides a technical overview of the python modules and workers th
   - `delete_node(name, scopes)`: Physically removes a node and its relationships from the graph.
   - `get_neighbors(name, scopes)`: Returns connected nodes within the allowed scopes.
   - `get_active_nodes(threshold, scopes)`: Returns active context filtered by scope.
+  - `get_dormant_projects(threshold_days, limit, scopes)`: Identifies historically high-heat nodes that have been inactive.
+  - `get_temporal_trends(days_ago, limit, scopes)`: Extracts nodes active/created within a specific time window.
   - `add_document(title, chunks, scope)`: Ingests a Document and its constituent Chunks with structural links (`CONTAINS`, `NEXT_CHUNK`).
   - `_fuzzy_link_chunk(chunk_name, text, alias_map)`: Performs selective fuzzy matching to link chunks to existing Entities/Topics.
   - `get_all_aliases(scopes)`: Retrieves a mapping of aliases/names for fuzzy matching.
@@ -91,6 +93,7 @@ I worker sono processi indipendenti che estendono le capacità di Mnemosyne tram
   - `run_once()`: Executes a full gardening cycle.
   - `sanitize_duplicates()`: Merges nodes with identical names.
   - `check_deadlines()`: Scans for overdue/approaching tasks and goals, applying heat boosts to bring them to focus.
+  - `check_dormant_projects()`: Detects abandoned high-connectivity projects and applies subtle activation boosts.
   - `apply_temporal_decay()`: Triggers the attention model's decay.
 
 ---
@@ -110,6 +113,7 @@ I worker sono processi indipendenti che estendono le capacità di Mnemosyne tram
   - `POST /register`: Handshake for external plugins/workers.
   - `POST /share`: Promotes a node from one scope to another.
   - `POST /ingest`: Massive ingestion endpoint for files (txt/md). Handled via background tasks.
+  - `GET /briefing/longitudinal`: Returns historical analysis of trends and dormant projects.
   - `GET /stats`: Real-time graph statistics.
 
 ### 3.2 `legacy_cli.py` (The Command Line Bridge)

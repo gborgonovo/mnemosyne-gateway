@@ -31,7 +31,7 @@ Mnemosyne è ora un **Cognitive Middleware Headless**. Espone le sue capacità c
 5. **Knowledge Scopes**: Hierarchical visibility filtering (Private/Public) and selective deletion.
 6. **Distributed Workers**:
     - **LLMWorker**: Asynchronous entity extraction and enrichment.
-    - **Gardener**: Background worker for hygiene and **TimeWatcher** logic.
+    - **Gardener**: Background worker for hygiene, **TimeWatcher** logic, and **Longitudinal Analysis**.
 7. **The Butler Persona**: Relational layer for user interaction.
 
 ---
@@ -106,6 +106,7 @@ A background process responsible for "Graph Hygiene" and temporal awareness.
   - **Overdue**: If a deadline is passed, it injects a Massive Boost (+0.8), triggering proactive warnings from The Butler.
 - **Deduplication**: Combines string heuristics with LLM Semantic Comparison to find non-obvious duplicates.
 - **Automated Sanitization**: Merges nodes with exact same names to prevent graph fragmentation.
+- **Longitudinal Scanner**: A periodic routine that identifies "Dormant Projects" (nodes with high historical connectivity but low recent activity) and applies subtle heat boosts to surface them proactively.
 
 ### 3.4 Knowledge Scopes (Visibility & Deletion)
 

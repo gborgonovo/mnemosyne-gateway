@@ -43,6 +43,7 @@ Mnemosyne diventa l'infrastruttura su cui poggia l'intelligenza, non l'intellige
 - [x] Capitolo 4: Knowledge Scopes (Privacy Isolata)
 - [x] Capitolo 6: Proactive Planning (Intentionalità)
 - [x] Capitolo 7: Memory Sovereignty (Manutenzione Esplicita)
+- [x] Capitolo 8: Longitudinal Analysis & Historical Briefing
 - [x] Capitolo 9: Massive Ingestion (Heuristic Chunker & Semantic Firewall)
 
 ---

@@ -33,6 +33,7 @@ The project has been refactored from a monolith into a distributed ecosystem:
 * **Attention Model**: Nodes gain "heat" through interaction and lose it over time (decay), automatically highlighting what's relevant *now*.
 * **Intentionality**: Focuses on goals and tasks with differential attention decay, managed by the Attention Model and Gardening logic.
 * **Massive Ingestion**: Zero-LLM semantic chunking for large document repositories, integrated via the `/ingest` endpoint.
+* **Longitudinal Analysis**: Historical trend detection and recovery of dormant projects via background gardening.
 * **Explicit Memory Control**: Users (and AI agents) can explicitly update or delete node properties and relationships via MCP tools, moving beyond passive decay.
 * **Mnemosyne-RPC**: A lightweight protocol for registering external workers and plugins.
 * **MCP Integration**: Native Support for the **Model Context Protocol**, allowing any MCP-compatible agent (like Claude Desktop or OpenClaw) to use Mnemosyne as a specialized memory tool.

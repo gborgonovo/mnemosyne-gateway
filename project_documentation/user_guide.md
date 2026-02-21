@@ -116,7 +116,37 @@ Sulla sidebar troverai la sezione **"Mnemosyne Says..."**. Qui The Butler prende
 
 ---
 
-## 🛠️ 5. Controllo Manuale tramite MCP (Model Context Protocol)
+## � 5. Analisi Longitudinale (Historical Briefing)
+
+Oltre alla memoria a breve termine, Mnemosyne offre una **visione d'insieme** sulla tua evoluzione cognitiva.
+
+### Cosa puoi scoprire
+
+- **Progetti Dormienti**: Se avevi un obiettivo o un tema molto "caldo" un mese fa ma non lo tocchi da tempo, Mnemosyne lo identificherà come dormiente e te lo riproporrà come suggerimento proattivo.
+- **Trend Settimanali**: Una sintesi dei concetti che hanno ricevuto più attenzione negli ultimi 7 giorni.
+
+### Configurazione
+
+Puoi personalizzare o disattivare questa funzione nel file `config/settings.yaml`:
+
+```yaml
+longitudinal_analysis:
+  enabled: true              # Attiva/Disattiva l'analisi storica
+  frequency: "weekly"        # Cadenza del report (weekly, monthly)
+  dormancy_threshold_days: 30 # Soglia di inattività per i progetti
+```
+
+### Richiamare il Briefing Storico via API
+
+Se vuoi consultare manualmente l'analisi dei trend e dei progetti dormienti:
+
+```bash
+curl http://localhost:4001/briefing/longitudinal?scopes=Private
+```
+
+---
+
+## �🛠️ 5. Controllo Manuale tramite MCP (Model Context Protocol)
 
 Se utilizzi un client compatibile con MCP (come Claude Desktop o OpenClaw), The Butler ha accesso a strumenti di gestione diretta della memoria:
 
