@@ -356,3 +356,52 @@ class GraphManager:
             
             # 4. Selective Fuzzy Matching
             self._fuzzy_link_chunk(chunk_name, text, alias_map)
+
+    def get_dormant_projects(self, threshold_days: int = 30, limit: int = 5, scopes: list[str] = None) -> list[dict]:
+        """
+        Finds 'Goal', 'Project', or heavy 'Topic' nodes that haven't been seen recently
+        but had significant connections in the past.
+        """
+        scope_clause = self._get_scope_filter(scopes)
+        where_scope = f"AND {scope_clause}" if scope_clause else ""
+        
+        query = f"""
+        MATCH (n)
+        WHERE (n:Goal OR n:Project OR n:Topic)
+        {where_scope}
+        AND n.last_seen IS NOT NULL
+        // Convert ISO string to Neo4j datetime for comparison
+        AND datetime(n.last_seen) < datetime() - duration({{days: $threshold_days}})
+        AND NOT coalesce(n.status, '') IN ['done', 'completed', 'discarded']
+        OPTIONAL MATCH (n)-[r]-()
+        WITH n, count(r) as rel_count
+        WHERE rel_count > 2 // Must have been somewhat significant
+        RETURN n.name as name, labels(n) as labels, n.last_seen as last_seen, rel_count
+        ORDER BY rel_count DESC
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            results = session.run(query, threshold_days=threshold_days, limit=limit)
+            return [dict(record) for record in results]
+            
+    def get_temporal_trends(self, days_ago: int = 7, limit: int = 5, scopes: list[str] = None) -> list[dict]:
+        """
+        Finds nodes that were highly active or created within the last N days.
+        """
+        scope_clause = self._get_scope_filter(scopes)
+        where_scope = f"AND {scope_clause}" if scope_clause else ""
+        
+        query = f"""
+        MATCH (n)
+        WHERE (n:Goal OR n:Project OR n:Topic OR n:Entity)
+        {where_scope}
+        AND n.last_seen IS NOT NULL
+        AND datetime(n.last_seen) >= datetime() - duration({{days: $days_ago}})
+        RETURN n.name as name, labels(n) as labels, n.last_seen as last_seen, n.activation_level as activation
+        ORDER BY n.activation_level DESC
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            results = session.run(query, days_ago=days_ago, limit=limit)
+            return [dict(record) for record in results]
+

@@ -248,6 +248,28 @@ def get_briefing(scopes: Optional[str] = "Public"):
     # 1. Active Topics
     active_nodes = gm.get_active_nodes(threshold=0.7, scopes=scope_list)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
+
+@app.get("/briefing/longitudinal")
+def get_longitudinal_briefing(scopes: Optional[str] = "Public"):
+    """
+    Generates a historical briefing of dormant projects and temporal trends.
+    """
+    long_cfg = config.get('longitudinal_analysis', {})
+    if not long_cfg.get('enabled', True):
+        raise HTTPException(status_code=403, detail="Longitudinal analysis is disabled in configuration.")
+        
+    scope_list = scopes.split(",") if scopes else ["Public"]
+    
+    threshold = long_cfg.get('dormancy_threshold_days', 30)
+    dormant_projects = gm.get_dormant_projects(threshold_days=threshold, limit=5, scopes=scope_list)
+    recent_trends = gm.get_temporal_trends(days_ago=7, limit=5, scopes=scope_list)
+    
+    return {
+        "status": "success",
+        "dormant_projects": dormant_projects,
+        "recent_trends": recent_trends,
+        "message": f"Historical analysis generated for the past {threshold} days."
+    }
     
     # 2. Proactive Context (The Butler)
     proactive_context = ie.get_proactive_context(scopes=scope_list) 

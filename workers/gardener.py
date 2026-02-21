@@ -34,7 +34,26 @@ class Gardener:
         # Find semantic duplicates (similar names)
         self.find_and_mark_duplicates()
         self.check_deadlines()
+        self.check_dormant_projects()
         logger.info("Gardener finished cycle.")
+
+    def check_dormant_projects(self):
+        """
+        Retrieves dormant projects and creates proactive insights for The Butler.
+        """
+        long_cfg = getattr(self, 'config', {}).get('longitudinal_analysis', {})
+        if not long_cfg.get('enabled', True):
+            return
+            
+        threshold = long_cfg.get('dormancy_threshold_days', 30)
+        logger.info(f"Gardener checking for dormant projects (>{threshold} days)...")
+        
+        dormant_nodes = self.gm.get_dormant_projects(threshold_days=threshold, limit=5)
+        for node in dormant_nodes:
+            logger.info(f"Identified dormant project/goal: {node['name']}")
+            # We stimulate it slightly so it appears in the active context as a "ghost" or proactive suggestion
+            if self.am:
+                 self.am.stimulate([node['name']], boost_amount=0.3)
 
     def sanitize_duplicates(self):
         """
