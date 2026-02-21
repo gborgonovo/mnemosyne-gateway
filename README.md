@@ -10,6 +10,8 @@
 
 Mnemosyne is not a chatbot; it's the **Knowledge OS** that sits between you and your AI agents (like OpenClaw or Open WebUI). It ensures that your knowledge is **Immortale** (persistent), **Private** (local-first), and **Active** (proactive initiatives).
 
+📖 **[Leggi la storia di Mnemosyne](file:///project_documentation/mnemosyne_story.md)**: Scopri come è nato questo progetto e la visione del "Partner Cognitivo" che lo guida.
+
 ---
 
 ## 🏗️ Architecture: The Micro-Kernel Approach
