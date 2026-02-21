@@ -43,6 +43,7 @@ Mnemosyne diventa l'infrastruttura su cui poggia l'intelligenza, non l'intellige
 - [x] Capitolo 4: Knowledge Scopes (Privacy Isolata)
 - [x] Capitolo 6: Proactive Planning (Intentionalità)
 - [x] Capitolo 7: Memory Sovereignty (Manutenzione Esplicita)
+- [x] Capitolo 9: Massive Ingestion (Heuristic Chunker & Semantic Firewall)
 
 ---
 
@@ -347,17 +348,22 @@ Dato che Mnemosyne trasporta dati potenzialmente sensibili (Scope :Private), l'i
 # **Capitolo 6: Proactive Planning (Intentionalità)**
 
 ## **1. Oltre la Memoria Passiva**
+
 Mnemosyne evolve da semplice archivio a **Partner Proattivo**. Il sistema ora non solo ricorda il passato, ma monitora la direzione del futuro attraverso nodi teleologici (`Goal` e `Task`).
 
 ## **2. Dinamiche Temporali Avanzate**
 
 ### **2.1 Decadimento Differenziale**
+
 Per mantenere il focus, il Micro-Kernel implementa un metabolismo differenziato:
+
 - **Resilienza**: Gli Obiettivi e i Task attivi decadono molto più lentamente dei Topic generici.
 - **Effetto Sollievo**: I Task completati decadranno 5 volte più velocemente, simulando lo scarico cognitivo.
 
 ### **2.2 TimeWatcher (Gardener Integration)**
+
 Il Gardener agisce come un osservatore del tempo:
+
 - Se un nodo possiede una `deadline` o `due_date`, il TimeWatcher inietta stimoli termici artificiali all'avvicinarsi della scadenza.
 - Questo garantisce che i nodi critici raggiungano il picco di attenzione (`Peak`), innescando suggestioni proattive tramite The Butler senza intervento dell'utente.
 
@@ -366,6 +372,7 @@ Il Gardener agisce come un osservatore del tempo:
 # **Capitolo 7: Memory Sovereignty (Gestione Esplicita)**
 
 ## **1. Il Diritto alla Rettifica**
+
 In un middleware cognitivo, l'utente deve essere il sovrano assoluto della propria memoria. Abbiamo esteso le primitive del Core per permettere manipolazioni che vanno oltre il naturale decadimento dell'attenzione.
 
 ## **2. Strumenti di Sovranità (MCP Tools)**
@@ -374,3 +381,26 @@ In un middleware cognitivo, l'utente deve essere il sovrano assoluto della propr
 - **Rettifica dei Fatti (`update_node_properties`)**: Consente di aggiornare lo stato di un concetto o correggere errori semantici nati da osservazioni imprecise.
 
 Questi strumenti, esposti via **FastMCP**, permettono a The Butler di agire come un vero archivista personale, operando su istruzione diretta o identificando autonomamente la necessità di pulizia.
+
+# **Capitolo 9: Massive Ingestion & Semantic Firewall**
+
+## **1. Il Problema della Scalabilità**
+
+Al crescere della conoscenza, l'uso di LLM per ogni singolo frammento di testo diventa insostenibile in termini di tempo e risorse. La Fase 9 introduce un approccio **RAM-centric** per gestire repository di documenti immensi.
+
+## **2. Heuristic Chunker (Tier 1)**
+
+Invece di affidarsi a embeddings o LLM, il testo viene spezzato tramite euristiche strutturali:
+
+- **Punteggiatura e Paragrafi**: Il sistema identifica i confini naturali del discorso.
+- **Overlap Strategico**: I chunk mantengono una sovrapposizione per non perdere il contesto tra i tagli.
+
+## **3. Selective Fuzzy Matching**
+
+Il sistema scansiona i chunk alla ricerca di alias e nomi di nodi già esistenti nel Connectome. La relazione `MENTIONED_IN` viene creata solo se viene superata una soglia di occorrenze, evitando di inquinare il grafo con menzioni casuali.
+
+## **4. Il Firewall Semantico (Attenuation)**
+
+Per evitare il rumore, le relazioni `MENTIONED_IN` tra Entità e Chunk Documentali hanno un'attenuazione severa (x0.1) nel passaggio di energia all'indietro.
+
+- Se l'utente parla di un'Entità, i documenti che la menzionano vengono "pre-riscaldati" solo marginalmente, restando disponibili come contesto ma senza innescare iniziative proattive se non esplicitamente volute.

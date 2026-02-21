@@ -161,6 +161,32 @@ GET /search?q=progetto&scopes=Private,Public
 
 Se un'idea nata in `Private` è pronta per essere condivisa, puoi usare l'endpoint `/share` per spostare il nodo nello scope `Public`.
 
+---
+
+## 📂 7. Ingestione Massiva (Massive Ingestion)
+
+Per caricare grandi volumi di testo (documenti, repository, archivi) senza sovraccaricare il sistema, Mnemosyne offre un'interfaccia di **Ingestione Euristica**.
+
+### Come funziona
+
+A differenza delle normali "Osservazioni" che vengono elaborate dall'LLM, i documenti caricati tramite l'ingestione massiva vengono:
+
+1. **Spezzettati (Chunking)**: Il testo viene diviso in frammenti logici (paragrafi) basati sulla struttura, non su modelli statistici.
+2. **Scansionati**: Il sistema cerca riferimenti a concetti già presenti nel tuo Connectome.
+3. **Attenuati**: I collegamenti creati sono "silenziosi". Non attivano il Butler a meno che tu non ne faccia esplicita richiesta, evitando il rumore di fondo.
+
+### Caricare un documento via API
+
+Puoi caricare un file di testo (`.txt`, `.md`) usando l'endpoint `/ingest`:
+
+```bash
+curl -X POST "http://localhost:4001/ingest?scope=Internal" \
+     -H "Content-Type: multipart/form-data" \
+     -F "file=@il_mio_documento.txt"
+```
+
+Il sistema risponderà immediatamente e processerà il file in **background**. Puoi monitorare l'avanzamento dai log del Gateway.
+
 ## 🌫️ 5. Focalizzazione e Oblio: Cambiare Argomento
 
 Mnemosyne è progettata per seguire l'evoluzione dei tuoi interessi. Cosa succede se passi improvvisamente dal parlare del tuo "B&B" a un tema completamente diverso, come l'"Astrofisica"?

@@ -18,6 +18,9 @@ This document provides a technical overview of the python modules and workers th
   - `delete_node(name, scopes)`: Physically removes a node and its relationships from the graph.
   - `get_neighbors(name, scopes)`: Returns connected nodes within the allowed scopes.
   - `get_active_nodes(threshold, scopes)`: Returns active context filtered by scope.
+  - `add_document(title, chunks, scope)`: Ingests a Document and its constituent Chunks with structural links (`CONTAINS`, `NEXT_CHUNK`).
+  - `_fuzzy_link_chunk(chunk_name, text, alias_map)`: Performs selective fuzzy matching to link chunks to existing Entities/Topics.
+  - `get_all_aliases(scopes)`: Retrieves a mapping of aliases/names for fuzzy matching.
 
 ### 1.2 `attention.py` (The Metabolic Engine)
 
@@ -29,6 +32,16 @@ This document provides a technical overview of the python modules and workers th
   - `propagate()`: Conducts activation from hot nodes to their neighbors, attenuated by relationship weights.
   - `apply_decay()`: Gradually lowers activation levels across all nodes (forgetting).
     - Features **Differential Decay**: Goals and active Tasks decay slower than standard topics.
+  - `attenuation`: Implements severe backward propagation penalty (x0.1) for `MENTIONED_IN` relationships (Semantic Firewall).
+
+### 1.3 `chunking.py` (The Document Parser) [NEW]
+
+**Purpose**: Implements zero-LLM text splitting. It uses structural heuristics to divide large documents into manageable chunks without saturating resources.
+
+- **Main Class**: `HeuristicChunker`
+- **Key Methods**:
+  - `chunk_text(text)`: Splits text into semantic paragraphs with overlap to maintain context.
+  - `_hard_split(text)`: Handles excessively long paragraphs by breaking them at sentence boundaries or spaces.
 
 ## 2. Butler Layer (`/butler`)
 
@@ -96,6 +109,7 @@ I worker sono processi indipendenti che estendono le capacità di Mnemosyne tram
   - `POST /rpc`: Gateway for internal signaling between workers.
   - `POST /register`: Handshake for external plugins/workers.
   - `POST /share`: Promotes a node from one scope to another.
+  - `POST /ingest`: Massive ingestion endpoint for files (txt/md). Handled via background tasks.
   - `GET /stats`: Real-time graph statistics.
 
 ### 3.2 `legacy_cli.py` (The Command Line Bridge)

@@ -31,7 +31,8 @@ The project has been refactored from a monolith into a distributed ecosystem:
 
 * **Knowledge Scopes**: Multi-layered privacy pools (`Private`, `Internal`, `Public`). Knowledge is strictly isolated at the database level.
 * **Attention Model**: Nodes gain "heat" through interaction and lose it over time (decay), automatically highlighting what's relevant *now*.
-* **Proactive Planning (Intentionality)**: The system tracks `Goal` and `Task` nodes. It uses "Differential Decay" to keep objectives in mind longer and a "TimeWatcher" to boost the activation of overdue tasks.
+* **Intentionality**: Focuses on goals and tasks with differential attention decay, managed by the Attention Model and Gardening logic.
+* **Massive Ingestion**: Zero-LLM semantic chunking for large document repositories, integrated via the `/ingest` endpoint.
 * **Explicit Memory Control**: Users (and AI agents) can explicitly update or delete node properties and relationships via MCP tools, moving beyond passive decay.
 * **Mnemosyne-RPC**: A lightweight protocol for registering external workers and plugins.
 * **MCP Integration**: Native Support for the **Model Context Protocol**, allowing any MCP-compatible agent (like Claude Desktop or OpenClaw) to use Mnemosyne as a specialized memory tool.

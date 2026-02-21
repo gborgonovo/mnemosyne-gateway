@@ -51,6 +51,8 @@ Il Connectome implementa la visione del **"Grafo Liquido"**: la conoscenza non �
   - `Goal`: Obiettivi strategici ad alto livello (es. "Lanciare Mnemosyne"). Possiedono `deadline` e `priority`.
   - `Task`: Azioni concrete collegate ai Goal. Possiedono `due_date` e `status` (todo, in_progress, done).
   - `Resource`: Collegamenti a dati esterni (Files, Links).
+  - `Document`: Contenitore logico per testi estesi (Massive Ingestion).
+  - `DocumentChunk`: Frammento atomico di un documento, gestito in RAM.
   - `Observation`: La memoria episodica. Ogni frase che scrivi è una "osservazione" collegata al tempo.
 
 *Note: Qualsiasi altro descrittore (es. "Progetto", "Urgente", "Sogno") viene applicato come etichetta secondaria o proprietà, permettendo al grafo di evolvere organicamente senza rompere la logica di base.*
@@ -64,9 +66,11 @@ To allow heuristic emergence, relationships are mapped to four fundamental vecto
 3. `REQUIRES` (Weight: **High**, Directional): Used for (Goal)->(Task) decomposition.
 4. `EVOKES` (Weight: **Medium**, Bidirectional): Emotional or mnemonic trigger.
 5. `IS_A` (Weight: **Technical**, Directional): Taxonomic classification.
-6. `MENTIONED_IN` (Weight: **Low**, Directional): Link between an Entity/Topic and an Observation.
+6. `MENTIONED_IN` (Weight: **Low**, Directional): Link between an Entity/Topic and an Observation or DocumentChunk.
 7. `MAYBE_SAME_AS` (Weight: **Gardener**, Bidirectional): Suggested merge by the Gardener.
-8. `FEEDBACK` (Property): Each relationship can store a `feedback_score` (negative scores hide initiatives).
+8. `CONTAINS` (Weight: **Structural**, Directional): Links a `Document` to its `DocumentChunk` nodes.
+9. `NEXT_CHUNK` (Weight: **Structural**, Directional): Maintains the sequential flow between chunks.
+10. `FEEDBACK` (Property): Each relationship can store a `feedback_score` (negative scores hide initiatives).
 
 ### 3.2 The Attention Engine (Proactive Planning)
 
@@ -91,6 +95,7 @@ I nodi marcati con `persistence: high` hanno un coefficiente $K_{decay} \approx 
 
 - **Forward (A $\to$ B)**: Full strength transfer. If A is active, B becomes relevant.
 - **Backward (B $\to$ A)**: Attenuated transfer (e.g., 50%). If B is discussed, A is "remembered" faintly.
+- **Semantic Firewall (B $\to$ Chunk)**: Severe attenuation ($0.1 \times factor$) for `MENTIONED_IN` relationships when moving backward from an Entity to a `DocumentChunk`, preventing document noise from overwhelming the active context.
 
 ### 3.3 The Gardener (Hygiene & TimeWatcher)
 
@@ -130,6 +135,14 @@ To ensure a non-blocking user experience and handle potential local LLM latencie
 - **Persistent Queue**: A job is created in a persistent disk-based queue (`data/queue/`) containing the raw text and metadata.
 - **Background Worker**: A dedicated `LearningWorker` thread monitors the queue and performs the heavy LLM extraction and graph integration tasks.
 - **Resilience**: If the LLM provider is unavailable or slow, jobs are retried automatically without data loss.
+
+### 3.6 Massive Ingestion Pipeline (Zero-LLM)
+
+Designed to handle large scale text data without overwhelming GPU resources.
+
+- **Heuristic Chunker**: Splits text based on structural cues (paragraphs, punctuation) and character limits, ensuring semantic boundaries are respected without using an LLM.
+- **Selective Fuzzy Matcher**: Scans chunks for known entities/topics and creates explicit `MENTIONED_IN` links only for high-relevance matches.
+- **Background Processing**: Ingestion is handled via FastAPI `BackgroundTasks`, keeping the Gateway responsive.
 
 ### 3.6 Feedback & Relevance Tuning
 
