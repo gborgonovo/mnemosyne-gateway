@@ -1,0 +1,55 @@
+# Mnemosyne Gateway Git Ignore
+
+# Private Workspace (User's specific request)
+openclaw_workspace/
+wiki_repo/
+
+# Neo4j Data (Docker volumes)
+docker/neo4j_data/
+data/
+db/
+
+# Secrets and Configuration
+config/settings.yaml
+.env
+project_documentation/mnemosyne_project.md
+
+# System/Agent Metadata (IMPORTANT for privacy)
+.gemini/
+.antigravity/
+brain/
+.system_generated/
+walkthrough.md
+implementation_plan.md
+task.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+*.pid
+logs/
+
+# IDEs
+.vscode/
+.idea/
+
+# System
+.DS_Store
+# System
+.DS_Store
+Thumbs.db
+*.kate-swp
+
+project_documentation/

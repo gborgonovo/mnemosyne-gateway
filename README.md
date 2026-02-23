@@ -8,38 +8,35 @@
 
 ## 🧠 Core Vision
 
-Mnemosyne is not a chatbot; it's the **Knowledge OS** that sits between you and your AI agents (like OpenClaw or Open WebUI). It ensures that your knowledge is **Immortale** (persistent), **Private** (local-first), and **Active** (proactive initiatives).
+Mnemosyne is not a chatbot; it's the **Knowledge OS** that sits between you and your AI agents (like OpenClaw or Open WebUI). It ensures that your knowledge is **Immortal** (persistent), **Private** (local-first), and **Active** (proactive initiatives).
 
-📖 **[Leggi la storia di Mnemosyne](project_documentation/mnemosyne_story.md)**: Scopri come è nato questo progetto e la visione del "Partner Cognitivo" che lo guida.
+📖 **[Read the Mnemosyne Story](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_The_Story)**: Discover the origin of this project and the "Cognitive Partner" vision.
 
 ---
 
 ## 🏗️ Architecture: The Micro-Kernel Approach
 
-The project has been refactored from a monolith into a distributed ecosystem:
+The project is a distributed ecosystem designed for modularity:
 
 1. **Micro-Kernel (Core)**: A lightweight, LLM-free engine that manages the Neo4j graph and the "heat" (activation) of nodes.
-2. **Mnemosyne Gateway**: A FastAPI-based distributed hub that handles REST requests and coordinates communication via an Event Bus.
+2. **Mnemosyne Gateway**: A FastAPI-based hub that handles REST requests and coordinates communication via an Event Bus.
 3. **Distributed Workers**:
     * **LLMWorker**: Asynchronously enriches the graph by extracting entities and relationships using local LLMs (Ollama).
-    * **BriefingWorker**: Generates proactive suggestions and insights when specific concepts become "hot".
-4. **The Butler Persona**: A relational layer that interacts with the user, providing a consistent and professional personality.
+    * **BriefingWorker**: Generates proactive suggestions and insights when concepts become "hot".
+4. **The Butler Persona**: A relational layer that interacts with the user, providing a professional and empathetic personality.
 
 ---
 
 ## 🛡️ Key Features
 
-* **Document Management**: Physical archiving of original sources in `data/storage/documents` with deep-deletion logic (syncing disk and graph).
-* **Cognitive Dashboard**: API-first Streamlit interface with dynamic visual Connectome and dedicated Document Manager.
+* **Document Management**: Physical archiving of original sources with deep-deletion logic syncing disk and graph.
+* **Cognitive Dashboard**: API-first Streamlit interface with a dynamic visual Connectome and Document Manager.
 * **Knowledge Scopes**: Multi-layered privacy pools (`Private`, `Internal`, `Public`).
-* **Attention Model**: Nodes gain "heat" through interaction and lose it over time (decay), automatically highlighting what's relevant *now*.
-* **Intentionality**: Focuses on goals and tasks with differential attention decay, managed by the Attention Model and Gardening logic.
-* **Massive Ingestion**: Zero-LLM semantic chunking for large document repositories, integrated via the `/ingest` endpoint.
-* **Longitudinal Analysis**: Historical trend detection and recovery of dormant projects via background gardening.
-* **Explicit Memory Control**: Users can explicitly update or delete node properties and relationships via MCP tools or Dashboard.
+* **Attention Model**: Nodes gain "heat" through interaction and lose it over time (decay), highlighting what's relevant *now*.
+* **Massive Ingestion**: Zero-LLM semantic chunking for large document repositories.
+* **Longitudinal Analysis**: Historical trend detection and recovery of dormant projects.
 * **Mnemosyne-RPC**: A lightweight protocol for registering external workers and plugins.
-* **MCP Integration**: Native Support for the **Model Context Protocol**, allowing any MCP-compatible agent to use Mnemosyne.
-* **LLM-Agnostic Core**: The central engine doesn't depend on LLMs, delegating semantic tasks to workers.
+* **MCP Support**: Native implementation of the **Model Context Protocol**.
 
 ---
 
@@ -67,65 +64,47 @@ The project has been refactored from a monolith into a distributed ecosystem:
     -e NEO4J_AUTH=neo4j/your_password neo4j:latest
     ```
 
-3. **Setup Virtual Environment**:
+3. **Setup Environment**:
 
     ```bash
     python3 -m venv .venv
-    source .venv/bin/python3
+    source .venv/bin/activate
     pip install -r requirements.txt
     ```
 
-4. **Configure**:
-    Update `config/settings.yaml` with your Neo4j credentials and Ollama endpoint.
-
-5. **Maintenance (Backups)**:
-    Keep your Connectome safe by exporting it to JSON:
-
-    ```bash
-    .venv/bin/python3 scripts/manage_db.py backup --file data/my_brain.json
-    ```
-
-6. **Run the System**:
-    To start the Gateway and all background workers safely (detached from the terminal):
+4. **Run the System**:
 
     ```bash
     ./scripts/start.sh
-    ```
-
-    To stop the system later:
-
-    ```bash
-    ./scripts/stop.sh
     ```
 
 ---
 
 ## 🔌 Integrations
 
-* **OpenClaw**: Use the provided Skill in `integrations/openclaw/` to connect OpenClaw to Mnemosyne.
-* **Open WebUI**: Use the Filter Function in `integrations/open_webui/` for seamless context injection.
-* **MCP Clients**: Point your MCP settings to `gateway/mcp_server.py`.
+* **OpenClaw**: Use the Skill in `integrations/openclaw/`.
+* **Open WebUI**: Use the Filter Function in `integrations/open_webui/`.
+* **MCP Clients**: Point your settings to `gateway/mcp_server.py`.
 
 ---
 
 ## 📄 Documentation
 
-For more deep dives, check the `project_documentation/` folder:
+For detailed guides, please visit our **[GitHub Wiki](https://github.com/gborgonovo/mnemosyne-gateway/wiki)**:
 
-* [Technical Specifications](file:///project_documentation/technical_specifications.md)
-* [User Guide](file:///project_documentation/user_guide.md)
-* [Modules Documentation](file:///project_documentation/modules_documentation.md)
-* [Project Roadmap](file:///project_documentation/roadmap%202026-02.md)
+* [Getting Started](https://github.com/gborgonovo/mnemosyne-gateway/wiki/User_Getting_Started)
+* [Architecture Overview](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Dev_Architecture_Overview)
+* [The Theory of the Liquid Graph](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_Liquid_Graph)
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please refer to the [Mnemosyne Project Document](file:///project_documentation/mnemosyne_project.md) for the long-term vision and architectural principles.
+We welcome contributions! Please refer to the **[Long-term Vision](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_Ghiandola_Semantica)** for architectural principles.
 
 ## ⚖️ License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Project licensed under the MIT License.
 
 ---
 
