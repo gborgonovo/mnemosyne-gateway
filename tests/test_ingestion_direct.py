@@ -2,7 +2,7 @@ import sys
 import os
 import yaml
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.getcwd())
 
 from core.graph_manager import GraphManager
 from core.attention import AttentionModel
@@ -10,7 +10,7 @@ from core.chunking import HeuristicChunker
 
 def run_test():
     # Load config
-    config_path = os.path.join(os.path.dirname(__file__), 'config', 'settings.yaml')
+    config_path = os.path.join(os.getcwd(), 'config', 'settings.yaml')
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 

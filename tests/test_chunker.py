@@ -2,7 +2,7 @@ import sys
 import os
 
 # Add parent dir to path to import core
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.getcwd())
 
 from core.chunking import HeuristicChunker
 

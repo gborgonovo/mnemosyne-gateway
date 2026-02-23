@@ -1,7 +1,7 @@
 # Mnemosyne - Technical Specifications
 
-**Version:** 1.1
-**Date:** 2026-02-21
+**Version:** 1.2
+**Date:** 2026-02-23
 **Status:** Implemented
 
 ---
@@ -20,7 +20,7 @@ Mnemosyne è ora un **Cognitive Middleware Headless**. Espone le sue capacità c
 - **API Engine**: FastAPI / Uvicorn (Distributed Gateway)
 - **Communication Protocol**: Mnemosyne-RPC (Event-driven over REST)
 - **Interface**: FastMCP (stdio transport) & HTTP REST
-- **Storage Pools**: Knowledge Scopes (Private, Internal, Public)
+- **Storage Pools**: Knowledge Scopes (Neo4j) & Physical Archive (Filesystem)
 
 ### 2.2 Functional Blocks
 
@@ -142,8 +142,10 @@ To ensure a non-blocking user experience and handle potential local LLM latencie
 Designed to handle large scale text data without overwhelming GPU resources.
 
 - **Heuristic Chunker**: Splits text based on structural cues (paragraphs, punctuation) and character limits, ensuring semantic boundaries are respected without using an LLM.
+- **Physical Archiving**: Original files are saved to `data/storage/documents/` during ingestion, creating a "source witness" for the graph knowledge.
 - **Selective Fuzzy Matcher**: Scans chunks for known entities/topics and creates explicit `MENTIONED_IN` links only for high-relevance matches.
 - **Background Processing**: Ingestion is handled via FastAPI `BackgroundTasks`, keeping the Gateway responsive.
+- **Deep Deletion**: The system synchronizes the removal of `Document` nodes from the graph with the physical removal of the file from disk, ensuring zero memory pollution.
 
 ### 3.6 Feedback & Relevance Tuning
 
@@ -194,6 +196,24 @@ Mnemosyne communicates via a structured JSON protocol to remain client-agnostic.
 }
 ```
 
+### Document Management Endpoints
+
+#### `GET /documents`
+
+Lists all documents in the Connectome, filtered by scope.
+
+- **Returns**: `{"documents": [{"name": "doc_title", "scope": "Public", "properties": {...}}]}`
+
+#### `GET /document/{name}/download`
+
+Downloads the original archived file from the physical storage.
+
+#### `DELETE /document/{name}`
+
+Performs a **deep delete**: removes the Document node, all its Chunks, and the physical file from disk.
+
+- **Params**: `scope` (default: "Public")
+
 ## 5. Implementation Constraints & Principles
 
 - **Hardware Agnostic**: The core logic (Graph + Attention) runs on CPU/RAM. The GPU is only required for occasional LLM inference.
@@ -202,7 +222,7 @@ Mnemosyne communicates via a structured JSON protocol to remain client-agnostic.
 
 ## 5. Directory Structure
 
-```
+```text
 /home/giorgio/Projects/Mnemosyne gateway/
 ├── config/             # YAML configuration (decay rates, thresholds)
 ├── core/               # Python modules for Graph and Attention

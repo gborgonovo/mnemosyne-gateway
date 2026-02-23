@@ -330,12 +330,13 @@ class GraphManager:
                     # Create attenuated relationship (backward weight will be handled by attention model)
                     self.add_edge(chunk_name, canonical_name, "MENTIONED_IN", weight=0.1)
 
-    def add_document(self, title: str, chunks: list[str], scope: str = "Public"):
+    def add_document(self, title: str, chunks: list[str], scope: str = "Public", file_path: str = None):
         """
         Ingests a document as a 'Document' node and links its 'DocumentChunk' children.
         Performs selective fuzzy matching contextually.
         """
-        doc_node = self.add_node(title, primary_label="Document", scope=scope)
+        props = {"file_path": file_path} if file_path else {}
+        doc_node = self.add_node(title, primary_label="Document", properties=props, scope=scope)
         alias_map = self.get_all_aliases(scopes=[scope])
         
         prev_chunk_name = None
@@ -404,4 +405,35 @@ class GraphManager:
         with self.driver.session() as session:
             results = session.run(query, days_ago=days_ago, limit=limit)
             return [dict(record) for record in results]
+
+    def delete_document(self, title: str, scope: str = "Public") -> bool:
+        """
+        Deep deletes a document node and all its associated DocumentChunk nodes.
+        """
+        query = f"""
+        MATCH (d:Document {{name: $title}})-[:CONTAINS]->(c:DocumentChunk)
+        WHERE d:{scope}
+        DETACH DELETE d, c
+        """
+        # Also handle documents with no chunks yet or where chunks were already deleted
+        cleanup_query = f"""
+        MATCH (d:Document {{name: $title}})
+        WHERE d:{scope}
+        DETACH DELETE d
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, title=title)
+                summary = result.consume()
+                nodes_deleted = summary.counters.nodes_deleted
+                
+                # Second pass for the document node itself if first query didn't match chunks
+                result2 = session.run(cleanup_query, title=title)
+                summary2 = result2.consume()
+                nodes_deleted += summary2.counters.nodes_deleted
+                
+                return nodes_deleted > 0
+        except Exception as e:
+            logger.error(f"GRAPH DELETE FAILED for '{title}': {e}")
+            raise e
 

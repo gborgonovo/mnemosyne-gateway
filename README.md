@@ -29,15 +29,17 @@ The project has been refactored from a monolith into a distributed ecosystem:
 
 ## 🛡️ Key Features
 
-* **Knowledge Scopes**: Multi-layered privacy pools (`Private`, `Internal`, `Public`). Knowledge is strictly isolated at the database level.
+* **Document Management**: Physical archiving of original sources in `data/storage/documents` with deep-deletion logic (syncing disk and graph).
+* **Cognitive Dashboard**: API-first Streamlit interface with dynamic visual Connectome and dedicated Document Manager.
+* **Knowledge Scopes**: Multi-layered privacy pools (`Private`, `Internal`, `Public`).
 * **Attention Model**: Nodes gain "heat" through interaction and lose it over time (decay), automatically highlighting what's relevant *now*.
 * **Intentionality**: Focuses on goals and tasks with differential attention decay, managed by the Attention Model and Gardening logic.
 * **Massive Ingestion**: Zero-LLM semantic chunking for large document repositories, integrated via the `/ingest` endpoint.
 * **Longitudinal Analysis**: Historical trend detection and recovery of dormant projects via background gardening.
-* **Explicit Memory Control**: Users (and AI agents) can explicitly update or delete node properties and relationships via MCP tools, moving beyond passive decay.
+* **Explicit Memory Control**: Users can explicitly update or delete node properties and relationships via MCP tools or Dashboard.
 * **Mnemosyne-RPC**: A lightweight protocol for registering external workers and plugins.
-* **MCP Integration**: Native Support for the **Model Context Protocol**, allowing any MCP-compatible agent (like Claude Desktop or OpenClaw) to use Mnemosyne as a specialized memory tool.
-* **LLM-Agnostic Core**: The central engine doesn't depend on LLMs, delegating all semantic tasks to dedicated workers.
+* **MCP Integration**: Native Support for the **Model Context Protocol**, allowing any MCP-compatible agent to use Mnemosyne.
+* **LLM-Agnostic Core**: The central engine doesn't depend on LLMs, delegating semantic tasks to workers.
 
 ---
 

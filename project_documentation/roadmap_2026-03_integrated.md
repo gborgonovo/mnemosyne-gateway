@@ -26,24 +26,11 @@ Questo documento rappresenta la visione consolidata di Mnemosyne, unendo i tragu
 - [x] **Heuristic Chunker**: Spezzettamento semantico zero-LLM con link strutturali.
 - [x] **Semantic Firewall**: Attenuazione delle relazioni documentali per ridurre il rumore.
 - [x] **Longitudinal Analysis**: Rilevamento di trend storici e progetti dormienti.
+- [x] **Cognitive Dashboard**: Portale web Streamlit (Chat, Visual Connectome, Document Manager).
+- [x] **Physical Archiving**: Memorizzazione locale delle fonti originali.
+- [x] **Deep Deletion**: Sincronizzazione dell'eliminazione tra disco e Connectome.
 
 ---
-
-## 🚀 Nuovi Orizzonti: Verso il "Cognitive Dashboard"
-
-L'obiettivo per i prossimi mesi è spostare il fulcro dell'interazione dal solo prompt a un'interfaccia di orchestrazione visuale e a una percezione passiva dell'ambiente.
-
-### **Fase 10: Cognitive Dashboard (L'Interfaccia di Orchestrazione)**
-
-Vogliamo un portale web centralizzato che agisca da "Cockpit" del tuo pensiero:
-
-- **Chat Evoluta**: Interfaccia di conversazione con *The Butler* con visualizzazione dei nodi attivati in tempo reale.
-- **Node Explorer**: Navigazione visuale del Connectome (heatmap del calore e relazioni).
-- **Control Center (Orchestrazione)**:
-  - Configurazione drag-and-drop dei nodi e dei vincoli.
-  - Monitoraggio e registrazione dei Workers (Tier 1, 2, 3).
-  - Toggles per attivare/disattivare analisi (Longitudinale, Intentionalità).
-- **Ingestion Portal**: Upload file facilitato con drag-and-drop e monitoraggio dello stato di chunking.
 
 ### **Fase 11: Cognitive Tiering & Orchestrazione Ibrida**
 

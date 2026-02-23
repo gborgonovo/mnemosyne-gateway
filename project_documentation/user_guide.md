@@ -39,8 +39,10 @@ Questa è la modalità principale. Usando lo **HTTP Bridge**, le tue app preferi
 
 Usa la dashboard per una gestione visiva del "cervello":
 
-- **Tab Connectome**: Per vedere quali argomenti sono "caldi".
-- **Tab Gardener**: Per pulire i duplicati e gestire le scadenze.
+- **Tab Chat**: Per interagire direttamente con The Butler.
+- **Tab Connectome**: Per esplorare graficamente le relazioni calde e stimolare nodi specifici.
+- **Tab Gardener**: Per la manutenzione del grafo e il merge dei duplicati.
+- **Tab Documents**: Per caricare nuovi file e gestire l'archivio fisico.
 
 ### C. Tramite CLI (Manuale)
 
@@ -54,14 +56,11 @@ python3 gateway/legacy_cli.py add "Nuova osservazione"
 
 ## 🕸️ 2. Esplorazione del Connectome (Tab "Connectome")
 
-In questa sezione puoi osservare e influenzare lo stato "termico" della tua memoria digitale. Il Connectome non è un archivio statico, ma un sistema dinamico che dà la priorità a ciò che è rilevante *ora*.
+In questa sezione puoi osservare e influenzare lo stato "termico" della tua memoria digitale tramite un **Grafo Dinamico**.
 
-- **Heatmap delle Attivazioni**: Visualizza i concetti attualmente nella tua "faci di attenzione". Le barre di progresso indicano quanto un argomento è "caldo":
-  - **Barra Piena**: Argomento focale. The Butler lo userà come contesto principale e genererà iniziative su questo tema.
-  - **Barra Media**: Argomento latente. The Butler lo "ricorda" ma non ci si sofferma a meno che tu non lo nomini.
-- **Stimolazione Manuale**: Se desideri che The Butler inizi a considerare un vecchio progetto, puoi selezionarlo e premere **Stimulate**. Questo inietta "calore" artificiale nel nodo, riportandolo al centro del discorso.
-- **Reset All Heat (Cold Start)**: Utile quando cambi drasticamente argomento (es. passi dal lavoro al tempo libero) e vuoi che The Butler smetta di suggerire temi della sessione precedente.
-- **🌫️ Forgotten Topics (Dormant)**: Qui finiscono i concetti che non vengono nominati o stimolati da tempo. Non sono cancellati, ma sono in uno stato di "sonno profondo". Possono essere risvegliati in qualsiasi momento semplicemente nominandoli in chat.
+- **Grafo Visuale (Plotly)**: Digita il nome di un concetto nella barra di ricerca per centrare il grafo. Vedrai i nodi correlati e la forza dei loro legami.
+- **Stimolazione Manuale**: Se desideri che The Butler inizi a considerare un vecchio progetto, puoi stimolare i nodi o semplicemente parlarne in chat. Il "calore" (attivazione) si propagherà automaticamente ai concetti vicini.
+- **Focalizzazione**: Mnemosyne dà la priorità a ciò che è rilevante *ora*. Gli argomenti non nominati scivolano gradualmente nel "dimenticatoio" (dormancy) tramite il decadimento temporale.
 
 ---
 
@@ -193,29 +192,30 @@ Se un'idea nata in `Private` è pronta per essere condivisa, puoi usare l'endpoi
 
 ---
 
-## 📂 7. Ingestione Massiva (Massive Ingestion)
+📂 7. Document Manager & Ingestione Massiva
 
-Per caricare grandi volumi di testo (documenti, repository, archivi) senza sovraccaricare il sistema, Mnemosyne offre un'interfaccia di **Ingestione Euristica**.
+Per gestire grandi volumi di testo (documenti, repository, archivi), Mnemosyne offre un **Document Manager** integrato nella Dashboard.
 
-### Come funziona
+### Caricamento e Archiviazione
 
-A differenza delle normali "Osservazioni" che vengono elaborate dall'LLM, i documenti caricati tramite l'ingestione massiva vengono:
+Nel tab **Documents**, puoi trascinare file `.txt` o `.md`.
 
-1. **Spezzettati (Chunking)**: Il testo viene diviso in frammenti logici (paragrafi) basati sulla struttura, non su modelli statistici.
+- **Archiviazione Fisica**: A differenza delle semplici osservazioni, i documenti vengono salvati stabilmente in `data/storage/documents/`.
+- **Witnessing**: Il file fisico funge da "testimone" per la conoscenza estratta nel grafo. Se il file viene rimosso, Mnemosyne perde la traccia della fonte originale.
+
+### Deep Delete (Eliminazione Sicura)
+
+Se decidi di rimuovere un documento dall'archivio:
+
+1. Clicca su **Elimina** accanto al nome del file nella Dashboard.
+2. Mnemosyne rimuoverà il file dal disco.
+3. Verranno eliminati dal Connectome il nodo `Document` e tutti i relativi `DocumentChunk`, pulendo completamente la memoria da quell'apporto informativo.
+
+### Come funziona l'Ingestione
+
+1. **Spezzettati (Chunking)**: Il testo viene diviso in frammenti logici (paragrafi).
 2. **Scansionati**: Il sistema cerca riferimenti a concetti già presenti nel tuo Connectome.
-3. **Attenuati**: I collegamenti creati sono "silenziosi". Non attivano il Butler a meno che tu non ne faccia esplicita richiesta, evitando il rumore di fondo.
-
-### Caricare un documento via API
-
-Puoi caricare un file di testo (`.txt`, `.md`) usando l'endpoint `/ingest`:
-
-```bash
-curl -X POST "http://localhost:4001/ingest?scope=Internal" \
-     -H "Content-Type: multipart/form-data" \
-     -F "file=@il_mio_documento.txt"
-```
-
-Il sistema risponderà immediatamente e processerà il file in **background**. Puoi monitorare l'avanzamento dai log del Gateway.
+3. **Background**: L'elaborazione avviene in sottofondo per non bloccare la tua operatività.
 
 ## 🌫️ 5. Focalizzazione e Oblio: Cambiare Argomento
 

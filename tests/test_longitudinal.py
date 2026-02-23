@@ -3,7 +3,7 @@ import os
 import yaml
 from pprint import pprint
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.getcwd())
 
 from core.graph_manager import GraphManager
 

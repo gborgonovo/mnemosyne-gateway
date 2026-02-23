@@ -5,6 +5,8 @@ import uvicorn
 import requests
 import threading
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File
+from fastapi.responses import FileResponse
+import shutil
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
@@ -184,12 +186,12 @@ def add_observation(obs: Observation, scope: Optional[str] = "Public"):
         "job_id": job_id
     }
 
-def background_ingest(title: str, text: str, scope: str):
+def background_ingest(title: str, text: str, scope: str, file_path: str = None):
     """Background task for heavy document ingestion."""
     try:
         logger.info(f"INGESTION: Starting background ingestion for '{title}'...")
         chunks = chunker.chunk_text(text)
-        gm.add_document(title, chunks, scope=scope)
+        gm.add_document(title, chunks, scope=scope, file_path=file_path)
         logger.info(f"INGESTION: Complete. '{title}' processed into {len(chunks)} chunks.")
     except Exception as e:
         logger.error(f"INGESTION FAILED for '{title}': {e}")
@@ -202,6 +204,7 @@ async def ingest_document(
 ):
     """
     Ingests a massive document (txt, md) bypassing the LLM via Heuristic Chanking.
+    Archives the original file in data/storage/documents.
     """
     content = await file.read()
     try:
@@ -210,14 +213,83 @@ async def ingest_document(
          raise HTTPException(status_code=400, detail="Only UTF-8 text files are supported for now.")
          
     title = file.filename
+    storage_path = os.path.join(os.getcwd(), 'data', 'storage', 'documents', title)
+    
+    # Save physical copy
+    try:
+        with open(storage_path, "wb") as buffer:
+            buffer.write(content)
+        logger.info(f"ARCHIVE: File saved to {storage_path}")
+    except Exception as e:
+        logger.error(f"ARCHIVE FAILED for {title}: {e}")
+        # We continue ingestion even if archiving fails, but log it
+    
     # Queue the background task to avoid blocking the Gateway
-    background_tasks.add_task(background_ingest, title, text, scope)
+    background_tasks.add_task(background_ingest, title, text, scope, storage_path)
     
     return {
         "status": "processing",
-        "message": f"Document '{title}' queued for massive ingestion in background.",
-        "scope": scope
+        "message": f"Document '{title}' queued for massive ingestion and archived.",
+        "scope": scope,
+        "archive_path": storage_path
     }
+
+@app.get("/documents")
+def list_documents(scopes: Optional[str] = "Public"):
+    """Lists all Document nodes in the graph."""
+    scope_list = scopes.split(",") if scopes else ["Public"]
+    query = """
+    MATCH (d:Document)
+    WHERE """ + gm._get_scope_filter(scope_list, var_name="d") + """
+    RETURN d.name as name, labels(d) as labels, properties(d) as props
+    """
+    documents = []
+    with gm.driver.session() as session:
+        result = session.run(query)
+        for record in result:
+            documents.append({
+                "name": record["name"],
+                "scope": [l for l in record["labels"] if l in gm.scope_hierarchy][0],
+                "properties": record["props"]
+            })
+    return {"documents": documents}
+
+@app.get("/document/{name}/download")
+def download_document(name: str):
+    """Downloads the original archived file."""
+    storage_path = os.path.join(os.getcwd(), 'data', 'storage', 'documents', name)
+    if not os.path.exists(storage_path):
+        raise HTTPException(status_code=404, detail="Original file not found in archive.")
+    
+    return FileResponse(path=storage_path, filename=name, media_type='application/octet-stream')
+
+@app.delete("/document/{name}")
+def delete_document(name: str, scope: str = "Public"):
+    """
+    Deletes a document from the graph and the physical storage.
+    This is a 'Deep Delete' that removes all associated chunks.
+    """
+    # 1. Remove from graph
+    try:
+        # We'll add a deep_delete_document to GraphManager
+        success = gm.delete_document(name, scope=scope)
+        if not success:
+             logger.warning(f"DELETE: Document '{name}' not found in graph for scope '{scope}'")
+    except Exception as e:
+        logger.error(f"DELETE GRAPH FAILED for {name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # 2. Remove from storage
+    storage_path = os.path.join(os.getcwd(), 'data', 'storage', 'documents', name)
+    if os.path.exists(storage_path):
+        try:
+            os.remove(storage_path)
+            logger.info(f"DELETE STORAGE: Removed {storage_path}")
+        except Exception as e:
+            logger.error(f"DELETE STORAGE FAILED for {name}: {e}")
+
+    return {"status": "success", "message": f"Document '{name}' and its chunks have been removed."}
+
 
 @app.post("/share")
 def share_knowledge(node_name: str, from_scope: str, to_scope: str):
