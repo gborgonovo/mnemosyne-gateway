@@ -54,7 +54,7 @@ The project has been refactored from a monolith into a distributed ecosystem:
 1. **Clone the repository**:
 
     ```bash
-    git clone https://github.com/your-username/mnemosyne-gateway.git
+    git clone https://github.com/gborgonovo/mnemosyne-gateway.git
     cd mnemosyne-gateway
     ```
 
