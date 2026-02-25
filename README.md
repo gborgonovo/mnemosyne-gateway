@@ -100,7 +100,7 @@ For detailed guides, please visit our **[GitHub Wiki](https://github.com/gborgon
 
 ## 🤝 Contributing
 
-We welcome contributions! Please refer to the **[Long-term Vision](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_Ghiandola_Semantica)** for architectural principles.
+We welcome contributions! Please refer to the **[Long-term Vision](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_Semantic_Gland)** for architectural principles.
 
 ## ⚖️ License
 
