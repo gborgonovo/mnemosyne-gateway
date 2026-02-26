@@ -1,0 +1,16 @@
+# This file is used to configure API keys for the Mnemosyne gateway.
+# To enable authentication, rename this file to "api_keys.yaml" and restart the gateway.
+# Keys are defined in the format:
+# "YOUR_API_KEY":
+#   - List
+#   - Of
+#   - Allowed
+#   - Scopes
+
+"mnm_sk_master_12345":
+  - Public
+  - Internal
+  - Private
+
+"mnm_sk_public_only_67890":
+  - Public

@@ -11,6 +11,7 @@ db/
 
 # Secrets and Configuration
 config/settings.yaml
+config/api_keys.yaml
 .env
 project_documentation/mnemosyne_project.md
 

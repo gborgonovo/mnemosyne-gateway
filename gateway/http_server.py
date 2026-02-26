@@ -4,7 +4,7 @@ import yaml
 import uvicorn
 import requests
 import threading
-from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
 from fastapi.responses import FileResponse
 import shutil
 from pydantic import BaseModel
@@ -50,6 +50,39 @@ def load_config():
         return yaml.safe_load(f)
 
 config = load_config()
+
+# Load API Keys
+API_KEYS_FILE = os.path.join(os.path.dirname(__file__), '..', 'config', 'api_keys.yaml')
+api_keys = {}
+if os.path.exists(API_KEYS_FILE):
+    with open(API_KEYS_FILE, 'r') as f:
+        api_keys = yaml.safe_load(f) or {}
+    logger.info(f"Loaded {len(api_keys)} API keys for authentication.")
+else:
+    logger.warning("No api_keys.yaml found. Gateway running WITHOUT authentication.")
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)) -> List[str]:
+    """
+    Dependency to check the API Key against the configured api_keys.yaml.
+    If no config exists, it returns a wildcard to allow any scope.
+    If it exists, it expects the header X-API-Key to be valid.
+    """
+    if not api_keys:
+        return ["*"] # Wildcard for 'allow all' when no auth is configured
+        
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="X-API-Key header missing")
+        
+    if x_api_key not in api_keys:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+        
+    return api_keys[x_api_key]
+
+def intersect_scopes(requested: str, allowed: List[str]) -> List[str]:
+    requested_list = requested.split(",") if requested else ["Public"]
+    if "*" in allowed:
+        return requested_list
+    return list(set(requested_list) & set(allowed))
 
 # Initialize Core Components
 try:
@@ -146,18 +179,21 @@ def health_check():
     return {"status": "ok", "service": "mnemosyne-gateway"}
 
 @app.get("/search")
-def search(q: str, scopes: Optional[str] = "Public"):
-    scope_list = scopes.split(",") if scopes else ["Public"]
-    node = gm.get_node(q, scopes=scope_list)
+def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
+    node = gm.get_node(q, scopes=actual_scopes)
     if not node:
-        raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {scope_list}.")
+        raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
     
     # Energize the node to trigger initiatives/propagation
     am.propagate_activation(q, initial_boost=1.0)
     
     props = {k: v for k, v in dict(node).items() if k not in ['name', 'labels']}
     
-    neighbors = gm.get_neighbors(q, scopes=scope_list)
+    neighbors = gm.get_neighbors(q, scopes=actual_scopes)
     related = []
     if neighbors:
         limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
@@ -171,13 +207,18 @@ def search(q: str, scopes: Optional[str] = "Public"):
     }
 
 @app.post("/add")
-def add_observation(obs: Observation, scope: Optional[str] = "Public"):
-    logger.info(f"API: Adding observation to scope {scope}")
+def add_observation(obs: Observation, scope: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scope, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+    actual_scope = actual_scopes[0] # Using the first authorized scope
+
+    logger.info(f"API: Adding observation to scope {actual_scope}")
     # 1. Immediate step: Create the observation node
-    obs_name = pm.create_observation(obs.content, scope=scope)
+    obs_name = pm.create_observation(obs.content, scope=actual_scope)
     
     # 2. Background step: Enqueue for entity extraction
-    job_id = kq.enqueue(obs.content, obs_name, scope=scope)
+    job_id = kq.enqueue(obs.content, obs_name, scope=actual_scope)
     
     return {
         "status": "success", 
@@ -200,8 +241,13 @@ def background_ingest(title: str, text: str, scope: str, file_path: str = None):
 async def ingest_document(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...), 
-    scope: Optional[str] = "Public"
+    scope: Optional[str] = "Public",
+    allowed_scopes: List[str] = Depends(verify_api_key)
 ):
+    actual_scopes = intersect_scopes(scope, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+    actual_scope = actual_scopes[0]
     """
     Ingests a massive document (txt, md) bypassing the LLM via Heuristic Chanking.
     Archives the original file in data/storage/documents.
@@ -225,22 +271,25 @@ async def ingest_document(
         # We continue ingestion even if archiving fails, but log it
     
     # Queue the background task to avoid blocking the Gateway
-    background_tasks.add_task(background_ingest, title, text, scope, storage_path)
+    background_tasks.add_task(background_ingest, title, text, actual_scope, storage_path)
     
     return {
         "status": "processing",
         "message": f"Document '{title}' queued for massive ingestion and archived.",
-        "scope": scope,
+        "scope": actual_scope,
         "archive_path": storage_path
     }
 
 @app.get("/documents")
-def list_documents(scopes: Optional[str] = "Public"):
+def list_documents(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
     """Lists all Document nodes in the graph."""
-    scope_list = scopes.split(",") if scopes else ["Public"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
     query = """
     MATCH (d:Document)
-    WHERE """ + gm._get_scope_filter(scope_list, var_name="d") + """
+    WHERE """ + gm._get_scope_filter(actual_scopes, var_name="d") + """
     RETURN d.name as name, labels(d) as labels, properties(d) as props
     """
     documents = []
@@ -264,17 +313,22 @@ def download_document(name: str):
     return FileResponse(path=storage_path, filename=name, media_type='application/octet-stream')
 
 @app.delete("/document/{name}")
-def delete_document(name: str, scope: str = "Public"):
+def delete_document(name: str, scope: str = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
     """
     Deletes a document from the graph and the physical storage.
     This is a 'Deep Delete' that removes all associated chunks.
     """
+    actual_scopes = intersect_scopes(scope, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+    actual_scope = actual_scopes[0]
+    
     # 1. Remove from graph
     try:
         # We'll add a deep_delete_document to GraphManager
-        success = gm.delete_document(name, scope=scope)
+        success = gm.delete_document(name, scope=actual_scope)
         if not success:
-             logger.warning(f"DELETE: Document '{name}' not found in graph for scope '{scope}'")
+             logger.warning(f"DELETE: Document '{name}' not found in graph for scope '{actual_scope}'")
     except Exception as e:
         logger.error(f"DELETE GRAPH FAILED for {name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -292,10 +346,14 @@ def delete_document(name: str, scope: str = "Public"):
 
 
 @app.post("/share")
-def share_knowledge(node_name: str, from_scope: str, to_scope: str):
+def share_knowledge(node_name: str, from_scope: str, to_scope: str, allowed_scopes: List[str] = Depends(verify_api_key)):
     """
     Explicitly moves/links knowledge between scopes.
     """
+    if "*" not in allowed_scopes:
+        if from_scope not in allowed_scopes or to_scope not in allowed_scopes:
+            raise HTTPException(status_code=403, detail="Not authorized to share between requested scopes")
+            
     node = gm.get_node(node_name, scopes=[from_scope])
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_name}' not found in scope '{from_scope}'")
@@ -315,14 +373,17 @@ def share_knowledge(node_name: str, from_scope: str, to_scope: str):
     return {"status": "shared", "node": node_name, "new_scope": to_scope}
 
 @app.get("/briefing")
-def get_briefing(scopes: Optional[str] = "Public"):
-    scope_list = scopes.split(",") if scopes else ["Public"]
+def get_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
     # 1. Active Topics
-    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=scope_list)
+    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=actual_scopes)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
 
 @app.get("/briefing/longitudinal")
-def get_longitudinal_briefing(scopes: Optional[str] = "Public"):
+def get_longitudinal_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
     """
     Generates a historical briefing of dormant projects and temporal trends.
     """
@@ -330,11 +391,13 @@ def get_longitudinal_briefing(scopes: Optional[str] = "Public"):
     if not long_cfg.get('enabled', True):
         raise HTTPException(status_code=403, detail="Longitudinal analysis is disabled in configuration.")
         
-    scope_list = scopes.split(",") if scopes else ["Public"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
     
     threshold = long_cfg.get('dormancy_threshold_days', 30)
-    dormant_projects = gm.get_dormant_projects(threshold_days=threshold, limit=5, scopes=scope_list)
-    recent_trends = gm.get_temporal_trends(days_ago=7, limit=5, scopes=scope_list)
+    dormant_projects = gm.get_dormant_projects(threshold_days=threshold, limit=5, scopes=actual_scopes)
+    recent_trends = gm.get_temporal_trends(days_ago=7, limit=5, scopes=actual_scopes)
     
     return {
         "status": "success",
@@ -344,10 +407,10 @@ def get_longitudinal_briefing(scopes: Optional[str] = "Public"):
     }
     
     # 2. Proactive Context (The Butler)
-    proactive_context = ie.get_proactive_context(scopes=scope_list) 
+    proactive_context = ie.get_proactive_context(scopes=actual_scopes) 
     
     # 3. Suggestions (Mix local and plugin-based)
-    local_suggestions = ie.generate_initiatives(scopes=scope_list)
+    local_suggestions = ie.generate_initiatives(scopes=actual_scopes)
     combined_suggestions = [s['message'] for s in local_suggestions] + plugin_suggestions
     
     return {
@@ -449,9 +512,11 @@ def get_status():
     return status
         
 @app.get("/stats")
-def get_stats(scopes: Optional[str] = "Public"):
-    scope_list = scopes.split(",") if scopes else ["Public"]
-    return gm.get_stats(scopes=scope_list)
+def get_stats(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+    return gm.get_stats(scopes=actual_scopes)
 
 @app.get("/history")
 def get_history():
