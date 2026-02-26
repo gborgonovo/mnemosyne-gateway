@@ -178,6 +178,87 @@ class SearchResponse(BaseModel):
 def health_check():
     return {"status": "ok", "service": "mnemosyne-gateway"}
 
+# --- STANDARD REST API (Nodes CRUD) ---
+
+@app.get("/nodes")
+def list_nodes(type: Optional[str] = None, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+    
+    nodes_raw = gm.get_all_nodes(label=type, scopes=actual_scopes)
+    data = []
+    for n in nodes_raw:
+        item = {
+            "name": n["name"],
+            "slug": n["name"],
+            "labels": n["labels"],
+            "type": type if type else (n["labels"][0] if n["labels"] else "Node"),
+            "scope": actual_scopes[0] if actual_scopes else "Public",
+            "properties": n["props"]
+        }
+        for f in ["title", "description", "summary", "ai_context", "cover_image_id"]:
+             if f in n["props"]:
+                  item[f] = n["props"][f]
+        data.append(item)
+    return {"data": data}
+
+@app.get("/nodes/{name}")
+def get_node(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
+    node = gm.get_node(name, scopes=actual_scopes)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
+        
+    n_dict = dict(node)
+    props = {k: v for k, v in n_dict.items() if k not in ['name', 'labels']}
+    item = {
+        "name": n_dict.get("name"),
+        "slug": n_dict.get("name"),
+        "properties": props
+    }
+    for f in ["title", "description", "summary", "ai_context", "type", "cover_image_id"]:
+         if f in props:
+              item[f] = props[f]
+              
+    return {"data": item}
+
+@app.put("/nodes/{name}")
+def upsert_node(name: str, payload: Dict[str, Any] = Body(...), scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
+    primary_label = payload.get("type", "Node")
+    props = payload.get("properties", {})
+    
+    # Flatten specific root fields into properties for graph storage
+    for f in ["title", "description", "summary", "ai_context", "cover_image_id"]:
+        if f in payload and payload[f] is not None:
+            props[f] = payload[f]
+            
+    tags = payload.get("tags", [])
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    
+    node = gm.add_node(name, primary_label=primary_label, tags=tags, properties=props, scope=actual_scopes[0])
+    return {"status": "success", "data": dict(node)}
+
+@app.delete("/nodes/{name}")
+def delete_node_api(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
+    success = gm.delete_node(name, scopes=actual_scopes)
+    if not success:
+         raise HTTPException(status_code=404, detail=f"Node '{name}' not found or already deleted")
+         
+    return {"status": "success", "message": f"Node '{name}' deleted"}
+
 @app.get("/search")
 def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, allowed_scopes)

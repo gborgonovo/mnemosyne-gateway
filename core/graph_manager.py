@@ -136,9 +136,19 @@ class GraphManager:
             record = result.single()
             return record[0] if record else None
 
-    def get_all_nodes(self, scopes: list[str] = None):
+    def get_all_nodes(self, label: str = None, scopes: list[str] = None):
         scope_clause = self._get_scope_filter(scopes)
-        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        conditions = []
+        if label:
+            conditions.append(f"n:{label}")
+        if scope_clause:
+            conditions.append(scope_clause)
+            
+        where_clause = ""
+        if conditions:
+             where_clause = "WHERE " + " AND ".join(conditions)
+             
         query = f"MATCH (n) {where_clause} RETURN n.name as name, labels(n) as labels, n.activation_level as activation, properties(n) as props"
         with self.driver.session() as session:
             return [dict(record) for record in session.run(query)]
