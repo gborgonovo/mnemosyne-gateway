@@ -136,6 +136,56 @@ class GraphManager:
             record = result.single()
             return record[0] if record else None
 
+    def create_fulltext_index(self):
+        """
+        Ensures a full-text search index is available for semantic fallback.
+        """
+        query = (
+            "CREATE FULLTEXT INDEX mnemosyne_text_idx IF NOT EXISTS "
+            "FOR (n:Node) ON EACH [n.name, n.title, n.description, n.summary, n.ai_context]"
+        )
+        try:
+            with self.driver.session() as session:
+                session.run(query)
+                logger.info("Full-text index 'mnemosyne_text_idx' checked/created.")
+        except Exception as e:
+            logger.warning(f"Could not create full-text index: {e}")
+
+    def search_nodes_fulltext(self, search_text: str, scopes: list[str] = None, limit: int = 5):
+        """
+        Searches nodes using the Neo4j full-text index 'mnemosyne_text_idx'.
+        Applies basic fuzzy matching by appending '~' to search terms.
+        """
+        scope_clause = self._get_scope_filter(scopes, var_name="node")
+        
+        # very basic sanitization: remove lucene special characters
+        safe_text = ''.join(c for c in search_text if c.isalnum() or c.isspace())
+        if not safe_text.strip():
+            return []
+            
+        # create lucene query: "word1~ word2~"
+        tokens = safe_text.split()
+        lucene_query = " OR ".join([f"{t}~" for t in tokens if len(t) > 2])
+        if not lucene_query:
+            lucene_query = safe_text
+            
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        query = (
+            "CALL db.index.fulltext.queryNodes('mnemosyne_text_idx', $lucene_query) YIELD node, score "
+            f"{where_clause} "
+            "RETURN node, score "
+            "ORDER BY score DESC LIMIT toInteger($limit)"
+        )
+        
+        with self.driver.session() as session:
+            try:
+                result = session.run(query, lucene_query=lucene_query, limit=limit)
+                return [dict(record) for record in result]
+            except Exception as e:
+                logger.error(f"Full-text search failed: {e}")
+                return []
+
     def get_all_nodes(self, label: str = None, scopes: list[str] = None):
         scope_clause = self._get_scope_filter(scopes)
         

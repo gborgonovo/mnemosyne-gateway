@@ -94,6 +94,9 @@ try:
         config['graph']['user'], 
         config['graph']['password']
     )
+    # Ensure Full-Text index is ready for Semantic Search
+    gm.create_fulltext_index()
+    
     llm = get_llm_provider(config)
     am = AttentionModel(gm, config=config.get('attention', {}), event_bus=eb)
     pm = PerceptionModule(gm, eb, am)
@@ -266,15 +269,26 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
     node = gm.get_node(q, scopes=actual_scopes)
-    if not node:
-        raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
+    if node:
+        # EXACT MATCH
+        n_dict = dict(node)
+        name = n_dict['name']
+        props = {k: v for k, v in n_dict.items() if k not in ['name', 'labels']}
+    else:
+        # SEMANTIC FALLBACK (Full-Text)
+        results = gm.search_nodes_fulltext(q, scopes=actual_scopes, limit=1)
+        if not results:
+            raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
+            
+        best_match = results[0]['node']
+        name = best_match['name']
+        props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
+        logger.info(f"API Search: Used full-text fallback for '{q}' -> found '{name}' (Score: {results[0]['score']})")
     
     # Energize the node to trigger initiatives/propagation
-    am.propagate_activation(q, initial_boost=1.0)
+    am.propagate_activation(name, initial_boost=1.0)
     
-    props = {k: v for k, v in dict(node).items() if k not in ['name', 'labels']}
-    
-    neighbors = gm.get_neighbors(q, scopes=actual_scopes)
+    neighbors = gm.get_neighbors(name, scopes=actual_scopes)
     related = []
     if neighbors:
         limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
@@ -282,7 +296,7 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
             related.append(f"{n['node']['name']} ({n['rel_type']})")
             
     return {
-        "name": node['name'],
+        "name": name,
         "properties": props,
         "related": related
     }
