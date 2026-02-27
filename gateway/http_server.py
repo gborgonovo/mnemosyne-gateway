@@ -196,15 +196,20 @@ def list_nodes(type: Optional[str] = None, scopes: Optional[str] = "Public", all
     nodes_raw = gm.get_all_nodes(label=type, scopes=actual_scopes)
     data = []
     for n in nodes_raw:
+        # Determine primary type (the label that isn't 'Node', 'Public', 'Internal', or 'Private')
+        exclusion_list = ["Node", "Public", "Internal", "Private"]
+        type_labels = [l for l in n["labels"] if l not in exclusion_list]
+        primary_type = type_labels[0] if type_labels else (n["labels"][0] if n["labels"] else "Node")
+        
         item = {
             "name": n["name"],
             "slug": n["name"],
             "labels": n["labels"],
-            "type": type if type else (n["labels"][0] if n["labels"] else "Node"),
-            "scope": actual_scopes[0] if actual_scopes else "Public",
+            "type": primary_type,
+            "scope": [l for l in n["labels"] if l in gm.scope_hierarchy][0] if any(l in gm.scope_hierarchy for l in n["labels"]) else "Public",
             "properties": n["props"]
         }
-        for f in ["title", "description", "summary", "ai_context", "cover_image_id"]:
+        for f in ["title", "description", "summary", "ai_context", "cover_image_id", "type"]:
              if f in n["props"]:
                   item[f] = n["props"][f]
         data.append(item)
@@ -222,12 +227,21 @@ def get_node(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[s
         
     n_dict = dict(node)
     props = {k: v for k, v in n_dict.items() if k not in ['name', 'labels']}
+    
+    # Extract labels if available in the node object
+    labels = list(node.labels) if hasattr(node, 'labels') else []
+    exclusion_list = ["Node", "Public", "Internal", "Private"]
+    type_labels = [l for l in labels if l not in exclusion_list]
+    primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
+
     item = {
         "name": n_dict.get("name"),
         "slug": n_dict.get("name"),
+        "type": primary_type,
+        "labels": labels,
         "properties": props
     }
-    for f in ["title", "description", "summary", "ai_context", "type", "cover_image_id"]:
+    for f in ["title", "description", "summary", "ai_context", "cover_image_id", "type"]:
          if f in props:
               item[f] = props[f]
               
@@ -287,7 +301,21 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         best_match = results[0]['node']
         name = best_match['name']
         props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
+        
+        # Determine type from labels
+        labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
+        exclusion_list = ["Node", "Public", "Internal", "Private"]
+        type_labels = [l for l in labels if l not in exclusion_list]
+        primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
+        
         logger.info(f"API Search: Used full-text fallback for '{q}' -> found '{name}' (Score: {results[0]['score']})")
+    
+    # Determine type for exact match if needed (exact match fallback)
+    if not 'primary_type' in locals():
+         labels = list(node.labels) if hasattr(node, 'labels') else []
+         exclusion_list = ["Node", "Public", "Internal", "Private"]
+         type_labels = [l for l in labels if l not in exclusion_list]
+         primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
     
     # Energize the node to trigger initiatives/propagation
     am.propagate_activation(name, initial_boost=1.0)
@@ -301,6 +329,7 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
             
     return {
         "name": name,
+        "type": primary_type,
         "properties": props,
         "related": related
     }
