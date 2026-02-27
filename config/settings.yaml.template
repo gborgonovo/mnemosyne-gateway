@@ -19,15 +19,20 @@ initiative:
   explanation_threshold: 0.5
 
 llm:
-  mode: "ollama"
+  mode: "ollama"              # Options: "mock", "ollama", "openai"
   model_name: "qwen2.5-coder:7b-instruct-q5_K_M"
   display_name: "The Butler (Mnemosyne)"
+  
+  # --- Semantic Search Configuration ---
+  enable_embeddings: false    # Set to true to enable Vector Search (Layer 2)
+  embedding_model: "nomic-embed-text" 
+  
   ollama_url: "http://127.0.0.1:11434"
-  api_key: ""
+  api_key: ""                 # Required only for mode: openai
   
   prompts:
     butler: |
-      [Insert your prompt here]
+      [Insert your heavy system prompt for the Butler here]
 
 gardener:
   interval_seconds: 3600
@@ -35,4 +40,13 @@ gardener:
 
 gateway:
   host: "0.0.0.0"
-  port: 8000
+  port: 4001
+
+retrieval:
+  neighbors_limit: 5            
+  search_neighbors_limit: 10     
+  observation_limit: 3           
+  observation_text_limit: 150    
+  impact_depth: 3                
+  initiative_limit: 3            
+  history_limit: 10
