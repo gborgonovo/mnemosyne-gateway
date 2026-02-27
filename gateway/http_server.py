@@ -9,6 +9,10 @@ from fastapi.responses import FileResponse
 import shutil
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+from dotenv import load_dotenv
+
+# Load environmental variables from .env
+load_dotenv()
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

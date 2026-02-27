@@ -3,6 +3,10 @@ import sys
 import logging
 import yaml
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+# Load environmental variables
+load_dotenv()
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
