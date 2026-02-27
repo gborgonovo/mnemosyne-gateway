@@ -25,6 +25,11 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
+    def embed(self, text: str) -> list[float]:
+        """Generates an embedding vector for the given text."""
+        pass
+
+    @abstractmethod
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
         """Determines if two entity names refer to the same semantic concept."""
         pass
@@ -54,6 +59,10 @@ class MockLLM(LLMProvider):
             if w[0].isupper() and len(w) > 2:
                 entities.append({"name": w.strip(".,;:"), "type": "Topic"})
         return entities
+
+    def embed(self, text: str) -> list[float]:
+        # Return a deterministic "mock" vector based on text length
+        return [float(len(text))] * 16
 
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
         # Mock: just check if they are very similar or lowercase matches
@@ -152,6 +161,18 @@ class OpenAILLM(LLMProvider):
             return entities
         except Exception as e:
             logger.error(f"LLM Extraction error: {e}")
+            return []
+
+    def embed(self, text: str) -> list[float]:
+        try:
+            model = self.config.get("llm", {}).get("embedding_model", "text-embedding-3-small")
+            response = self.client.embeddings.create(
+                input=[text],
+                model=model
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.error(f"OpenAI Embedding error: {e}")
             return []
 
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
@@ -269,6 +290,18 @@ class OllamaLLM(LLMProvider):
             logger.error(f"Ollama Extraction error: {e}")
             return []
 
+    def embed(self, text: str) -> list[float]:
+        model = self.config.get("llm", {}).get("embedding_model", "nomic-embed-text")
+        data = {
+            "model": model,
+            "prompt": text
+        }
+        try:
+            res = self._call_ollama("embeddings", data)
+            return res.get("embedding", [])
+        except Exception as e:
+            logger.error(f"Ollama Embedding error: {e}")
+            return []
 
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
         prompt = f"Are the concepts '{entity_a}' and '{entity_b}' referring to the same thing in a knowledge graph? Answer only YES or NO."

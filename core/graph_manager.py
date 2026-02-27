@@ -497,3 +497,38 @@ class GraphManager:
             logger.error(f"GRAPH DELETE FAILED for '{title}': {e}")
             raise e
 
+    def get_nodes_missing_embeddings(self, limit: int = 10, scopes: list[str] = None) -> list[dict]:
+        """
+        Retrieves nodes that are eligible for vector search but don't have an embedding yet.
+        """
+        scope_clause = self._get_scope_filter(scopes)
+        where_scope = f"AND {scope_clause}" if scope_clause else ""
+        
+        # We target :Node and :Lab (which are the main entity types)
+        # We avoid :Observation as they are raw input, usually entities are extracted from them.
+        query = f"""
+        MATCH (n:Node)
+        WHERE NOT n:Observation
+        AND n.embedding IS NULL
+        {where_scope}
+        RETURN n.name as name, labels(n) as labels, 
+               coalesce(n.name, '') + ' ' + coalesce(n.title, '') + ' ' + coalesce(n.description, '') + ' ' + coalesce(n.summary, '') + ' ' + coalesce(n.ai_context, '') as text
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            results = session.run(query, limit=limit)
+            return [dict(record) for record in results]
+
+    def update_node_embedding(self, name: str, embedding: list[float]) -> bool:
+        """
+        Saves the embedding vector to a specific node.
+        """
+        query = """
+        MATCH (n:Node {name: $name})
+        SET n.embedding = $embedding
+        RETURN n
+        """
+        with self.driver.session() as session:
+            result = session.run(query, name=name, embedding=embedding)
+            return result.single() is not None
+

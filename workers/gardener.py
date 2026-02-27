@@ -35,6 +35,8 @@ class Gardener:
         self.find_and_mark_duplicates()
         self.check_deadlines()
         self.check_dormant_projects()
+        # New: Backfill embeddings if enabled
+        self.backfill_embeddings()
         logger.info("Gardener finished cycle.")
 
     def check_dormant_projects(self):
@@ -192,3 +194,38 @@ class Gardener:
              return self.llm.compare_entities(a, b)
 
         return False
+
+    def backfill_embeddings(self):
+        """
+        Periodically checks for nodes without embeddings and generates them in small batches.
+        Only runs if enable_embeddings is true in the config.
+        """
+        llm_cfg = getattr(self, 'config', {}).get('llm', {})
+        if not llm_cfg.get('enable_embeddings', False):
+            return
+
+        logger.info("Gardener checking for missing embeddings (Backfill)...")
+        # Process in small batches to avoid timeouts or cost spikes
+        nodes = self.gm.get_nodes_missing_embeddings(limit=10)
+        
+        if not nodes:
+            logger.info("No nodes missing embeddings found.")
+            return
+
+        logger.info(f"Backfilling {len(nodes)} nodes...")
+        for node in nodes:
+            text_to_embed = node.get('text', '').strip()
+            if not text_to_embed:
+                text_to_embed = node.get('name', 'Unknown')
+            
+            logger.debug(f"Generating embedding for '{node['name']}'...")
+            try:
+                embedding = self.llm.embed(text_to_embed)
+                if embedding:
+                    self.gm.update_node_embedding(node['name'], embedding)
+                    logger.info(f"Successfully updated embedding for '{node['name']}'")
+                else:
+                    logger.warning(f"Failed to generate embedding for '{node['name']}'")
+            except Exception as e:
+                logger.error(f"Error embedding node '{node['name']}': {e}")
+
