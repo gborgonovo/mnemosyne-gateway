@@ -11,7 +11,7 @@ class LLMProvider(ABC):
     """Abstract Base Class for LLM interactions."""
     
     @abstractmethod
-    def generate(self, prompt: str, context: dict = None) -> str:
+    def generate(self, prompt: str, context: dict = None, timeout: int = None) -> str:
         pass
 
     @abstractmethod
@@ -37,7 +37,7 @@ class LLMProvider(ABC):
 class MockLLM(LLMProvider):
     """A dummy LLM for development on limited hardware."""
     
-    def generate(self, prompt: str, context: dict = None) -> str:
+    def generate(self, prompt: str, context: dict = None, timeout: int = None) -> str:
         logger.info(f"MOCK LLM GENERATION\nPrompt: {prompt[:50]}...")
         responses = [
             "This is a mock response from Mnemosyne (Dev Mode).",
@@ -78,10 +78,12 @@ class OpenAILLM(LLMProvider):
         self.model = model
         self.config = config or {}
 
-    def generate(self, prompt: str, context: dict = None) -> str:
+    def generate(self, prompt: str, context: dict = None, timeout: int = None) -> str:
+        # OpenAI SDK handles timeouts via its client config or per-request
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            timeout=timeout
         )
         return response.choices[0].message.content
 
