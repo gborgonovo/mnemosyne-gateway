@@ -2,7 +2,11 @@ import os
 import sys
 import logging
 import yaml
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
 from dotenv import load_dotenv
 
 # Load environmental variables
