@@ -30,9 +30,12 @@ def main():
     config = load_config()
     
     # Check if embeddings are enabled
-    if not config.get('llm', {}).get('enable_embeddings', False):
+    llm_config = config.get('llm', {})
+    embedding_config = llm_config.get('embeddings', {})
+    
+    if not embedding_config.get('enabled', False):
         print("\n" + "="*50)
-        print("⚠️  WARNING: Embeddings are DISABLED in settings.yaml.")
+        print("⚠️  WARNING: Embeddings are DISABLED in settings.yaml (llm.embeddings.enabled).")
         print("="*50)
         confirm = input("Do you want to proceed with backfilling anyway? (y/N): ")
         if confirm.lower() != 'y':
@@ -45,12 +48,13 @@ def main():
         config['graph']['user'], 
         config['graph']['password']
     )
-    llm = get_llm_provider(config)
+    # Use the specifically configured embedding provider
+    llm = get_llm_provider(embedding_config, root_config=config)
     
     print("\n🧠 Mnemosyne Embedding Backfill Utility")
     print("---------------------------------------")
-    print(f"LLM Mode: {config.get('llm', {}).get('mode')}")
-    print(f"Embedding Model: {config.get('llm', {}).get('embedding_model')}")
+    print(f"LLM Mode: {embedding_config.get('mode')}")
+    print(f"Embedding Model: {embedding_config.get('model_name')}")
     print("---------------------------------------\n")
     
     total_processed = 0

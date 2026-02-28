@@ -101,7 +101,19 @@ try:
     gm.create_fulltext_index()
     gm.create_vector_index()
     
-    llm = get_llm_provider(config)
+    # Initialize LLM providers
+    llm_config = config.get('llm', {})
+    
+    # Provider for The Butler (Chat, Extraction)
+    butler_config = llm_config.get('butler', llm_config)
+    butler_llm = get_llm_provider(butler_config, root_config=config)
+    
+    # Provider for Embeddings (Vector Search)
+    embedding_config = llm_config.get('embeddings', llm_config)
+    embedding_llm = get_llm_provider(embedding_config, root_config=config)
+    
+    # Legacy 'llm' reference for backward compatibility (pointing to butler)
+    llm = butler_llm
     am = AttentionModel(gm, config=config.get('attention', {}), event_bus=eb)
     pm = PerceptionModule(gm, eb, am)
     ie = InitiativeEngine(gm, config=config)
@@ -282,18 +294,13 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
-    node = gm.get_node(q, scopes=actual_scopes)
-    if node:
-        # 1. EXACT MATCH
-        n_dict = dict(node)
-        name = n_dict['name']
-        props = {k: v for k, v in n_dict.items() if k not in ['name', 'labels']}
-    else:
-        # SEMANTIC SEARCH via GraphManager
-        enable_embeddings = config.get("llm", {}).get("enable_embeddings", False)
+    # Semantic search with resilient fallback in GraphManager
+    enable_embeddings = config.get("llm", {}).get("embeddings", {}).get("enabled", True)
+    
+    try:
         best_match, search_type, score = gm.semantic_search(
             query=q, 
-            llm_provider=llm, 
+            llm_provider=embedding_llm, 
             enable_embeddings=enable_embeddings, 
             scopes=actual_scopes, 
             limit=1
@@ -306,29 +313,29 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
         logger.info(f"API Search: Used {search_type.upper()} search for '{q}' -> found '{name}' (Score: {score})")
         
-        # Override node for the 'exact match fallback' type checks below
-        node = best_match
+        # Determine type
+        labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
+        primary_type = props.get("type") or gm._extract_primary_type(labels)
         
-    # Determine type
-    labels = list(node.labels) if hasattr(node, 'labels') else []
-    primary_type = props.get("type") or gm._extract_primary_type(labels)
-    
-    # Energize the node to trigger initiatives/propagation
-    am.propagate_activation(name, initial_boost=1.0)
-    
-    neighbors = gm.get_neighbors(name, scopes=actual_scopes)
-    related = []
-    if neighbors:
-        limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
-        for n in neighbors[:limit]:
-            related.append(f"{n['node']['name']} ({n['rel_type']})")
-            
-    return {
-        "name": name,
-        "type": primary_type,
-        "properties": props,
-        "related": related
-    }
+        # Energize the node to trigger initiatives/propagation
+        am.propagate_activation(name, initial_boost=1.0)
+        
+        neighbors = gm.get_neighbors(name, scopes=actual_scopes)
+        related = []
+        if neighbors:
+            limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
+            for n in neighbors[:limit]:
+                related.append(f"{n['node']['name']} ({n['rel_type']})")
+                
+        return {
+            "name": name,
+            "type": primary_type,
+            "properties": props,
+            "related": related
+        }
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/add")
 def add_observation(obs: Observation, scope: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
@@ -613,25 +620,24 @@ def get_status():
     except Exception as e:
         status["neo4j"] = f"error: {str(e)}"
 
-    # 2. LLM Check (with Timeout)
-    # We use a shortcut to avoid full model loading if possible
-    try:
-        # If it's Ollama, we check the version/tags first (very fast)
-        if hasattr(llm, 'base_url'):
-            resp = requests.get(f"{llm.base_url.rstrip('/')}/api/tags", timeout=2)
-            if resp.status_code == 200:
-                status["llm"] = "connected (Ollama service alive)"
+    # 2. LLM Checks (with Timeout)
+    for name, provider in [("butler", butler_llm), ("embeddings", embedding_llm)]:
+        try:
+            if hasattr(provider, 'base_url'):
+                resp = requests.get(f"{provider.base_url.rstrip('/')}/api/tags", timeout=2)
+                if resp.status_code == 200:
+                    status[name] = "connected (Ollama service alive)"
+                else:
+                    status[name] = f"error: Ollama returned {resp.status_code}"
             else:
-                status["llm"] = f"error: Ollama returned {resp.status_code}"
-        else:
-            # For OpenAI or others, we do a very small generation with a tight timeout
-            # Note: This might still trigger a model load in Ollama if not caught above
-            llm.generate("health check", timeout=3)
-            status["llm"] = "connected"
-    except requests.exceptions.Timeout:
-        status["llm"] = "timeout (service is running but slow/loading model)"
-    except Exception as e:
-        status["llm"] = f"error: {str(e)}"
+                # For OpenAI or others
+                provider.generate("health check", timeout=3)
+                status[name] = "connected"
+        except Exception as e:
+            status[name] = f"error: {str(e)}"
+    
+    # Legacy backward compatibility for old clients expecting 'llm' key
+    status["llm"] = status["butler"]
     
     return status
         

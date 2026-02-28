@@ -68,13 +68,12 @@ class MockLLM(LLMProvider):
         # Mock: just check if they are very similar or lowercase matches
         return entity_a.lower() == entity_b.lower()
 
-from openai import OpenAI
-
 class OpenAILLM(LLMProvider):
-    """Implementation using OpenAI API."""
+    """Implementation using OpenAI-compatible API."""
     
-    def __init__(self, api_key: str, model: str, config: dict = None):
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, api_key: str, model: str, base_url: str = None, config: dict = None):
+        # If base_url is provided, use it (allows DeepSeek, local vLLM, etc.)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.config = config or {}
 
@@ -91,7 +90,9 @@ class OpenAILLM(LLMProvider):
         """
         Generates a response in The Butler's persona, optionally weaving in proactive or impact context.
         """
-        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler", "You are a helpful assistant.")
+        # Look for butler prompt in the root config if passed, or use default
+        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler") or \
+                        self.config.get("prompts", {}).get("butler", "You are a helpful assistant.")
         
         full_user_prompt = f"User said: {user_text}\n"
         
@@ -156,10 +157,6 @@ class OpenAILLM(LLMProvider):
             # Be flexible with response format
             if isinstance(data, list): return data
             entities = data.get("entities", [])
-            if not entities and data:
-                # If LLM returned {"Ganaghello": "Entity"} etc, try to flatten it
-                # For now just return the "entities" key
-                pass
             return entities
         except Exception as e:
             logger.error(f"LLM Extraction error: {e}")
@@ -167,10 +164,10 @@ class OpenAILLM(LLMProvider):
 
     def embed(self, text: str) -> list[float]:
         try:
-            model = self.config.get("llm", {}).get("embedding_model", "text-embedding-3-small")
+            # The model is the one passed to __init__
             response = self.client.embeddings.create(
                 input=[text],
-                model=model
+                model=self.model
             )
             return response.data[0].embedding
         except Exception as e:
@@ -207,6 +204,8 @@ class OllamaLLM(LLMProvider):
         except Exception as e:
             logger.error(f"Ollama API error ({url}): {e}")
             raise
+    
+    # ... (generate, generate_response, extract_entities are the same as before but using self.model and self.base_url)
 
     def generate(self, prompt: str, context: dict = None, timeout: int = 30) -> str:
         data = {
@@ -218,7 +217,8 @@ class OllamaLLM(LLMProvider):
         return res.get("response", "")
 
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
-        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler", "You are a helpful assistant.")
+        system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler") or \
+                        self.config.get("prompts", {}).get("butler", "You are a helpful assistant.")
         
         full_user_prompt = f"User said: {user_text}\n"
         
@@ -293,9 +293,8 @@ class OllamaLLM(LLMProvider):
             return []
 
     def embed(self, text: str) -> list[float]:
-        model = self.config.get("llm", {}).get("embedding_model", "nomic-embed-text")
         data = {
-            "model": model,
+            "model": self.model,
             "prompt": text
         }
         try:
@@ -318,21 +317,47 @@ class OllamaLLM(LLMProvider):
         except:
             return False
 
-def get_llm_provider(config: dict) -> LLMProvider:
-    mode = config.get("llm", {}).get("mode", "mock")
+def get_llm_provider(config_block: dict, root_config: dict = None) -> LLMProvider:
+    """
+    Factory to get an LLM provider based on a specific configuration block.
+    config_block should be like settings['llm']['butler'] or settings['llm']['embeddings'].
+    """
+    mode = config_block.get("mode", "mock")
     if mode == "mock":
         return MockLLM()
-    elif mode == "openai":
+    
+    model_name = config_block.get("model_name")
+    base_url = config_block.get("base_url")
+    # API key from config or env
+    api_key_name = config_block.get("api_key") # e.g. "OPENAI_API_KEY"
+    api_key = os.getenv(api_key_name) if api_key_name else None
+    
+    # Fallback to direct key or standard env if not specified
+    if not api_key:
+        api_key = config_block.get("api_key_value") or os.getenv("OPENAI_API_KEY")
+
+    if mode == "openai":
         return OpenAILLM(
-            api_key=config["llm"].get("api_key") or os.getenv("OPENAI_API_KEY"),
-            model=config["llm"].get("model_name", "gpt-4o-mini"),
-            config=config
+            api_key=api_key,
+            model=model_name or "gpt-4o-mini",
+            base_url=base_url,
+            config=root_config or {"llm": config_block}
         )
     elif mode == "ollama":
         return OllamaLLM(
-            base_url=config["llm"]["ollama_url"],
-            model=config["llm"]["model_name"],
-            config=config
+            base_url=base_url or "http://localhost:11434",
+            model=model_name,
+            config=root_config or {"llm": config_block}
+        )
+    elif mode == "remote":
+        # Remote mode is basically OpenAI-compatible with a required base_url
+        if not base_url:
+            raise ValueError("Remote mode requires a base_url")
+        return OpenAILLM(
+            api_key=api_key,
+            model=model_name,
+            base_url=base_url,
+            config=root_config or {"llm": config_block}
         )
     else:
         raise ValueError(f"Unknown LLM mode: {mode}")

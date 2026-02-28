@@ -22,7 +22,8 @@ class LLMWorker(PluginBase):
             port=5001,
             capabilities=["REQ_ENRICHMENT"]
         )
-        self.llm = get_llm_provider(config)
+        butler_config = config.get("llm", {}).get("butler", config.get("llm", {}))
+        self.llm = get_llm_provider(butler_config, root_config=config)
         self._setup_handlers()
 
     def _setup_handlers(self):

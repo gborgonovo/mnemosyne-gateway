@@ -31,17 +31,28 @@ longitudinal_analysis:
   dormancy_threshold_days: 30 # Days of inactivity before a project is considered dormant
 
 llm:
-  mode: "ollama"              # Options: "mock", "ollama", "openai"
-  model_name: "qwen2.5-coder:7b-instruct-q5_K_M"   # Used for backend processing (Ollama/OpenAI)
-  display_name: "The Butler (Mnemosyne)" # Name shown in Open WebUI / API Clients
+  # The Butler: Higher level reasoning, extraction, and initiative.
+  butler:
+    mode: "mock"                         # Options: "mock", "ollama", "openai", "remote"
+    model_name: "gpt-4o-mini"
+    base_url: ""                         # Leave empty for default provider URL
+    api_key: ""                            # Env variable name (e.g. OPENAI_API_KEY)
 
-  # --- Semantic Search Configuration ---
-  enable_embeddings: false    # Set to true to enable Vector Search (Layer 2)
-  embedding_model: "nomic-embed-text" # Model used for generating vectors (Ollama/Local)
+  # Semantic Memory: High-performance vector generation for search.
+  embeddings:
+    enabled: true                          # Master toggle for semantic search
+    mode: "mock"
+    model_name: "text-embedding-3-small"
+    base_url: ""
+    api_key: ""
+
+  display_name: "The Butler (Mnemosyne)" # Name shown in Open WebUI / API Clients
+  # The following are legacy or specific to Ollama setup, consider moving/removing
+  # embedding_model: "nomic-embed-text" # Model used for generating vectors (Ollama/Local)
   # ------------------------------------
 
   ollama_url: "http://127.0.0.1:11434"
-  api_key: ""                 # MOVED TO .env (OPENAI_API_KEY)
+  # api_key: ""                 # MOVED TO .env (OPENAI_API_KEY)
   
   prompts:
     butler: |
