@@ -98,8 +98,9 @@ try:
         config['graph']['user'], 
         config['graph']['password']
     )
-    # Ensure Full-Text index is ready for Semantic Search
+    # Ensure Indexes are ready for Semantic Search
     gm.create_fulltext_index()
+    gm.create_vector_index()
     
     llm = get_llm_provider(config)
     am = AttentionModel(gm, config=config.get('attention', {}), event_bus=eb)
@@ -288,27 +289,48 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         
     node = gm.get_node(q, scopes=actual_scopes)
     if node:
-        # EXACT MATCH
+        # 1. EXACT MATCH
         n_dict = dict(node)
         name = n_dict['name']
         props = {k: v for k, v in n_dict.items() if k not in ['name', 'labels']}
     else:
-        # SEMANTIC FALLBACK (Full-Text)
-        results = gm.search_nodes_fulltext(q, scopes=actual_scopes, limit=1)
-        if not results:
-            raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
+        # 2. VECTOR SEMANTIC SEARCH
+        vector_results = []
+        if config.get("llm", {}).get("enable_embeddings", False):
+            try:
+                query_embedding = llm.embed(q)
+                if query_embedding:
+                    vector_results = gm.search_nodes_vector(query_embedding, scopes=actual_scopes, limit=1)
+            except Exception as e:
+                logger.warning(f"Vector embedding failed, falling back to full-text: {e}")
+
+        if vector_results:
+            best_match = vector_results[0]['node']
+            name = best_match['name']
+            props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
             
-        best_match = results[0]['node']
-        name = best_match['name']
-        props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
-        
-        # Determine type from labels
-        labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
-        exclusion_list = ["Node", "Public", "Internal", "Private"]
-        type_labels = [l for l in labels if l not in exclusion_list]
-        primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
-        
-        logger.info(f"API Search: Used full-text fallback for '{q}' -> found '{name}' (Score: {results[0]['score']})")
+            labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
+            exclusion_list = ["Node", "Public", "Internal", "Private"]
+            type_labels = [l for l in labels if l not in exclusion_list]
+            primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
+            
+            logger.info(f"API Search: Used VECTOR search for '{q}' -> found '{name}' (Score: {vector_results[0]['score']})")
+        else:
+            # 3. SEMANTIC FALLBACK (Full-Text)
+            results = gm.search_nodes_fulltext(q, scopes=actual_scopes, limit=1)
+            if not results:
+                raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
+                
+            best_match = results[0]['node']
+            name = best_match['name']
+            props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
+            
+            labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
+            exclusion_list = ["Node", "Public", "Internal", "Private"]
+            type_labels = [l for l in labels if l not in exclusion_list]
+            primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
+            
+            logger.info(f"API Search: Used FULL-TEXT fallback for '{q}' -> found '{name}' (Score: {results[0]['score']})")
     
     # Determine type for exact match if needed (exact match fallback)
     if not 'primary_type' in locals():

@@ -151,6 +151,39 @@ class GraphManager:
         except Exception as e:
             logger.warning(f"Could not create full-text index: {e}")
 
+    def create_vector_index(self):
+        """
+        Ensures a vector search index is available for semantic search.
+        Requires determining the vector dimension from an existing node.
+        """
+        query_check = "SHOW INDEXES YIELD name, type WHERE name = 'mnemosyne_vector_idx' RETURN name"
+        query_dim = "MATCH (n:Node) WHERE n.embedding IS NOT NULL RETURN size(n.embedding) as dim LIMIT 1"
+        try:
+            with self.driver.session() as session:
+                res = session.run(query_check)
+                if res.single() is None:
+                    # Index does not exist, find dimension
+                    dim_res = session.run(query_dim)
+                    dim_record = dim_res.single()
+                    if dim_record:
+                        dim = dim_record['dim']
+                        query_create = (
+                            "CREATE VECTOR INDEX mnemosyne_vector_idx IF NOT EXISTS "
+                            "FOR (n:Node) ON (n.embedding) "
+                            "OPTIONS {indexConfig: { "
+                            f" `vector.dimensions`: {dim}, "
+                            " `vector.similarity_function`: 'cosine' "
+                            "}}"
+                        )
+                        session.run(query_create)
+                        logger.info(f"Vector index 'mnemosyne_vector_idx' created with dimension {dim}.")
+                    else:
+                        logger.warning("No embeddings found in graph, postponed vector index creation.")
+                else:
+                    logger.info("Vector index 'mnemosyne_vector_idx' checked.")
+        except Exception as e:
+            logger.warning(f"Could not check/create vector index: {e}")
+
     def search_nodes_fulltext(self, search_text: str, scopes: list[str] = None, limit: int = 5):
         """
         Searches nodes using the Neo4j full-text index 'mnemosyne_text_idx'.
@@ -184,6 +217,30 @@ class GraphManager:
                 return [dict(record) for record in result]
             except Exception as e:
                 logger.error(f"Full-text search failed: {e}")
+                return []
+
+    def search_nodes_vector(self, query_embedding: list[float], scopes: list[str] = None, limit: int = 5):
+        """
+        Searches nodes using the Neo4j vector index 'mnemosyne_vector_idx'.
+        Requires that the vector index is already created.
+        """
+        scope_clause = self._get_scope_filter(scopes, var_name="node")
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        # We query the vector index and return the top match
+        query = (
+            "CALL db.index.vector.queryNodes('mnemosyne_vector_idx', $limit, $embedding) YIELD node, score "
+            f"{where_clause} "
+            "RETURN node, score "
+            "ORDER BY score DESC"
+        )
+        
+        with self.driver.session() as session:
+            try:
+                result = session.run(query, embedding=query_embedding, limit=limit)
+                return [dict(record) for record in result]
+            except Exception as e:
+                logger.error(f"Vector search failed: {e}")
                 return []
 
     def get_all_nodes(self, label: str = None, scopes: list[str] = None):
