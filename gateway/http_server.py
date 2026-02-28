@@ -9,11 +9,6 @@ from fastapi.responses import FileResponse
 import shutil
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from dotenv import load_dotenv
-
-# Load environmental variables from .env
-load_dotenv()
-
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -197,10 +192,8 @@ def list_nodes(type: Optional[str] = None, scopes: Optional[str] = "Public", all
     nodes_raw = gm.get_all_nodes(label=type, scopes=actual_scopes)
     data = []
     for n in nodes_raw:
-        # Determine primary type (the label that isn't 'Node', 'Public', 'Internal', or 'Private')
-        exclusion_list = ["Node", "Public", "Internal", "Private"]
-        type_labels = [l for l in n["labels"] if l not in exclusion_list]
-        primary_type = type_labels[0] if type_labels else (n["labels"][0] if n["labels"] else "Node")
+        # Determine primary type using GraphManager helper
+        primary_type = gm._extract_primary_type(n["labels"])
         
         item = {
             "name": n["name"],
@@ -231,9 +224,7 @@ def get_node(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[s
     
     # Extract labels if available in the node object
     labels = list(node.labels) if hasattr(node, 'labels') else []
-    exclusion_list = ["Node", "Public", "Internal", "Private"]
-    type_labels = [l for l in labels if l not in exclusion_list]
-    primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
+    primary_type = props.get("type") or gm._extract_primary_type(labels)
 
     item = {
         "name": n_dict.get("name"),
@@ -294,50 +285,29 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         name = n_dict['name']
         props = {k: v for k, v in n_dict.items() if k not in ['name', 'labels']}
     else:
-        # 2. VECTOR SEMANTIC SEARCH
-        vector_results = []
-        if config.get("llm", {}).get("enable_embeddings", False):
-            try:
-                query_embedding = llm.embed(q)
-                if query_embedding:
-                    vector_results = gm.search_nodes_vector(query_embedding, scopes=actual_scopes, limit=1)
-            except Exception as e:
-                logger.warning(f"Vector embedding failed, falling back to full-text: {e}")
-
-        if vector_results:
-            best_match = vector_results[0]['node']
-            name = best_match['name']
-            props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
+        # SEMANTIC SEARCH via GraphManager
+        enable_embeddings = config.get("llm", {}).get("enable_embeddings", False)
+        best_match, search_type, score = gm.semantic_search(
+            query=q, 
+            llm_provider=llm, 
+            enable_embeddings=enable_embeddings, 
+            scopes=actual_scopes, 
+            limit=1
+        )
+        
+        if not best_match:
+            raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
             
-            labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
-            exclusion_list = ["Node", "Public", "Internal", "Private"]
-            type_labels = [l for l in labels if l not in exclusion_list]
-            primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
-            
-            logger.info(f"API Search: Used VECTOR search for '{q}' -> found '{name}' (Score: {vector_results[0]['score']})")
-        else:
-            # 3. SEMANTIC FALLBACK (Full-Text)
-            results = gm.search_nodes_fulltext(q, scopes=actual_scopes, limit=1)
-            if not results:
-                raise HTTPException(status_code=404, detail=f"Concept '{q}' not found in scopes {actual_scopes}.")
-                
-            best_match = results[0]['node']
-            name = best_match['name']
-            props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
-            
-            labels = list(best_match.labels) if hasattr(best_match, 'labels') else []
-            exclusion_list = ["Node", "Public", "Internal", "Private"]
-            type_labels = [l for l in labels if l not in exclusion_list]
-            primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
-            
-            logger.info(f"API Search: Used FULL-TEXT fallback for '{q}' -> found '{name}' (Score: {results[0]['score']})")
-    
-    # Determine type for exact match if needed (exact match fallback)
-    if not 'primary_type' in locals():
-         labels = list(node.labels) if hasattr(node, 'labels') else []
-         exclusion_list = ["Node", "Public", "Internal", "Private"]
-         type_labels = [l for l in labels if l not in exclusion_list]
-         primary_type = props.get("type") or (type_labels[0] if type_labels else "Node")
+        name = best_match['name']
+        props = {k: v for k, v in dict(best_match).items() if k not in ['name', 'labels']}
+        logger.info(f"API Search: Used {search_type.upper()} search for '{q}' -> found '{name}' (Score: {score})")
+        
+        # Override node for the 'exact match fallback' type checks below
+        node = best_match
+        
+    # Determine type
+    labels = list(node.labels) if hasattr(node, 'labels') else []
+    primary_type = props.get("type") or gm._extract_primary_type(labels)
     
     # Energize the node to trigger initiatives/propagation
     am.propagate_activation(name, initial_boost=1.0)

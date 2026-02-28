@@ -7,11 +7,6 @@ try:
 except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
-from dotenv import load_dotenv
-
-# Load environmental variables
-load_dotenv()
-
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

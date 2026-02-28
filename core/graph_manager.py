@@ -46,6 +46,17 @@ class GraphManager:
         condition = " OR ".join([f"{var_name}:{s}" for s in all_allowed])
         return f"({condition})"
 
+    def _extract_primary_type(self, labels: list[str]) -> str:
+        """
+        Determines the primary type of a node from its labels,
+        excluding 'Node' and scope labels.
+        """
+        if not labels:
+            return "Node"
+        exclusion_list = ["Node"] + list(self.scope_hierarchy.keys())
+        type_labels = [l for l in labels if l not in exclusion_list]
+        return type_labels[0] if type_labels else labels[0]
+
     def add_node(self, name: str, primary_label: str = "Topic", tags: list = None, properties: dict = None, scope: str = "Public"):
         """
         Creates or updates a node.
@@ -242,6 +253,28 @@ class GraphManager:
             except Exception as e:
                 logger.error(f"Vector search failed: {e}")
                 return []
+
+    def semantic_search(self, query: str, llm_provider=None, enable_embeddings: bool = False, scopes: list[str] = None, limit: int = 1):
+        """
+        Performs semantic search using vector index, falling back to full-text.
+        Returns a tuple: (best_match_node, search_type, score) or (None, None, None)
+        """
+        if enable_embeddings and llm_provider:
+            try:
+                query_embedding = llm_provider.embed(query)
+                if query_embedding:
+                    vector_results = self.search_nodes_vector(query_embedding, scopes=scopes, limit=limit)
+                    if vector_results:
+                        return vector_results[0]['node'], "vector", vector_results[0]['score']
+            except Exception as e:
+                logger.warning(f"Vector embedding failed, falling back to full-text: {e}")
+                
+        # 3. SEMANTIC FALLBACK (Full-Text)
+        results = self.search_nodes_fulltext(query, scopes=scopes, limit=limit)
+        if results:
+            return results[0]['node'], "full-text", results[0]['score']
+            
+        return None, None, None
 
     def get_all_nodes(self, label: str = None, scopes: list[str] = None):
         scope_clause = self._get_scope_filter(scopes)
