@@ -32,27 +32,27 @@ longitudinal_analysis:
 
 llm:
   # The Butler: Higher level reasoning, extraction, and initiative.
+  # MODES: 
+  # - "mock": Fast dev mode (Static responses, no AI costs/latency)
+  # - "ollama": Local inference (Privacy focus)
+  # - "openai": Original OpenAI API
+  # - "remote": Any OpenAI-compatible API (DeepSeek, vLLM, Azure, etc.)
   butler:
-    mode: "mock"                         # Options: "mock", "ollama", "openai", "remote"
-    model_name: "gpt-4o-mini"
-    base_url: ""                         # Leave empty for default provider URL
-    api_key: ""                            # Env variable name (e.g. OPENAI_API_KEY)
+    mode: "mock"
+    model_name: "gpt-4o-mini"           # Local model name for Ollama, or OpenAI model name
+    base_url: ""                        # Required for "remote" or custom "ollama" ports
+    api_key: ""                         # Variable name in .env (e.g. OPENAI_API_KEY)
 
   # Semantic Memory: High-performance vector generation for search.
+  # MODES: same as butler (recommend "ollama" with nomic-embed-text for local use)
   embeddings:
-    enabled: true                          # Master toggle for semantic search
+    enabled: true                       # Master toggle for Layer 2 (Semantic Search)
     mode: "mock"
     model_name: "text-embedding-3-small"
     base_url: ""
     api_key: ""
 
   display_name: "The Butler (Mnemosyne)" # Name shown in Open WebUI / API Clients
-  # The following are legacy or specific to Ollama setup, consider moving/removing
-  # embedding_model: "nomic-embed-text" # Model used for generating vectors (Ollama/Local)
-  # ------------------------------------
-
-  ollama_url: "http://127.0.0.1:11434"
-  # api_key: ""                 # MOVED TO .env (OPENAI_API_KEY)
   
   prompts:
     butler: |
