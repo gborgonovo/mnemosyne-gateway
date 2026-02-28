@@ -8,6 +8,10 @@ from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, F
 from fastapi.responses import FileResponse
 import shutil
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Load environmental variables from .env file
+load_dotenv()
 from typing import List, Optional, Dict, Any
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
