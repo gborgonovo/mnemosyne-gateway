@@ -394,6 +394,7 @@ async def ingest_document(
     
     # Save physical copy
     try:
+        os.makedirs(os.path.dirname(storage_path), exist_ok=True)
         with open(storage_path, "wb") as buffer:
             buffer.write(content)
         logger.info(f"ARCHIVE: File saved to {storage_path}")
@@ -513,6 +514,19 @@ def get_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = D
     active_nodes = gm.get_active_nodes(threshold=0.7, scopes=actual_scopes)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
 
+    # 2. Proactive Context (The Butler)
+    proactive_context = ie.get_proactive_context(scopes=actual_scopes)
+
+    # 3. Suggestions (Mix local and plugin-based)
+    local_suggestions = ie.generate_initiatives(scopes=actual_scopes)
+    combined_suggestions = [s['message'] for s in local_suggestions] + plugin_suggestions
+
+    return {
+        "hot_topics": hot_topics,
+        "butler_log": proactive_context,
+        "suggestions": list(set(combined_suggestions)) # Deduplicate
+    }
+
 @app.get("/briefing/longitudinal")
 def get_longitudinal_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
     """
@@ -535,19 +549,6 @@ def get_longitudinal_briefing(scopes: Optional[str] = "Public", allowed_scopes: 
         "dormant_projects": dormant_projects,
         "recent_trends": recent_trends,
         "message": f"Historical analysis generated for the past {threshold} days."
-    }
-    
-    # 2. Proactive Context (The Butler)
-    proactive_context = ie.get_proactive_context(scopes=actual_scopes) 
-    
-    # 3. Suggestions (Mix local and plugin-based)
-    local_suggestions = ie.generate_initiatives(scopes=actual_scopes)
-    combined_suggestions = [s['message'] for s in local_suggestions] + plugin_suggestions
-    
-    return {
-        "hot_topics": hot_topics,
-        "butler_log": proactive_context,
-        "suggestions": list(set(combined_suggestions)) # Deduplicate
     }
 
 # --- Mnemosyne-RPC Bridge (Cap. 2 Roadmap) ---
