@@ -20,8 +20,8 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> list[dict]:
-        """Extracts entities from text. Returns list of dicts with 'name', 'type'."""
+    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
+        """Extracts entities and relationships from text. Returns tuple of (entities, relationships)."""
         pass
 
     @abstractmethod
@@ -50,7 +50,7 @@ class MockLLM(LLMProvider):
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
         return f"Signore, ho ricevuto il suo messaggio: '{user_text}'. {proactive_context} {impact_context} {semantic_context}".strip()
 
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> list[dict]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
         logger.info(f"MOCK LLM EXTRACTION\nText: {text[:50]}...")
         # Simple heuristic for testing: treat capitalized words as entities
         words = text.split()
@@ -58,7 +58,7 @@ class MockLLM(LLMProvider):
         for w in words:
             if w[0].isupper() and len(w) > 2:
                 entities.append({"name": w.strip(".,;:"), "type": "Topic"})
-        return entities
+        return entities, []
 
     def embed(self, text: str) -> list[float]:
         # Return a deterministic "mock" vector based on text length
@@ -118,7 +118,7 @@ class OpenAILLM(LLMProvider):
             logger.error(f"LLM Response generation error: {e}")
             return "Mi scusi signore, sto riscontrando qualche difficoltà nel processare la sua richiesta."
 
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> list[dict]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
         context_nodes = context_nodes or []
         context_info = ""
         if context_nodes:
@@ -126,8 +126,9 @@ class OpenAILLM(LLMProvider):
 
         prompt = f"""
         Extract key entities and topics from the following text.{context_info}
-        Structure your response as a JSON object with a key "entities" containing a list of objects.
-        Each object must have 'name' (the label) and 'type' (Entity, Topic, Resource, Goal, or Task).
+        Structure your response as a JSON object with two keys:
+        1. "entities": a list of objects, each with 'name' (the label) and 'type' (Entity, Topic, Resource, Goal, or Task).
+        2. "relationships": a list of objects, each representing an explicit link between two extracted entities. Each must have 'source', 'target', and 'type' (a screaming snake case verb EXCLUSIVELY from this list: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
         
         - Entity: Concrete items (People, Tools, Places, specific things the user mentions).
         - Topic: Abstract themes or ideas.
@@ -140,6 +141,7 @@ class OpenAILLM(LLMProvider):
         2. Ignore generic adjectives (e.g., 'interessante', 'utile'), conversational fillers, or common verbs.
         3. Focus on nouns, proper names, and well-defined technical terms.
         4. Even simple requests like "Tell me about X" should extract X as an entity.
+        5. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If two concepts are similar/congruent, map A -> RELATED_TO -> B.
         
         Text: {text}
         """
@@ -155,12 +157,13 @@ class OpenAILLM(LLMProvider):
             data = json.loads(content)
             
             # Be flexible with response format
-            if isinstance(data, list): return data
+            if isinstance(data, list): return data, []
             entities = data.get("entities", [])
-            return entities
+            relationships = data.get("relationships", [])
+            return entities, relationships
         except Exception as e:
             logger.error(f"LLM Extraction error: {e}")
-            return []
+            return [], []
 
     def embed(self, text: str) -> list[float]:
         try:
@@ -246,7 +249,7 @@ class OllamaLLM(LLMProvider):
             logger.error(f"Ollama chat error: {e}")
             return "Mi scusi signore, sto riscontrando qualche difficoltà nel processare la sua richiesta locale."
 
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> list[dict]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
         context_nodes = context_nodes or []
         context_info = ""
         if context_nodes:
@@ -254,8 +257,9 @@ class OllamaLLM(LLMProvider):
 
         prompt = f"""
         Extract key entities and topics from the following text.{context_info}
-        Structure your response as a JSON object with a key "entities" containing a list of objects.
-        Each object must have 'name' (the label) and 'type' (Entity, Topic, Resource, Goal, or Task).
+        Structure your response as a JSON object with two keys:
+        1. "entities": a list of objects, each with 'name' (the label) and 'type' (Entity, Topic, Resource, Goal, or Task).
+        2. "relationships": a list of objects, each representing an explicit link between two extracted entities. Each must have 'source', 'target', and 'type' (a screaming snake case verb EXCLUSIVELY from this list: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
         
         - Entity: Concrete items (People, Tools, Places, specific things the user mentions).
         - Topic: Abstract themes or ideas.
@@ -267,6 +271,7 @@ class OllamaLLM(LLMProvider):
         1. If the user is ASKING about something (e.g., "Parlami della stalla", "Cosa sai del progetto X?"), extract the SUBJECT of their question as an Entity.
         2. Ignore conversational fillers or common verbs.
         3. Return ONLY the JSON object. No preamble or postscript.
+        4. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If two concepts are similar/congruent, map A -> RELATED_TO -> B.
         
         Text: {text}
         """
@@ -282,15 +287,18 @@ class OllamaLLM(LLMProvider):
             logger.debug(f"Ollama Extraction Response: {content}")
             if not content or content.strip() == "":
                 logger.warning("Ollama returned empty extraction response")
-                return []
+                return [], []
             data = json.loads(content)
-            return data.get("entities", [])
+            
+            entities = data.get("entities", [])
+            relationships = data.get("relationships", [])
+            return entities, relationships
         except json.JSONDecodeError as e:
             logger.error(f"Ollama Extraction JSON Error: {e}. Content: {content[:100]}")
-            return []
+            return [], []
         except Exception as e:
             logger.error(f"Ollama Extraction error: {e}")
-            return []
+            return [], []
 
     def embed(self, text: str) -> list[float]:
         data = {

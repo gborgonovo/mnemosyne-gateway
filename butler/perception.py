@@ -44,11 +44,12 @@ class PerceptionModule:
         })
         logger.info(f"PERCEPTION: Enrichment requested for {obs_name} in scope {scope}")
 
-    def integrate_entities(self, entities: list[dict], obs_name: str, scope: str = "Public"):
+    def integrate_entities(self, entities: list[dict], obs_name: str, scope: str = "Public", relationships: list[dict] = None):
         """
         Integrates external entities into the graph.
         """
         touched_node_names = []
+        node_map = {}
         for ent in entities:
             name = ent.get('name')
             if not name: continue
@@ -57,6 +58,7 @@ class PerceptionModule:
             # Create/Merge the node
             node_data = self.gm.add_node(name, primary_label=ent_type, scope=scope)
             touched_node_names.append(node_data['name'])
+            node_map[name.lower()] = node_data['name']
 
         # Link entities to Observation
         for name in touched_node_names:
@@ -66,13 +68,40 @@ class PerceptionModule:
         if self.am and touched_node_names:
             self.am.stimulate(touched_node_names, boost_amount=0.4)
 
-        # Heuristic: Connect consecutive entities
-        if len(touched_node_names) > 1:
-            for i in range(len(touched_node_names)):
-                for j in range(i + 1, len(touched_node_names)):
-                    self.gm.add_edge(
-                        touched_node_names[i], 
-                        touched_node_names[j], 
-                        "LINKED_TO"
-                    )
+        if relationships:
+            for rel in relationships:
+                source_req = rel.get('source')
+                target_req = rel.get('target')
+                edge_type = rel.get('type')
+
+                if not source_req or not target_req or not edge_type:
+                    continue
+
+                source_key = source_req.lower()
+                target_key = target_req.lower()
+
+                # Anti-hallucination: create on the fly if not extracted in entities list
+                if source_key not in node_map:
+                    node_data = self.gm.add_node(source_req, primary_label="Topic", scope=scope)
+                    touched_node_names.append(node_data['name'])
+                    node_map[source_key] = node_data['name']
+
+                if target_key not in node_map:
+                    node_data = self.gm.add_node(target_req, primary_label="Topic", scope=scope)
+                    touched_node_names.append(node_data['name'])
+                    node_map[target_key] = node_data['name']
+
+                actual_source = node_map[source_key]
+                actual_target = node_map[target_key]
+                self.gm.add_edge(actual_source, actual_target, edge_type)
+        else:
+            # Heuristic: Connect consecutive entities only if explicit relationships were not provided
+            if len(touched_node_names) > 1:
+                for i in range(len(touched_node_names)):
+                    for j in range(i + 1, len(touched_node_names)):
+                        self.gm.add_edge(
+                            touched_node_names[i], 
+                            touched_node_names[j], 
+                            "LINKED_TO"
+                        )
         return touched_node_names

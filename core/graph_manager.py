@@ -97,7 +97,9 @@ class GraphManager:
         """
         valid_relations = {
             "LINKED_TO": 0.3, "DEPENDS_ON": 0.9, "EVOKES": 0.6,
-            "IS_A": 1.0, "MENTIONED_IN": 0.1, "MAYBE_SAME_AS": 0.0
+            "IS_A": 1.0, "MENTIONED_IN": 0.1, "MAYBE_SAME_AS": 0.0,
+            "PART_OF": 0.8, "MANAGES": 0.8, "HAS_MEMBER": 0.7,
+            "REQUIRES": 0.9, "RELATED_TO": 0.4
         }
 
         if relation_type not in valid_relations:

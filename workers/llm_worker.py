@@ -34,12 +34,13 @@ class LLMWorker(PluginBase):
             context = payload.get("context_nodes", [])
             logger.info(f"Processing enrichment request for {obs_name}: {text[:50]}...")
             
-            entities = self.llm.extract_entities(text, context_nodes=context)
+            entities, relationships = self.llm.extract_entities(text, context_nodes=context)
             
             # Send result back via RPC
             self.rpc_publish("ENRICHMENT_RESULT", {
                 "obs_name": obs_name,
-                "entities": entities
+                "entities": entities,
+                "relationships": relationships
             }, scope=scope)
 
 if __name__ == "__main__":
