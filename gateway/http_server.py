@@ -156,15 +156,16 @@ try:
     
     # Bridge ENRICHMENT_RESULT back to Perception
     def handle_enrichment_result(payload):
-        # Payload format: {"scope": [...], "payload": {"obs_name": ..., "entities": [...]}}
+        # Payload format: {"scope": [...], "payload": {"obs_name": ..., "entities": [...], "relationships": [...]}}
         nested_payload = payload.get("payload", {})
         entities = nested_payload.get("entities", [])
+        relationships = nested_payload.get("relationships", [])
         obs_name = nested_payload.get("obs_name")
         scope = payload.get("scope", ["Public"])[0]
         
         if entities and obs_name:
-             pm.integrate_entities(entities, obs_name, scope=scope)
-             logger.info(f"PERCEPTION: Integrated {len(entities)} entities for {obs_name}")
+             pm.integrate_entities(entities, obs_name, relationships=relationships, scope=scope)
+             logger.info(f"PERCEPTION: Integrated {len(entities)} entities and {len(relationships)} relationships for {obs_name}")
 
     def handle_initiative_ready(payload):
         nested_payload = payload.get("payload", {})
