@@ -4,6 +4,7 @@ import logging
 import requests
 import json
 import os
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -301,16 +302,31 @@ class OllamaLLM(LLMProvider):
             return [], []
 
     def embed(self, text: str) -> list[float]:
-        data = {
-            "model": self.model,
-            "prompt": text
-        }
-        try:
-            res = self._call_ollama("embeddings", data)
-            return res.get("embedding", [])
-        except Exception as e:
-            logger.error(f"Ollama Embedding error: {e}")
-            return []
+        # Compatibility: recent Ollama versions use /api/embed while older ones use /api/embeddings
+        for endpoint in ["embed", "embeddings"]:
+            data = {
+                "model": self.model,
+                "input": text if endpoint == "embed" else None,
+                "prompt": text if endpoint == "embeddings" else None
+            }
+            # Remove None values
+            data = {k: v for k, v in data.items() if v is not None}
+            
+            try:
+                res = self._call_ollama(endpoint, data)
+                # handle different field names: 'embedding' (embeddings) or 'embeddings' (plural for embed)
+                vec = res.get("embedding") or res.get("embeddings")
+                if vec:
+                    # In /api/embed (new API), it returns a list of vectors if multiple inputs are provided
+                    # since we only pass one string as 'input', we might get [ [vector] ] or [vector]
+                    if isinstance(vec[0], list):
+                        return vec[0]
+                    return vec
+            except Exception:
+                continue # Try next endpoint if this one fails
+        
+        logger.error(f"Ollama Embedding failed: tried both 'embed' and 'embeddings' endpoints for model {self.model}")
+        return []
 
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
         prompt = f"Are the concepts '{entity_a}' and '{entity_b}' referring to the same thing in a knowledge graph? Answer only YES or NO."

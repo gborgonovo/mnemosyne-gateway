@@ -334,6 +334,9 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
             "properties": props,
             "related": related
         }
+    except HTTPException:
+        # Re-raise FastAPIs internal exceptions so they aren't masked as 500
+        raise
     except Exception as e:
         logger.error(f"Search error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
