@@ -199,17 +199,16 @@ class OllamaLLM(LLMProvider):
         self.model = model
         self.config = config or {}
 
-    def _call_ollama(self, endpoint: str, data: dict, timeout: int = 30) -> dict:
+    def _call_ollama(self, endpoint: str, data: dict, timeout: int = 30, silent: bool = False) -> dict:
         url = f"{self.base_url.rstrip('/')}/api/{endpoint}"
         try:
             response = requests.post(url, json=data, timeout=timeout)
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            logger.error(f"Ollama API error ({url}): {e}")
+            if not silent:
+                logger.error(f"Ollama API error ({url}): {e}")
             raise
-    
-    # ... (generate, generate_response, extract_entities are the same as before but using self.model and self.base_url)
 
     def generate(self, prompt: str, context: dict = None, timeout: int = 30) -> str:
         data = {
@@ -217,8 +216,12 @@ class OllamaLLM(LLMProvider):
             "prompt": prompt,
             "stream": False
         }
-        res = self._call_ollama("generate", data, timeout=timeout)
-        return res.get("response", "")
+        try:
+            res = self._call_ollama("generate", data, timeout=timeout)
+            return res.get("response", "")
+        except Exception as e:
+            logger.error(f"Ollama generate error: {e}")
+            return "I am sorry, I encountered an error while generating a response."
 
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
         system_prompt = self.config.get("llm", {}).get("prompts", {}).get("butler") or \
@@ -313,20 +316,22 @@ class OllamaLLM(LLMProvider):
             data = {k: v for k, v in data.items() if v is not None}
             
             try:
-                res = self._call_ollama(endpoint, data)
+                # Use silent=True here to avoid logging 404 errors during the probing phase
+                res = self._call_ollama(endpoint, data, silent=True)
                 # handle different field names: 'embedding' (embeddings) or 'embeddings' (plural for embed)
                 vec = res.get("embedding") or res.get("embeddings")
                 if vec:
                     # In /api/embed (new API), it returns a list of vectors if multiple inputs are provided
                     # since we only pass one string as 'input', we might get [ [vector] ] or [vector]
-                    if isinstance(vec[0], list):
+                    if isinstance(vec, list) and len(vec) > 0 and isinstance(vec[0], list):
                         return vec[0]
                     return vec
             except Exception:
                 continue # Try next endpoint if this one fails
         
-        logger.error(f"Ollama Embedding failed: tried both 'embed' and 'embeddings' endpoints for model {self.model}")
+        logger.error(f"Ollama Embedding failed: tried both 'embed' and 'embeddings' endpoints for model {self.model}. Check if the model supports embeddings and if the server is running.")
         return []
+
 
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
         prompt = f"Are the concepts '{entity_a}' and '{entity_b}' referring to the same thing in a knowledge graph? Answer only YES or NO."
@@ -352,11 +357,17 @@ def get_llm_provider(config_block: dict, root_config: dict = None) -> LLMProvide
     
     model_name = config_block.get("model_name")
     base_url = config_block.get("base_url")
-    # API key from config or env
-    api_key_name = config_block.get("api_key") # e.g. "OPENAI_API_KEY"
-    api_key = os.getenv(api_key_name) if api_key_name else None
+    # API key resolution: check if it's a variable name, a literal key, or fallback to env
+    api_key_raw = config_block.get("api_key")
+    api_key = None
     
-    # Fallback to direct key or standard env if not specified
+    if api_key_raw:
+        if api_key_raw.startswith("sk-"):
+            api_key = api_key_raw  # It's a literal key
+        else:
+            api_key = os.getenv(api_key_raw) # It's an env var name
+            
+    # Fallback to direct key value or standard env if still not found
     if not api_key:
         api_key = config_block.get("api_key_value") or os.getenv("OPENAI_API_KEY")
 

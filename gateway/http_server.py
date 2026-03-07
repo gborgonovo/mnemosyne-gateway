@@ -334,12 +334,12 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
             "properties": props,
             "related": related
         }
-    except HTTPException:
+    except HTTPException as he:
         # Re-raise FastAPIs internal exceptions so they aren't masked as 500
-        raise
+        raise he
     except Exception as e:
-        logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal Search error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal Server Error during search: {str(e)}")
 
 @app.post("/add")
 def add_observation(obs: Observation, scope: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):

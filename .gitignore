@@ -1,6 +1,7 @@
 # Mnemosyne Gateway Git Ignore
 
 # Private Workspace (User's specific request)
+project_documentation/
 openclaw_workspace/
 wiki_repo/
 
@@ -13,7 +14,6 @@ db/
 config/settings.yaml
 config/api_keys.yaml
 .env
-project_documentation/mnemosyne_project.md
 
 # System/Agent Metadata (IMPORTANT for privacy)
 .gemini/
@@ -48,9 +48,8 @@ logs/
 
 # System
 .DS_Store
-# System
-.DS_Store
 Thumbs.db
 *.kate-swp
 
-project_documentation/
+
+

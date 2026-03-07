@@ -258,9 +258,16 @@ class GraphManager:
 
     def semantic_search(self, query: str, llm_provider=None, enable_embeddings: bool = False, scopes: list[str] = None, limit: int = 1):
         """
-        Performs semantic search using vector index, falling back to full-text.
+        Performs semantic search using vector index, falling back to full-text,
+        and finally to exact/fuzzy name match.
         Returns a tuple: (best_match_node, search_type, score) or (None, None, None)
         """
+        # 1. EXACT NAME MATCH (Highest priority, most reliable)
+        node = self.get_node(query, scopes=scopes)
+        if node:
+            return node, "exact", 1.0
+
+        # 2. VECTOR SEARCH (Semantic)
         if enable_embeddings and llm_provider:
             try:
                 query_embedding = llm_provider.embed(query)
@@ -596,15 +603,13 @@ class GraphManager:
         scope_clause = self._get_scope_filter(scopes)
         where_scope = f"AND {scope_clause}" if scope_clause else ""
         
-        # We target :Node and :Lab (which are the main entity types)
-        # We avoid :Observation as they are raw input, usually entities are extracted from them.
+        # We target :Node and :Observation (which are the main entity types)
         query = f"""
         MATCH (n:Node)
-        WHERE NOT n:Observation
-        AND n.embedding IS NULL
+        WHERE n.embedding IS NULL
         {where_scope}
         RETURN n.name as name, labels(n) as labels, 
-               coalesce(n.name, '') + ' ' + coalesce(n.title, '') + ' ' + coalesce(n.description, '') + ' ' + coalesce(n.summary, '') + ' ' + coalesce(n.ai_context, '') as text
+               coalesce(n.name, '') + ' ' + coalesce(n.title, '') + ' ' + coalesce(n.description, '') + ' ' + coalesce(n.summary, '') + ' ' + coalesce(n.ai_context, '') + ' ' + coalesce(n.content, '') as text
         LIMIT $limit
         """
         with self.driver.session() as session:
