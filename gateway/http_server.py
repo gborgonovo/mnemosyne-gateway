@@ -628,16 +628,29 @@ def get_status():
     # 2. LLM Checks (with Timeout)
     for name, provider in [("butler", butler_llm), ("embeddings", embedding_llm)]:
         try:
-            if hasattr(provider, 'base_url'):
-                resp = requests.get(f"{provider.base_url.rstrip('/')}/api/tags", timeout=2)
-                if resp.status_code == 200:
-                    status[name] = "connected (Ollama service alive)"
-                else:
-                    status[name] = f"error: Ollama returned {resp.status_code}"
+            info = provider.get_info()
+            status[name] = info # Start with config info
+            
+            # Connection probing
+            if info["mode"] == "ollama":
+                try:
+                    resp = requests.get(f"{info['base_url'].rstrip('/')}/api/tags", timeout=2)
+                    if resp.status_code == 200:
+                         status[name]["status"] = "connected (Ollama is alive)"
+                    else:
+                         status[name]["status"] = f"error: Ollama returned {resp.status_code}"
+                except Exception as e:
+                    status[name]["status"] = f"error: {str(e)}"
+            elif info["mode"] == "mock":
+                 status[name]["status"] = "ready (local mock)"
             else:
-                # For OpenAI or others
-                provider.generate("health check", timeout=3)
-                status[name] = "connected"
+                 # OpenAI or Remote
+                 try:
+                    provider.generate("health check", timeout=3)
+                    status[name]["status"] = "connected"
+                 except Exception as e:
+                    status[name]["status"] = f"error: {str(e)}"
+                    
         except Exception as e:
             status[name] = f"error: {str(e)}"
     

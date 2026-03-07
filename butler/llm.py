@@ -35,6 +35,11 @@ class LLMProvider(ABC):
         """Determines if two entity names refer to the same semantic concept."""
         pass
 
+    @abstractmethod
+    def get_info(self) -> dict:
+        """Returns provider metadata for status checks."""
+        pass
+
 class MockLLM(LLMProvider):
     """A dummy LLM for development on limited hardware."""
     
@@ -68,6 +73,9 @@ class MockLLM(LLMProvider):
     def compare_entities(self, entity_a: str, entity_b: str) -> bool:
         # Mock: just check if they are very similar or lowercase matches
         return entity_a.lower() == entity_b.lower()
+
+    def get_info(self) -> dict:
+        return {"mode": "mock", "model": "internal-mock"}
 
 class OpenAILLM(LLMProvider):
     """Implementation using OpenAI-compatible API."""
@@ -190,6 +198,13 @@ class OpenAILLM(LLMProvider):
         except Exception as e:
             logger.error(f"LLM Comparison error: {e}")
             return False
+
+    def get_info(self) -> dict:
+        return {
+            "mode": "openai/remote",
+            "model": self.model,
+            "base_url": str(self.client.base_url)
+        }
 
 class OllamaLLM(LLMProvider):
     """Real implementation connecting to Ollama."""
@@ -345,6 +360,13 @@ class OllamaLLM(LLMProvider):
             return "YES" in res.get("response", "").upper()
         except:
             return False
+
+    def get_info(self) -> dict:
+        return {
+            "mode": "ollama",
+            "model": self.model,
+            "base_url": self.base_url
+        }
 
 def get_llm_provider(config_block: dict, root_config: dict = None) -> LLMProvider:
     """
