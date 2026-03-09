@@ -66,57 +66,52 @@ echo ""
 echo -e "${BLUE}${BOLD}[ 2. Stato Connettività & AI ]${NC}"
 echo -ne "  Interrogazione Gateway in corso (max 15s)... \r"
 
-# Timeout aumentato a 15 secondi per gestire risposte lente da OpenAI/Ollama
 STATUS_JSON=$(curl -s --max-time 15 -H "X-API-Key: $API_KEY" http://localhost:$PORT/status)
 
 if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
     echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}                       "
     
-    # Parsing dello stato con gestione errori Python
-    PARSE_CMD="import sys, json; 
+    # Unica chiamata Python per estrarre tutto in modo sicuro
+    $PYTHON_CMD -c "
+import sys, json
+
 try:
     data = json.load(sys.stdin)
 except:
-    data = {}"
+    print('  ${RED}○ Errore: Risposta API non valida${NC}')
+    sys.exit(0)
+
+def fmt_status(name, label):
+    # Cerca Butler sia in 'butler' che 'llm' per compatibilità
+    obj = data.get(name)
+    if not obj and name == 'butler':
+        obj = data.get('llm', {})
+    if not obj: obj = {}
     
-    NEO4J=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('neo4j', 'unknown'))" <<< "$STATUS_JSON")
+    mode = obj.get('mode', 'unknown')
+    model = obj.get('model', 'unknown')
+    status = obj.get('status', 'unknown')
+    url = obj.get('base_url', 'unknown')
     
-    # Butler Info (check both 'butler' and 'llm' keys for compatibility)
-    B_DATA=$($PYTHON_CMD -c "$PARSE_CMD; print(json.dumps(data.get('butler', data.get('llm', {}))))" <<< "$STATUS_JSON")
-    BUTLER_MODE=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('mode', 'unknown'))" <<< "$B_DATA")
-    BUTLER_MODEL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('model', 'unknown'))" <<< "$B_DATA")
-    BUTLER_STATUS=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('status', 'unknown'))" <<< "$B_DATA")
-    BUTLER_URL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('base_url', 'unknown'))" <<< "$B_DATA")
+    color = '\033[0;32m●' if 'error' not in str(status).lower() else '\033[0;31m○'
+    nc = '\033[0m'
+    red = '\033[0;31m'
     
-    # Embeddings Info
-    E_DATA=$($PYTHON_CMD -c "$PARSE_CMD; print(json.dumps(data.get('embeddings', {})))" <<< "$STATUS_JSON")
-    EMB_MODE=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('mode', 'unknown'))" <<< "$E_DATA")
-    EMB_MODEL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('model', 'unknown'))" <<< "$E_DATA")
-    EMB_STATUS=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('status', 'unknown'))" <<< "$E_DATA")
-    EMB_URL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('base_url', 'unknown'))" <<< "$E_DATA")
-    
-    echo -n "  Neo4j DB:    "
-    if [[ "$NEO4J" == "connected" ]]; then echo -e "${GREEN}● CONNESSO${NC}"; else echo -e "${RED}○ ERRORE ($NEO4J)${NC}"; fi
-    
-    echo -n "  Butler:      "
-    if [[ "$BUTLER_STATUS" == *"error"* ]]; then 
-        echo -e "${RED}○ $BUTLER_MODE | $BUTLER_MODEL${NC}"
-        echo -e "               ${RED}Stat: $BUTLER_STATUS${NC}"
-        echo -e "               ${RED}URL:  $BUTLER_URL${NC}"
-    else 
-        echo -e "${GREEN}● $BUTLER_MODE | $BUTLER_MODEL${NC}"
-        echo -e "               URL:  $BUTLER_URL"
-    fi
-    
-    echo -n "  Embeddings:  "
-    if [[ "$EMB_STATUS" == *"error"* ]]; then 
-        echo -e "${RED}○ $EMB_MODE | $EMB_MODEL${NC}"
-        echo -e "               ${RED}Stat: $EMB_STATUS${NC}"
-        echo -e "               ${RED}URL:  $EMB_URL${NC}"
-    else 
-        echo -e "${GREEN}● $EMB_MODE | $EMB_MODEL${NC}"
-        echo -e "               URL:  $EMB_URL"
-    fi
+    print(f'  {label:<12} {color} {mode} | {model}{nc}')
+    if 'error' in str(status).lower():
+        print(f'               {red}Stat: {status}{nc}')
+        print(f'               {red}URL:  {url}{nc}')
+    else:
+        print(f'               URL:  {url}')
+
+# Neo4j
+n_status = data.get('neo4j', 'unknown')
+n_color = '\033[0;32m● CONNESSO' if n_status == 'connected' else f'\033[0;31m○ ERRORE ({n_status})'
+print(f'  Neo4j DB:    {n_color}\033[0m')
+
+fmt_status('butler', 'Butler:')
+fmt_status('embeddings', 'Embeddings:')
+" <<< "$STATUS_JSON"
 else
     echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC}                       "
     echo -e "               (Timeout dopo 15s o Errore Auth. Controlla porta e chiavi)"
@@ -126,35 +121,25 @@ echo ""
 
 # 3. STATISTICHE CONNECTOME
 echo -e "${BLUE}${BOLD}[ 3. Salute del Connectome ]${NC}"
-# Estraiamo le statistiche con protezione contro errori di parsing
-STATS_PARSE="import sys, json;
-try:
-    d = json.load(sys.stdin)
-    s = d.get('stats', d) if 'stats' in d or 'nodes' in d or 'total_nodes' in d else {}
-    print(s.get('nodes') or s.get('total_nodes') or 0)
-except:
-    print(0)"
+$PYTHON_CMD -c "
+import sys, json
 
-NODES=$($PYTHON_CMD -c "$STATS_PARSE" <<< "$STATUS_JSON")
-
-if [ "$NODES" -eq "0" ] 2>/dev/null; then
-    # Se non c'erano nello stato, prova l'endpoint dedicato con Auth
-    STATS_JSON=$(curl -s --max-time 3 -H "X-API-Key: $API_KEY" http://localhost:$PORT/stats)
-    if [ ! -z "$STATS_JSON" ]; then
-        NODES=$($PYTHON_CMD -c "$STATS_PARSE" <<< "$STATS_JSON")
-        EDGES=$($PYTHON_CMD -c "import sys, json; 
 try:
-    d = json.load(sys.stdin)
-    print(d.get('relationships') or d.get('total_relationships') or 0)
+    data = json.load(sys.stdin)
+    stats = data.get('stats', {})
+    nodes = stats.get('nodes') or stats.get('total_nodes')
+    edges = stats.get('relationships') or stats.get('total_relationships')
+    
+    if nodes and nodes > 0:
+        density = round(edges/nodes, 2) if nodes > 0 else 0
+        print(f'  Nodi totali: \033[1m{nodes}\033[0m')
+        print(f'  Relazioni:   \033[1m{edges}\033[0m')
+        print(f'  Densità:     \033[1m{density}\033[0m (Relazioni/Nodo)')
+    else:
+        print('  \033[1;33mDati non disponibili o database vuoto.\033[0m')
 except:
-    print(0)" <<< "$STATS_JSON")
-    else
-        NODES=0
-        EDGES=0
-    fi
-else
-    EDGES=$($PYTHON_CMD -c "import sys, json; d=json.load(sys.stdin).get('stats', {}); print(d.get('relationships') or d.get('total_relationships') or 0)" <<< "$STATUS_JSON")
-fi
+    print('  \033[1;33mDati non disponibili o database vuoto.\033[0m')
+" <<< "$STATUS_JSON"
 
 if [ ! -z "$NODES" ] && [ "$NODES" -gt 0 ] 2>/dev/null; then
     echo -e "  Nodi totali: ${BOLD}$NODES${NC}"
