@@ -379,19 +379,25 @@ def get_llm_provider(config_block: dict, root_config: dict = None) -> LLMProvide
     
     model_name = config_block.get("model_name")
     base_url = config_block.get("base_url")
-    # API key resolution: check if it's a variable name, a literal key, or fallback to env
+    # API key resolution
     api_key_raw = config_block.get("api_key")
     api_key = None
     
     if api_key_raw:
-        if api_key_raw.startswith("sk-"):
-            api_key = api_key_raw  # It's a literal key
+        # Se la stringa è lunga o contiene caratteri tipici delle chiavi, la usiamo letteralmente
+        # Le chiavi OpenAI iniziano con sk-, quelle Gemini con AIza...
+        if api_key_raw.startswith("sk-") or api_key_raw.startswith("AIza") or len(api_key_raw) > 30:
+            api_key = api_key_raw
         else:
-            api_key = os.getenv(api_key_raw) # It's an env var name
+            # Altrimenti prova a cercarla come variabile d'ambiente
+            api_key = os.getenv(api_key_raw)
             
-    # Fallback to direct key value or standard env if still not found
+    # Fallback finale
     if not api_key:
         api_key = config_block.get("api_key_value") or os.getenv("OPENAI_API_KEY")
+
+    if not api_key and mode in ["openai", "remote"]:
+        logger.error(f"LLM API Key missing for mode {mode}. Check settings.yaml or environment variables.")
 
     if mode == "openai":
         return OpenAILLM(
