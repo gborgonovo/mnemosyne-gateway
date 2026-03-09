@@ -27,7 +27,7 @@ try:
 except:
     print('')" 2>/dev/null)
 
-clear
+
 echo -e "${CYAN}${BOLD}================================================================${NC}"
 echo -e "${CYAN}${BOLD}           Mnemosyne: Pannello di Controllo Cognitivo           ${NC}"
 echo -e "${CYAN}${BOLD}================================================================${NC}"
