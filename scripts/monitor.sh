@@ -16,7 +16,13 @@ BOLD='\033[1m'
 # Estrazione porta e chiave API
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
-PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+
+# Tentativo di estrazione porta (Python -> Grep -> Default)
+PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null)
+if [ -z "$PORT" ]; then
+    PORT=$(grep "port:" config/settings.yaml | sed 's/[^0-9]*//g' | head -n 1)
+fi
+if [ -z "$PORT" ]; then PORT=4002; fi
 
 # Estrazione chiave API (prende la prima disponibile)
 API_KEY=$($PYTHON_CMD -c "import yaml, os; 
