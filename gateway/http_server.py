@@ -646,7 +646,8 @@ def get_status():
             else:
                  # OpenAI or Remote
                  try:
-                    provider.generate("health check", timeout=3)
+                    # Aumentato timeout a 10s per latenza API/Proxy
+                    provider.generate("health check", timeout=10)
                     status[name]["status"] = "connected"
                  except Exception as e:
                     status[name]["status"] = f"error: {str(e)}"
