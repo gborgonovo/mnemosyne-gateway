@@ -67,19 +67,43 @@ except:
     data = {}"
     
     NEO4J=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('neo4j', 'unknown'))" <<< "$STATUS_JSON")
-    BUTLER_MODE=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('butler', {}).get('mode', 'unknown'))" <<< "$STATUS_JSON")
-    BUTLER_STATUS=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('butler', {}).get('status', 'unknown'))" <<< "$STATUS_JSON")
-    EMB_MODE=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('embeddings', {}).get('mode', 'unknown'))" <<< "$STATUS_JSON")
-    EMB_STATUS=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('embeddings', {}).get('status', 'unknown'))" <<< "$STATUS_JSON")
+    
+    # Butler Info (check both 'butler' and 'llm' keys for compatibility)
+    B_DATA=$($PYTHON_CMD -c "$PARSE_CMD; print(json.dumps(data.get('butler', data.get('llm', {}))))" <<< "$STATUS_JSON")
+    BUTLER_MODE=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('mode', 'unknown'))" <<< "$B_DATA")
+    BUTLER_MODEL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('model', 'unknown'))" <<< "$B_DATA")
+    BUTLER_STATUS=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('status', 'unknown'))" <<< "$B_DATA")
+    BUTLER_URL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('base_url', 'unknown'))" <<< "$B_DATA")
+    
+    # Embeddings Info
+    E_DATA=$($PYTHON_CMD -c "$PARSE_CMD; print(json.dumps(data.get('embeddings', {})))" <<< "$STATUS_JSON")
+    EMB_MODE=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('mode', 'unknown'))" <<< "$E_DATA")
+    EMB_MODEL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('model', 'unknown'))" <<< "$E_DATA")
+    EMB_STATUS=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('status', 'unknown'))" <<< "$E_DATA")
+    EMB_URL=$($PYTHON_CMD -c "import json; d=json.loads(input()); print(d.get('base_url', 'unknown'))" <<< "$E_DATA")
     
     echo -n "  Neo4j DB:    "
     if [[ "$NEO4J" == "connected" ]]; then echo -e "${GREEN}● CONNESSO${NC}"; else echo -e "${RED}○ ERRORE ($NEO4J)${NC}"; fi
     
     echo -n "  Butler:      "
-    if [[ "$BUTLER_STATUS" == *"error"* ]]; then echo -e "${RED}○ $BUTLER_MODE ($BUTLER_STATUS)${NC}"; else echo -e "${GREEN}● $BUTLER_MODE ($BUTLER_STATUS)${NC}"; fi
+    if [[ "$BUTLER_STATUS" == *"error"* ]]; then 
+        echo -e "${RED}○ $BUTLER_MODE | $BUTLER_MODEL${NC}"
+        echo -e "               ${RED}Stat: $BUTLER_STATUS${NC}"
+        echo -e "               ${RED}URL:  $BUTLER_URL${NC}"
+    else 
+        echo -e "${GREEN}● $BUTLER_MODE | $BUTLER_MODEL${NC}"
+        echo -e "               URL:  $BUTLER_URL"
+    fi
     
     echo -n "  Embeddings:  "
-    if [[ "$EMB_STATUS" == *"error"* ]]; then echo -e "${RED}○ $EMB_MODE ($EMB_STATUS)${NC}"; else echo -e "${GREEN}● $EMB_MODE ($EMB_STATUS)${NC}"; fi
+    if [[ "$EMB_STATUS" == *"error"* ]]; then 
+        echo -e "${RED}○ $EMB_MODE | $EMB_MODEL${NC}"
+        echo -e "               ${RED}Stat: $EMB_STATUS${NC}"
+        echo -e "               ${RED}URL:  $EMB_URL${NC}"
+    else 
+        echo -e "${GREEN}● $EMB_MODE | $EMB_MODEL${NC}"
+        echo -e "               URL:  $EMB_URL"
+    fi
 else
     echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC} (Il gateway è spento o bloccato)"
     STATUS_JSON="{}" # Fallback per evitare errori nei passaggi successivi
