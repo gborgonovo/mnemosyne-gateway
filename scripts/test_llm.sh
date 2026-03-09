@@ -16,7 +16,7 @@ BOLD='\033[1m'
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
 
-clear
+
 echo -e "${CYAN}${BOLD}================================================================${NC}"
 echo -e "${CYAN}${BOLD}           Mnemosyne: Test Connettività OpenAI                  ${NC}"
 echo -e "${CYAN}${BOLD}================================================================${NC}"
