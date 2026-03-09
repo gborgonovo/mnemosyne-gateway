@@ -80,6 +80,24 @@ The project is a distributed ecosystem designed for modularity:
 
 ---
 
+## 🛠️ Utility Scripts
+
+The `scripts/` directory contains tools for managing the Mnemosyne lifecycle and data:
+
+### Lifecycle Management
+
+* **`./scripts/start.sh`**: Launches the Gateway and background Workers in `nohup` mode.
+* **`./scripts/stop.sh`**: Gracefully (and forcibly if needed) terminates all Mnemosyne processes.
+* **`./scripts/restart.sh`**: Performs a full stop, wait, and start cycle, followed by a health check of the API.
+
+### Data & Connectome
+
+* **`./scripts/backup.sh`**: Exports the entire graph memory to a timestamped JSON file in `data/backups/`.
+* **`./scripts/restore.sh`**: Restores the graph from a backup file (defaults to the latest available).
+* **`./scripts/manage_db.py`**: Python utility for administrative tasks (clear, backup, restore).
+
+---
+
 ## 🔌 Integrations
 
 * **OpenClaw**: Use the Skill in `integrations/openclaw/`.
