@@ -77,18 +77,23 @@ STATUS_JSON=$(curl -s --max-time 30 -H "X-API-Key: $API_KEY" http://localhost:$P
 if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
     echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}                       "
     
-    # Unica chiamata Python per estrarre tutto in modo sicuro
     $PYTHON_CMD -c "
 import sys, json
+
+# Passiamo i colori dallo shell come variabili Python
+GREEN = '$GREEN'
+RED = '$RED'
+YELLOW = '$YELLOW'
+NC = '$NC'
+BOLD = '$BOLD'
 
 try:
     data = json.load(sys.stdin)
 except:
-    print('  ${RED}○ Errore: Risposta API non valida${NC}')
+    print(f'  {RED}○ Errore: Risposta API non valida{NC}')
     sys.exit(0)
 
 def fmt_status(name, label):
-    # Cerca Butler sia in 'butler' che 'llm' per compatibilità
     obj = data.get(name)
     if not obj and name == 'butler':
         obj = data.get('llm', {})
@@ -99,21 +104,19 @@ def fmt_status(name, label):
     status = obj.get('status', 'unknown')
     url = obj.get('base_url', 'unknown')
     
-    color = '\033[0;32m●' if 'error' not in str(status).lower() else '\033[0;31m○'
-    nc = '\033[0m'
-    red = '\033[0;31m'
+    color = f'{GREEN}●' if 'error' not in str(status).lower() else f'{RED}○'
     
-    print(f'  {label:<12} {color} {mode} | {model}{nc}')
+    print(f'  {label:<12} {color} {mode} | {model}{NC}')
     if 'error' in str(status).lower():
-        print(f'               {red}Stat: {status}{nc}')
-        print(f'               {red}URL:  {url}{nc}')
+        print(f'               {RED}Stat: {status}{NC}')
+        print(f'               {RED}URL:  {url}{NC}')
     else:
         print(f'               URL:  {url}')
 
 # Neo4j
 n_status = data.get('neo4j', 'unknown')
-n_color = '\033[0;32m● CONNESSO' if n_status == 'connected' else f'\033[0;31m○ ERRORE ({n_status})'
-print(f'  Neo4j DB:    {n_color}\033[0m')
+n_color = f'{GREEN}● CONNESSO' if n_status == 'connected' else f'{RED}○ ERRORE ({n_status})'
+print(f'  Neo4j DB:    {n_color}{NC}')
 
 fmt_status('butler', 'Butler:')
 fmt_status('embeddings', 'Embeddings:')
@@ -129,6 +132,9 @@ echo ""
 echo -e "${BLUE}${BOLD}[ 3. Salute del Connectome ]${NC}"
 $PYTHON_CMD -c "
 import sys, json
+YELLOW = '$YELLOW'
+NC = '$NC'
+BOLD = '$BOLD'
 
 try:
     data = json.load(sys.stdin)
@@ -138,13 +144,13 @@ try:
     
     if nodes and nodes > 0:
         density = round(edges/nodes, 2) if nodes > 0 else 0
-        print(f'  Nodi totali: \033[1m{nodes}\033[0m')
-        print(f'  Relazioni:   \033[1m{edges}\033[0m')
-        print(f'  Densità:     \033[1m{density}\033[0m (Relazioni/Nodo)')
+        print(f'  Nodi totali: {BOLD}{nodes}{NC}')
+        print(f'  Relazioni:   {BOLD}{edges}{NC}')
+        print(f'  Densità:     {BOLD}{density}{NC} (Relazioni/Nodo)')
     else:
-        print('  \033[1;33mDati non disponibili o database vuoto.\033[0m')
+        print(f'  {YELLOW}Dati non disponibili o database vuoto.{NC}')
 except:
-    print('  \033[1;33mDati non disponibili o database vuoto.\033[0m')
+    print(f'  {YELLOW}Dati non disponibili o database vuoto.{NC}')
 " <<< "$STATUS_JSON"
 
 # Statistiche già stampate dal blocco Python sopra
