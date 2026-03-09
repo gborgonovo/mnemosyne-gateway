@@ -56,15 +56,21 @@ echo ""
 echo -e "${BLUE}${BOLD}[ 2. Stato Connettività & AI ]${NC}"
 STATUS_JSON=$(curl -s --max-time 3 http://localhost:$PORT/status)
 
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
     echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}"
     
-    # Parsing dello stato
-    NEO4J=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; print(json.load(sys.stdin).get('neo4j', 'unknown'))")
-    BUTLER_MODE=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; s=json.load(sys.stdin).get('butler', {}); print(s.get('mode', 'unknown'))")
-    BUTLER_STATUS=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; s=json.load(sys.stdin).get('butler', {}); print(s.get('status', 'unknown'))")
-    EMB_MODE=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; s=json.load(sys.stdin).get('embeddings', {}); print(s.get('mode', 'unknown'))")
-    EMB_STATUS=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; s=json.load(sys.stdin).get('embeddings', {}); print(s.get('status', 'unknown'))")
+    # Parsing dello stato con gestione errori Python
+    PARSE_CMD="import sys, json; 
+try:
+    data = json.load(sys.stdin)
+except:
+    data = {}"
+    
+    NEO4J=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('neo4j', 'unknown'))" <<< "$STATUS_JSON")
+    BUTLER_MODE=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('butler', {}).get('mode', 'unknown'))" <<< "$STATUS_JSON")
+    BUTLER_STATUS=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('butler', {}).get('status', 'unknown'))" <<< "$STATUS_JSON")
+    EMB_MODE=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('embeddings', {}).get('mode', 'unknown'))" <<< "$STATUS_JSON")
+    EMB_STATUS=$($PYTHON_CMD -c "$PARSE_CMD; print(data.get('embeddings', {}).get('status', 'unknown'))" <<< "$STATUS_JSON")
     
     echo -n "  Neo4j DB:    "
     if [[ "$NEO4J" == "connected" ]]; then echo -e "${GREEN}● CONNESSO${NC}"; else echo -e "${RED}○ ERRORE ($NEO4J)${NC}"; fi
@@ -76,26 +82,46 @@ if [ $? -eq 0 ]; then
     if [[ "$EMB_STATUS" == *"error"* ]]; then echo -e "${RED}○ $EMB_MODE ($EMB_STATUS)${NC}"; else echo -e "${GREEN}● $EMB_MODE ($EMB_STATUS)${NC}"; fi
 else
     echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC} (Il gateway è spento o bloccato)"
+    STATUS_JSON="{}" # Fallback per evitare errori nei passaggi successivi
 fi
 echo ""
 
 # 3. STATISTICHE CONNECTOME
 echo -e "${BLUE}${BOLD}[ 3. Salute del Connectome ]${NC}"
-# Estraiamo le statistiche dal JSON di stato se presenti (più veloce), altrimenti proviamo /stats
-NODES=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; d=json.load(sys.stdin).get('stats', {}); print(d.get('nodes') or d.get('total_nodes', 0))")
-EDGES=$(echo "$STATUS_JSON" | $PYTHON_CMD -c "import sys, json; d=json.load(sys.stdin).get('stats', {}); print(d.get('relationships') or d.get('total_relationships', 0))")
+# Estraiamo le statistiche con protezione contro errori di parsing
+STATS_PARSE="import sys, json;
+try:
+    d = json.load(sys.stdin)
+    s = d.get('stats', d) if 'stats' in d or 'nodes' in d or 'total_nodes' in d else {}
+    print(s.get('nodes') or s.get('total_nodes') or 0)
+except:
+    print(0)"
 
-if [ "$NODES" -eq "0" ] && [ $? -eq 0 ]; then
+NODES=$($PYTHON_CMD -c "$STATS_PARSE" <<< "$STATUS_JSON")
+
+if [ "$NODES" -eq "0" ] 2>/dev/null; then
     # Se non c'erano nello stato, prova l'endpoint dedicato
     STATS_JSON=$(curl -s --max-time 2 http://localhost:$PORT/stats)
-    NODES=$(echo "$STATS_JSON" | $PYTHON_CMD -c "import sys, json; d=json.load(sys.stdin); print(d.get('nodes') or d.get('total_nodes', 0))")
-    EDGES=$(echo "$STATS_JSON" | $PYTHON_CMD -c "import sys, json; d=json.load(sys.stdin); print(d.get('relationships') or d.get('total_relationships', 0))")
+    if [ ! -z "$STATS_JSON" ]; then
+        NODES=$($PYTHON_CMD -c "$STATS_PARSE" <<< "$STATS_JSON")
+        EDGES=$($PYTHON_CMD -c "import sys, json; 
+try:
+    d = json.load(sys.stdin)
+    print(d.get('relationships') or d.get('total_relationships') or 0)
+except:
+    print(0)" <<< "$STATS_JSON")
+    else
+        NODES=0
+        EDGES=0
+    fi
+else
+    EDGES=$($PYTHON_CMD -c "import sys, json; d=json.load(sys.stdin).get('stats', {}); print(d.get('relationships') or d.get('total_relationships') or 0)" <<< "$STATUS_JSON")
 fi
 
-if [ "$NODES" -gt 0 ]; then
+if [ ! -z "$NODES" ] && [ "$NODES" -gt 0 ] 2>/dev/null; then
     echo -e "  Nodi totali: ${BOLD}$NODES${NC}"
     echo -e "  Relazioni:   ${BOLD}$EDGES${NC}"
-    DENSITY=$($PYTHON_CMD -c "print(round($EDGES/$NODES, 2))")
+    DENSITY=$($PYTHON_CMD -c "print(round($EDGES/$NODES, 2))" 2>/dev/null || echo "0")
     echo -e "  Densità:     ${BOLD}$DENSITY${NC} (Relazioni/Nodo)"
 else
     echo -e "  ${YELLOW}Dati non disponibili o database vuoto.${NC}"
