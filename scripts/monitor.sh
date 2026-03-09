@@ -64,11 +64,13 @@ echo ""
 
 # 2. CONTROLLO CONNETTIVITÀ & AI
 echo -e "${BLUE}${BOLD}[ 2. Stato Connettività & AI ]${NC}"
-# Timeout aumentato a 10 secondi per gestire risposte lente da OpenAI
-STATUS_JSON=$(curl -s --max-time 10 -H "X-API-Key: $API_KEY" http://localhost:$PORT/status)
+echo -ne "  Interrogazione Gateway in corso (max 15s)... \r"
+
+# Timeout aumentato a 15 secondi per gestire risposte lente da OpenAI/Ollama
+STATUS_JSON=$(curl -s --max-time 15 -H "X-API-Key: $API_KEY" http://localhost:$PORT/status)
 
 if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
-    echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}"
+    echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}                       "
     
     # Parsing dello stato con gestione errori Python
     PARSE_CMD="import sys, json; 
@@ -116,8 +118,8 @@ except:
         echo -e "               URL:  $EMB_URL"
     fi
 else
-    echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC}"
-    echo -e "               (Timeout o Errore Auth. Controlla porta e chiavi)"
+    echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC}                       "
+    echo -e "               (Timeout dopo 15s o Errore Auth. Controlla porta e chiavi)"
     STATUS_JSON="{}" 
 fi
 echo ""
