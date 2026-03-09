@@ -147,20 +147,25 @@ except:
     print('  \033[1;33mDati non disponibili o database vuoto.\033[0m')
 " <<< "$STATUS_JSON"
 
-if [ ! -z "$NODES" ] && [ "$NODES" -gt 0 ] 2>/dev/null; then
-    echo -e "  Nodi totali: ${BOLD}$NODES${NC}"
-    echo -e "  Relazioni:   ${BOLD}$EDGES${NC}"
-    DENSITY=$($PYTHON_CMD -c "print(round($EDGES/$NODES, 2))" 2>/dev/null || echo "0")
-    echo -e "  Densità:     ${BOLD}$DENSITY${NC} (Relazioni/Nodo)"
-else
-    echo -e "  ${YELLOW}Dati non disponibili o database vuoto.${NC}"
-fi
+# Statistiche già stampate dal blocco Python sopra
 echo ""
 
 # 4. CODA DI APPRENDIMENTO (QUEUE)
 echo -e "${BLUE}${BOLD}[ 4. Coda di Apprendimento ]${NC}"
 if [ -d "data/queue" ]; then
-    PENDING=$(ls -1 data/queue/*.json 2>/dev/null | wc -l)
+    # Conta solo i file con status pending o failed
+    PENDING=$($PYTHON_CMD -c "
+import os, json
+count = 0
+for f in os.listdir('data/queue'):
+    if f.endswith('.json'):
+        try:
+            with open(os.path.join('data/queue', f), 'r') as j:
+                if json.load(j).get('status') in ['pending', 'failed']:
+                    count += 1
+        except: pass
+print(count)
+" 2>/dev/null || echo 0)
     if [ "$PENDING" -gt 0 ]; then
         echo -e "  Pending:     ${YELLOW}$PENDING osservazioni da processare${NC}"
     else
