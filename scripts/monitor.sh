@@ -13,10 +13,19 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-# Estrazione porta da configurazione
+# Estrazione porta e chiave API
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
 PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+
+# Estrazione chiave API (prende la prima disponibile)
+API_KEY=$($PYTHON_CMD -c "import yaml, os; 
+try:
+    with open('config/api_keys.yaml', 'r') as f:
+        keys = yaml.safe_load(f)
+        print(next(iter(keys)) if keys else '')
+except:
+    print('')" 2>/dev/null)
 
 clear
 echo -e "${CYAN}${BOLD}================================================================${NC}"
@@ -24,6 +33,7 @@ echo -e "${CYAN}${BOLD}           Mnemosyne: Pannello di Controllo Cognitivo    
 echo -e "${CYAN}${BOLD}================================================================${NC}"
 echo -e "Data: $(date)"
 echo -e "Porta Gateway: ${BOLD}$PORT${NC}"
+if [ ! -z "$API_KEY" ]; then echo -e "Auth:          ${GREEN}Configurata${NC}"; else echo -e "Auth:          ${YELLOW}Nessuna chiave (Open Mode?)${NC}"; fi
 echo -e ""
 
 # 1. CONTROLLO PROCESSI (LIFECYCLE)
@@ -54,7 +64,8 @@ echo ""
 
 # 2. CONTROLLO CONNETTIVITÀ & AI
 echo -e "${BLUE}${BOLD}[ 2. Stato Connettività & AI ]${NC}"
-STATUS_JSON=$(curl -s --max-time 3 http://localhost:$PORT/status)
+# Timeout aumentato a 10 secondi per gestire risposte lente da OpenAI
+STATUS_JSON=$(curl -s --max-time 10 -H "X-API-Key: $API_KEY" http://localhost:$PORT/status)
 
 if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
     echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}"
@@ -105,8 +116,9 @@ except:
         echo -e "               URL:  $EMB_URL"
     fi
 else
-    echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC} (Il gateway è spento o bloccato)"
-    STATUS_JSON="{}" # Fallback per evitare errori nei passaggi successivi
+    echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC}"
+    echo -e "               (Timeout o Errore Auth. Controlla porta e chiavi)"
+    STATUS_JSON="{}" 
 fi
 echo ""
 
@@ -124,8 +136,8 @@ except:
 NODES=$($PYTHON_CMD -c "$STATS_PARSE" <<< "$STATUS_JSON")
 
 if [ "$NODES" -eq "0" ] 2>/dev/null; then
-    # Se non c'erano nello stato, prova l'endpoint dedicato
-    STATS_JSON=$(curl -s --max-time 2 http://localhost:$PORT/stats)
+    # Se non c'erano nello stato, prova l'endpoint dedicato con Auth
+    STATS_JSON=$(curl -s --max-time 3 -H "X-API-Key: $API_KEY" http://localhost:$PORT/stats)
     if [ ! -z "$STATS_JSON" ]; then
         NODES=$($PYTHON_CMD -c "$STATS_PARSE" <<< "$STATS_JSON")
         EDGES=$($PYTHON_CMD -c "import sys, json; 
