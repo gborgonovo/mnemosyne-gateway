@@ -19,13 +19,18 @@ echo "⏳ In attesa che il Gateway sia pronto..."
 # Attesa di 3 secondi per l'inizializzazione del gateway
 sleep 5
 
+# Estrai la porta dalla configurazione (default 4001)
+PYTHON_CMD="python3"
+if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
+PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+
 # 3. Verifica dello stato
-echo "🔍 Verifica dello stato..."
-if curl -s -f http://localhost:4001/status > /dev/null; then
-    curl -s http://localhost:4001/status | python3 -m json.tool
+echo "🔍 Verifica dello stato sulla porta $PORT..."
+if curl -s -f http://localhost:$PORT/status > /dev/null; then
+    curl -s http://localhost:$PORT/status | $PYTHON_CMD -m json.tool
     echo "✅ Sistema riavviato correttamente!"
 else
-    echo "❌ Errore nella verifica del Gateway. Il servizio potrebbe essere ancora in fase di avvio o aver riscontrato un problema."
+    echo "❌ Errore nella verifica del Gateway sulla porta $PORT."
     echo "Controlla i log con: tail -n 20 logs/gateway.log"
 fi
 

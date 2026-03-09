@@ -16,12 +16,17 @@ if [ -f logs/gateway.pid ]; then
   rm logs/gateway.pid
 fi
 
-# 2. FALLBACK FONDAMENTALE: Verifica se la porta 4001 è ancora occupata
+# Estrai la porta dalla configurazione (default 4001)
+PYTHON_CMD="python3"
+if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
+PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+
+# 2. FALLBACK FONDAMENTALE: Verifica se la porta è ancora occupata
 # (Indipendentemente dal file PID, se la porta è piena il restart fallirà)
-PORT_PID=$(lsof -t -i :4001 2>/dev/null)
+PORT_PID=$(lsof -t -i :$PORT 2>/dev/null)
 if [ ! -z "$PORT_PID" ]; then
-  echo "⚠  Porta 4001 ancora occupata dal processo $PORT_PID. Terminazione forzata..."
-  kill -9 $PORT_PID 2>/dev/null && echo "✅ Gateway rimosso dalla porta 4001"
+  echo "⚠  Porta $PORT ancora occupata dal processo $PORT_PID. Terminazione forzata..."
+  kill -9 $PORT_PID 2>/dev/null && echo "✅ Gateway rimosso dalla porta $PORT"
 fi
 
 # 3. PULIZIA FINALE: Per sicurezza, cerca eventuali processi rimasti per nome
