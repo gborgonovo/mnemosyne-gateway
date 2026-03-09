@@ -80,17 +80,10 @@ if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
     $PYTHON_CMD -c "
 import sys, json
 
-# Passiamo i colori dallo shell come variabili Python
-GREEN = '$GREEN'
-RED = '$RED'
-YELLOW = '$YELLOW'
-NC = '$NC'
-BOLD = '$BOLD'
-
 try:
     data = json.load(sys.stdin)
 except:
-    print(f'  {RED}○ Errore: Risposta API non valida{NC}')
+    print(f'  ${RED}○ Errore: Risposta API non valida${NC}')
     sys.exit(0)
 
 def fmt_status(name, label):
@@ -104,19 +97,19 @@ def fmt_status(name, label):
     status = obj.get('status', 'unknown')
     url = obj.get('base_url', 'unknown')
     
-    color = f'{GREEN}●' if 'error' not in str(status).lower() else f'{RED}○'
+    color = f'${GREEN}●' if 'error' not in str(status).lower() else f'${RED}○'
     
-    print(f'  {label:<12} {color} {mode} | {model}{NC}')
+    print(f'  {label:<12} {color} {mode} | {model}${NC}')
     if 'error' in str(status).lower():
-        print(f'               {RED}Stat: {status}{NC}')
-        print(f'               {RED}URL:  {url}{NC}')
+        print(f'               ${RED}Stat: {status}${NC}')
+        print(f'               ${RED}URL:  {url}${NC}')
     else:
         print(f'               URL:  {url}')
 
 # Neo4j
 n_status = data.get('neo4j', 'unknown')
-n_color = f'{GREEN}● CONNESSO' if n_status == 'connected' else f'{RED}○ ERRORE ({n_status})'
-print(f'  Neo4j DB:    {n_color}{NC}')
+n_color = f'${GREEN}● CONNESSO' if n_status == 'connected' else f'${RED}○ ERRORE ({n_status})'
+print(f'  Neo4j DB:    {n_color}${NC}')
 
 fmt_status('butler', 'Butler:')
 fmt_status('embeddings', 'Embeddings:')
@@ -132,9 +125,6 @@ echo ""
 echo -e "${BLUE}${BOLD}[ 3. Salute del Connectome ]${NC}"
 $PYTHON_CMD -c "
 import sys, json
-YELLOW = '$YELLOW'
-NC = '$NC'
-BOLD = '$BOLD'
 
 try:
     data = json.load(sys.stdin)
@@ -144,13 +134,13 @@ try:
     
     if nodes and nodes > 0:
         density = round(edges/nodes, 2) if nodes > 0 else 0
-        print(f'  Nodi totali: {BOLD}{nodes}{NC}')
-        print(f'  Relazioni:   {BOLD}{edges}{NC}')
-        print(f'  Densità:     {BOLD}{density}{NC} (Relazioni/Nodo)')
+        print(f'  Nodi totali: ${BOLD}{nodes}${NC}')
+        print(f'  Relazioni:   ${BOLD}{edges}${NC}')
+        print(f'  Densità:     ${BOLD}{density}${NC} (Relazioni/Nodo)')
     else:
-        print(f'  {YELLOW}Dati non disponibili o database vuoto.{NC}')
+        print(f'  ${YELLOW}Dati non disponibili o database vuoto.${NC}')
 except:
-    print(f'  {YELLOW}Dati non disponibili o database vuoto.{NC}')
+    print(f'  ${YELLOW}Dati non disponibili o database vuoto.${NC}')
 " <<< "$STATUS_JSON"
 
 # Statistiche già stampate dal blocco Python sopra
