@@ -89,6 +89,7 @@ The `scripts/` directory contains tools for managing the Mnemosyne lifecycle and
 * **`./scripts/start.sh`**: Launches the Gateway and background Workers in `nohup` mode.
 * **`./scripts/stop.sh`**: Gracefully (and forcibly if needed) terminates all Mnemosyne processes.
 * **`./scripts/restart.sh`**: Performs a full stop, wait, and start cycle, followed by a health check of the API.
+* **`./scripts/monitor.sh`**: **(Recommended)** A comprehensive control panel showing process health, DB connectivity, AI status, and graph statistics.
 
 ### Data & Connectome
 
