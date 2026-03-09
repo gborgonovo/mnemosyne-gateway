@@ -64,9 +64,9 @@ echo ""
 
 # 2. CONTROLLO CONNETTIVITÀ & AI
 echo -e "${BLUE}${BOLD}[ 2. Stato Connettività & AI ]${NC}"
-echo -ne "  Interrogazione Gateway in corso (max 15s)... \r"
+echo -ne "  Interrogazione Gateway in corso (max 30s)... \r"
 
-STATUS_JSON=$(curl -s --max-time 15 -H "X-API-Key: $API_KEY" http://localhost:$PORT/status)
+STATUS_JSON=$(curl -s --max-time 30 -H "X-API-Key: $API_KEY" http://localhost:$PORT/status)
 
 if [ $? -eq 0 ] && [ ! -z "$STATUS_JSON" ]; then
     echo -e "  Gateway API: ${GREEN}● RAGGIUNGIBILE${NC}                       "
