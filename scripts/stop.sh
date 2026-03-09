@@ -16,10 +16,14 @@ if [ -f logs/gateway.pid ]; then
   rm logs/gateway.pid
 fi
 
-# Estrai la porta dalla configurazione (default 4001)
+# Estrazione porta (Python -> Grep -> Default)
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
-PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null)
+if [ -z "$PORT" ]; then
+    PORT=$(grep "port:" config/settings.yaml | sed 's/[^0-9]*//g' | head -n 1)
+fi
+if [ -z "$PORT" ]; then PORT=4002; fi
 
 # 2. FALLBACK FONDAMENTALE: Verifica se la porta è ancora occupata
 # (Indipendentemente dal file PID, se la porta è piena il restart fallirà)

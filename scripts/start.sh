@@ -28,10 +28,14 @@ BRIEFING_PID=$!
 echo $BRIEFING_PID > logs/briefing_worker.pid
 echo "✅ Briefing Worker avviato (PID: $BRIEFING_PID). Log: logs/briefing_worker.log"
 
-# Estrai la porta dalla configurazione (default 4001) per il messaggio finale
+# Estrazione porta (Python -> Grep -> Default)
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
-PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null)
+if [ -z "$PORT" ]; then
+    PORT=$(grep "port:" config/settings.yaml | sed 's/[^0-9]*//g' | head -n 1)
+fi
+if [ -z "$PORT" ]; then PORT=4002; fi
 
 echo ""
 echo "🚀 Sistema completamente operativo in background!"

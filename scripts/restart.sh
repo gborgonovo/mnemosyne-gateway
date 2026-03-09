@@ -19,10 +19,14 @@ echo "⏳ In attesa che il Gateway sia pronto..."
 # Attesa di 3 secondi per l'inizializzazione del gateway
 sleep 5
 
-# Estrai la porta dalla configurazione (default 4001)
+# Estrazione porta (Python -> Grep -> Default)
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
-PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null || echo 4001)
+PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null)
+if [ -z "$PORT" ]; then
+    PORT=$(grep "port:" config/settings.yaml | sed 's/[^0-9]*//g' | head -n 1)
+fi
+if [ -z "$PORT" ]; then PORT=4002; fi
 
 # 3. Verifica dello stato
 echo "🔍 Verifica dello stato sulla porta $PORT..."

@@ -120,7 +120,7 @@ fmt_status('embeddings', 'Embeddings:')
 " <<< "$STATUS_JSON"
 else
     echo -e "  Gateway API: ${RED}○ NON RAGGIUNGIBILE${NC}                       "
-    echo -e "               (Timeout dopo 15s o Errore Auth. Controlla porta e chiavi)"
+    echo -e "               (Timeout dopo 30s o Errore Auth. Controlla porta e chiavi)"
     STATUS_JSON="{}" 
 fi
 echo ""
