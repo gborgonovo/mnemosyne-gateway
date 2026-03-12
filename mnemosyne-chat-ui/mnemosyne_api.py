@@ -38,9 +38,15 @@ def generate_context_from_query(query: str) -> str:
             resp = requests.get(url, params={"q": word}, timeout=2)
             if resp.status_code == 200:
                 data = resp.json()
-                details = f"- {data.get('name', word)}: {data.get('properties', {}).get('summary', '')}"
+                
+                # Extract summary safely
+                summary = data.get('properties', {}).get('summary', '').strip()
+                if not summary:
+                    summary = "(Solo nome del nodo, nessun dettaglio aggiuntivo presente nel grafo)"
+                    
+                details = f"- {data.get('name', word)}: {summary}"
                 if data.get("related"):
-                    details += f" (Related: {', '.join(data['related'][:3])})"
+                    details += f" (Nodi correlati: {', '.join(data['related'][:3])})"
                 
                 if details not in found_concepts:
                     found_concepts.append(details)
