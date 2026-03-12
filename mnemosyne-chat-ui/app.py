@@ -2,7 +2,7 @@ import streamlit as st
 import database
 import mnemosyne_api
 import llm_client
-from config_reader import get_butler_prompt
+from config_reader import get_tester_prompt
 
 st.set_page_config(page_title="Mnemosyne Chat", page_icon="🧠", layout="wide")
 
@@ -58,7 +58,7 @@ if st.session_state.current_chat_id:
             status.update(label="Memorie recuperate", state="complete", expanded=False)
             
         # 4. Prepare messages for LLM
-        base_prompt = get_butler_prompt()
+        base_prompt = get_tester_prompt()
         if mnemosyne_context:
             system_content = f"{base_prompt}\n\n[MNEMOSYNE MEMORY RETRIEVAL]\n{mnemosyne_context}"
         else:

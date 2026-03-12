@@ -46,9 +46,11 @@ def get_gateway_config():
         "port": settings['gateway'].get('port', 4002)
     }
 
-def get_butler_prompt():
+def get_tester_prompt():
     settings = load_settings()
     try:
-        return settings['llm']['prompts']['butler']
+        # Peskily look for the tester prompt first, fallback to the regular butler
+        prompts = settings['llm']['prompts']
+        return prompts.get('tester', prompts.get('butler', "Sei un assistente AI."))
     except (KeyError, TypeError):
         return "Sei un assistente AI."
