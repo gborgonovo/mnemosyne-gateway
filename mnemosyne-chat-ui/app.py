@@ -27,9 +27,20 @@ with st.sidebar:
     for chat in chats:
         # Highlight active chat
         button_type = "primary" if str(chat["id"]) == str(st.session_state.current_chat_id) else "secondary"
-        if st.button(chat["title"], key=f"chat_{chat['id']}", type=button_type, use_container_width=True):
-            st.session_state.current_chat_id = str(chat["id"])
-            st.rerun()
+        
+        col1, col2 = st.sidebar.columns([0.8, 0.2])
+        
+        with col1:
+            if st.button(chat["title"], key=f"chat_{chat['id']}", type=button_type, use_container_width=True):
+                st.session_state.current_chat_id = str(chat["id"])
+                st.rerun()
+        
+        with col2:
+            if st.button("🗑️", key=f"del_{chat['id']}", help="Elimina conversazione"):
+                database.delete_chat(str(chat["id"]))
+                if st.session_state.current_chat_id == str(chat["id"]):
+                    st.session_state.current_chat_id = None
+                st.rerun()
 
 # --- MAIN CHAT AREA ---
 if st.session_state.current_chat_id:

@@ -78,5 +78,12 @@ def update_chat_title(chat_id: str, new_title: str):
     conn.commit()
     conn.close()
 
+def delete_chat(chat_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM chats WHERE id = ?', (chat_id,))
+    conn.commit()
+    conn.close()
+
 # Initialize database on module import
 init_db()
