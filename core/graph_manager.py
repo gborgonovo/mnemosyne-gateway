@@ -153,14 +153,16 @@ class GraphManager:
         """
         Ensures a full-text search index is available for semantic fallback.
         """
+        # Note: se l'indice esiste già con la vecchia configurazione, va rimosso dal database
+        # affinché IF NOT EXISTS crei quello nuovo.
         query = (
             "CREATE FULLTEXT INDEX mnemosyne_text_idx IF NOT EXISTS "
-            "FOR (n:Node) ON EACH [n.name, n.title, n.description, n.summary, n.ai_context]"
+            "FOR (n:Node) ON EACH [n.name, n.title, n.description, n.summary, n.ai_context, n.content]"
         )
         try:
             with self.driver.session() as session:
                 session.run(query)
-                logger.info("Full-text index 'mnemosyne_text_idx' checked/created.")
+                logger.info("Full-text index 'mnemosyne_text_idx' checked/created (includes n.content).")
         except Exception as e:
             logger.warning(f"Could not create full-text index: {e}")
 
