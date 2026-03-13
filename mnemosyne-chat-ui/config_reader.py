@@ -46,6 +46,28 @@ def get_gateway_config():
         "port": settings['gateway'].get('port', 4002)
     }
 
+def get_api_key():
+    # 1. Environment variable (preferred)
+    env_key = os.getenv("MNEMOSYNE_API_KEY")
+    if env_key:
+        return env_key
+        
+    # 2. Fallback to reading the first key from api_keys.yaml if it exists
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    api_keys_path = os.path.join(base_dir, "config", "api_keys.yaml")
+    
+    if os.path.exists(api_keys_path):
+        try:
+            with open(api_keys_path, 'r', encoding='utf-8') as f:
+                keys = yaml.safe_load(f)
+                if keys and isinstance(keys, dict):
+                    # Return the first key available
+                    return next(iter(keys))
+        except Exception:
+            pass
+            
+    return None
+
 def get_tester_prompt():
     settings = load_settings()
     try:

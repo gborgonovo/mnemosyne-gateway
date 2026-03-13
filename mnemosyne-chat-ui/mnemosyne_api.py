@@ -1,16 +1,20 @@
 import requests
 import json
-from config_reader import get_gateway_config
+from config_reader import get_gateway_config, get_api_key
 
 def get_base_url():
     config = get_gateway_config()
     return f"http://{config['host']}:{config['port']}"
 
+def get_auth_header():
+    key = get_api_key()
+    return {"X-API-Key": key} if key else {}
+
 def fetch_briefing() -> str:
     """Fetch the longitudinal briefing from Mnemosyne."""
     try:
         url = f"{get_base_url()}/briefing"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, headers=get_auth_header(), timeout=5)
         if response.status_code == 200:
             data = response.json()
             parts = []
@@ -35,7 +39,7 @@ def generate_context_from_query(query: str) -> str:
         
         # Search backwards to prioritize the latest concepts in the sentence
         for word in reversed(words):
-            resp = requests.get(url, params={"q": word}, timeout=2)
+            resp = requests.get(url, params={"q": word}, headers=get_auth_header(), timeout=2)
             if resp.status_code == 200:
                 data = resp.json()
                 
@@ -68,7 +72,7 @@ def add_memory(user_input: str, assistant_response: str):
         content = f"User: {user_input}\nAssistant: {assistant_response}"
         payload = {"content": content}
         
-        response = requests.post(url, json=payload, timeout=5)
+        response = requests.post(url, json=payload, headers=get_auth_header(), timeout=5)
         response.raise_for_status()
         return True
     except Exception as e:
