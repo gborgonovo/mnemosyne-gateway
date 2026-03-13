@@ -4,6 +4,7 @@ import yaml
 import uvicorn
 import requests
 import threading
+import time
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
 from fastapi.responses import FileResponse
 import shutil
@@ -44,6 +45,7 @@ from butler.perception import PerceptionModule
 from butler.initiative import InitiativeEngine
 from butler.knowledge_queue import KnowledgeQueue
 from workers.learning_worker import LearningWorker
+from workers.gardener import Gardener
 from core.chunking import HeuristicChunker
 
 # Load Configuration
@@ -124,6 +126,19 @@ try:
     worker.start()
     
     chunker = HeuristicChunker()
+
+    def gardener_loop(gm, llm, am, config):
+        gardener = Gardener(gm, llm, am, config)
+        # Give the server a moment to start before the first run
+        time.sleep(60)
+        while True:
+            try:
+                gardener.run_once()
+            except Exception as e:
+                logger.error(f"Gardener error: {e}")
+            time.sleep(gardener.interval)
+
+    threading.Thread(target=gardener_loop, args=(gm, butler_llm, am, config), daemon=True).start()
 
     def forward_event_to_plugins(event_type: str, payload: Dict[str, Any]):
         """
