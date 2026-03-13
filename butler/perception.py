@@ -55,8 +55,17 @@ class PerceptionModule:
             if not name: continue
             ent_type = ent.get('type', 'Topic')
             
+            # Fetch optional but recommended fields
+            properties = {}
+            if 'description' in ent:
+                properties['description'] = ent['description']
+            if 'status' in ent:
+                properties['status'] = ent['status']
+            if 'deadline' in ent:
+                properties['deadline'] = ent['deadline']
+            
             # Create/Merge the node
-            node_data = self.gm.add_node(name, primary_label=ent_type, scope=scope)
+            node_data = self.gm.add_node(name, primary_label=ent_type, scope=scope, properties=properties)
             touched_node_names.append(node_data['name'])
             node_map[name.lower()] = node_data['name']
 

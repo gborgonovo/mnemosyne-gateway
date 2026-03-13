@@ -136,21 +136,19 @@ class OpenAILLM(LLMProvider):
         prompt = f"""
         Extract key entities and topics from the following text.{context_info}
         Structure your response as a JSON object with two keys:
-        1. "entities": a list of objects, each with 'name' (the label) and 'type' (Entity, Topic, Resource, Goal, or Task).
+        1. "entities": a list of objects, each with 'name' (the label), 'type' (Topic, Project, Goal, or Task), and a brief 'description' (a short summary of what this entity is based on the text).
         2. "relationships": a list of objects, each representing an explicit link between two extracted entities. Each must have 'source', 'target', and 'type' (a screaming snake case verb EXCLUSIVELY from this list: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
         
-        - Entity: Concrete items (People, Tools, Places, specific things the user mentions).
-        - Topic: Abstract themes or ideas.
-        - Resource: Digital artifacts (Files, Links).
-        - Goal: Long-term objectives (e.g., 'Launch the B&B').
-        - Task: Specific actions or commitments (e.g., 'Fix the sink', 'Call the bank'). Tasks should also extract 'status' (todo/done) and 'deadline' if mentioned.
+        - Topic: Any concept, person, tool, place, resource or abstract theme.
+        - Project: A large structured container for tasks and topics (e.g., 'Progetto Mnemosyne').
+        - Goal: Long-term objectives.
+        - Task: Specific actions or commitments. Tasks should also extract 'status' (todo/done) and 'deadline' if mentioned.
         
         CRITICAL INSTRUCTIONS:
-        1. If the user is ASKING about something (e.g., "Parlami della stalla", "Cosa sai del progetto X?"), extract the SUBJECT of their question as an Entity.
-        2. Ignore generic adjectives (e.g., 'interessante', 'utile'), conversational fillers, or common verbs.
-        3. Focus on nouns, proper names, and well-defined technical terms.
-        4. Even simple requests like "Tell me about X" should extract X as an entity.
-        5. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If two concepts are similar/congruent, map A -> RELATED_TO -> B.
+        1. You must ALWAYS provide a 'description' for every extracted object to avoid empty nodes.
+        2. If the user is ASKING about something, extract the SUBJECT of their question as a Topic.
+        3. Ignore conversational fillers or common verbs. Focus on nouns and proper names.
+        4. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If a new Task is created, strongly try to link it to the relevant Project or Topic using RELATED_TO or PART_OF.
         
         Text: {text}
         """
@@ -277,20 +275,20 @@ class OllamaLLM(LLMProvider):
         prompt = f"""
         Extract key entities and topics from the following text.{context_info}
         Structure your response as a JSON object with two keys:
-        1. "entities": a list of objects, each with 'name' (the label) and 'type' (Entity, Topic, Resource, Goal, or Task).
+        1. "entities": a list of objects, each with 'name' (the label), 'type' (Topic, Project, Goal, or Task), and a brief 'description' (a short summary of what this entity is based on the text).
         2. "relationships": a list of objects, each representing an explicit link between two extracted entities. Each must have 'source', 'target', and 'type' (a screaming snake case verb EXCLUSIVELY from this list: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
         
-        - Entity: Concrete items (People, Tools, Places, specific things the user mentions).
-        - Topic: Abstract themes or ideas.
-        - Resource: Digital artifacts (Files, Links).
-        - Goal: Long-term objectives (e.g., 'Launch the B&B').
-        - Task: Specific actions or commitments (e.g., 'Fix the sink', 'Call the bank'). Tasks should also extract 'status' (todo/done) and 'deadline' if mentioned.
+        - Topic: Any concept, person, tool, place, resource or abstract theme.
+        - Project: A large structured container for tasks and topics (e.g., 'Progetto Mnemosyne').
+        - Goal: Long-term objectives.
+        - Task: Specific actions or commitments. Tasks should also extract 'status' (todo/done) and 'deadline' if mentioned.
         
         CRITICAL INSTRUCTIONS:
-        1. If the user is ASKING about something (e.g., "Parlami della stalla", "Cosa sai del progetto X?"), extract the SUBJECT of their question as an Entity.
-        2. Ignore conversational fillers or common verbs.
-        3. Return ONLY the JSON object. No preamble or postscript.
-        4. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If two concepts are similar/congruent, map A -> RELATED_TO -> B.
+        1. You must ALWAYS provide a 'description' for every extracted object to avoid empty nodes.
+        2. If the user is ASKING about something, extract the SUBJECT of their question as a Topic.
+        3. Ignore conversational fillers or common verbs. Focus on nouns and proper names.
+        4. Return ONLY the JSON object. No preamble or postscript.
+        5. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If a new Task is created, strongly try to link it to the relevant Project or Topic using RELATED_TO or PART_OF.
         
         Text: {text}
         """
