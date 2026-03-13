@@ -631,3 +631,22 @@ class GraphManager:
             result = session.run(query, name=name, embedding=embedding)
             return result.single() is not None
 
+    def get_orphan_tasks(self, scopes: list[str] = None) -> list[dict]:
+        """
+        Finds Task nodes that have NO relationships attached to them AND
+        are not explicitly marked to be kept as orphans.
+        """
+        scope_clause = self._get_scope_filter(scopes)
+        where_scope = f"AND {scope_clause}" if scope_clause else ""
+        
+        query = f"""
+        MATCH (n:Task)
+        WHERE NOT (n)-[]-()
+        AND coalesce(n.allow_orphan, false) = false
+        {where_scope}
+        RETURN n.name as name, labels(n) as labels, properties(n) as props
+        """
+        with self.driver.session() as session:
+            results = session.run(query)
+            return [dict(record) for record in results]
+

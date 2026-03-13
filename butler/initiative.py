@@ -133,4 +133,26 @@ class InitiativeEngine:
                     if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3):
                         return initiatives
 
+        # New: Orphan Tasks
+        orphan_query = f"""
+        MATCH (n:Task)
+        WHERE n._is_orphan = true
+        "{self.gm._get_scope_filter(scopes, var_name='n')}"
+        RETURN n.name as name LIMIT 2
+        """
+        # Quick manual grab via GM driver to save time
+        try:
+            with self.gm.driver.session() as session:
+                for record in session.run(orphan_query.replace('""', '')):
+                    initiatives.append({
+                        "source": record['name'],
+                        "target": "Contextualization",
+                        "message": f"Ho notato il task isolato **{record['name']}**. Desidera collegarlo a un Progetto o lasciarlo libero?",
+                        "reason": f"Orphan Task '{record['name']}' detected."
+                    })
+                    if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3):
+                        return initiatives
+        except Exception as e:
+            logger.error(f"Failed to query orphan tasks in InitiativeEngine: {e}")
+
         return initiatives

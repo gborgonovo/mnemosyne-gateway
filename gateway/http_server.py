@@ -304,6 +304,22 @@ def delete_node_api(name: str, scopes: Optional[str] = "Public", allowed_scopes:
          
     return {"status": "success", "message": f"Node '{name}' deleted"}
 
+@app.patch("/nodes/{name}/allow_orphan")
+def allow_orphan_task(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+    """
+    Marks a Task as intentionally isolated so the Gardener stops suggesting to contextualize it.
+    """
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
+        
+    # We remove the hidden flag and set the explicit allow flag
+    result = gm.update_node_properties(name, {"allow_orphan": True, "_is_orphan": None}, scopes=actual_scopes)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
+        
+    return {"status": "success", "message": f"Task '{name}' has been marked to float freely."}
+
 @app.get("/search")
 def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, allowed_scopes)

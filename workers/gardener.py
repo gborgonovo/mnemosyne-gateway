@@ -35,6 +35,7 @@ class Gardener:
         self.find_and_mark_duplicates()
         self.check_deadlines()
         self.check_dormant_projects()
+        self.check_orphan_tasks()
         # New: Backfill embeddings if enabled
         self.backfill_embeddings()
         logger.info("Gardener finished cycle.")
@@ -56,6 +57,20 @@ class Gardener:
             # We stimulate it slightly so it appears in the active context as a "ghost" or proactive suggestion
             if self.am:
                  self.am.stimulate([node['name']], boost_amount=0.3)
+
+    def check_orphan_tasks(self):
+        """
+        Finds Tasks that have no relationships and flags them as orphans.
+        If a Task is explicitly marked with 'allow_orphan'=True, it is ignored.
+        """
+        logger.info("Gardener checking for orphan Tasks...")
+        nodes = self.gm.get_orphan_tasks()
+        for node in nodes:
+            name = node['name']
+            # We add a hidden property so the InitiativeEngine can pick it up
+            # without constantly boosting it
+            self.gm.update_node_properties(name, {"_is_orphan": True})
+            logger.info(f"Gardener marked Task '{name}' as orphan for future briefing.")
 
     def sanitize_duplicates(self):
         """
