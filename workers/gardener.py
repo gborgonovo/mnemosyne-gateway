@@ -160,28 +160,50 @@ class Gardener:
 
     def find_and_mark_duplicates(self):
         """
-        Scans all nodes, compares names/concepts using simple string similarity.
-        Create MAYBE_SAME_AS edges.
+        Finds semantic duplicates using Embeddings-First strategy.
+        If embeddings are not enabled, uses robust string matching (Levenshtein/Jaccard)
+        to minimize LLM calls.
         """
-        nodes = self.gm.get_all_nodes()
-        # Exclude Observation nodes and ensure unique names list for comparison
-        node_names = sorted(list(set(n['name'] for n in nodes if "Observation" not in n['labels'])))
+        logger.info("Gardener looking for semantic duplicates...")
         
-        # O(N^2) comparison - acceptable for small personal graphs, 
-        # but should be optimized (blocking or vector search) for production.
+        llm_cfg = getattr(self, 'config', {}).get('llm', {})
+        if llm_cfg.get('enable_embeddings', False):
+            # 1. Embeddings-First Strategy (Fast & Semantic)
+            # Fetch directly from DB nodes with high cosine similarity
+            logger.info("Using vector similarity for duplicates...")
+            pairs = self.gm.get_highly_similar_node_pairs(threshold=self.threshold, limit=20)
+            
+            for pair in pairs:
+                name_a = pair['source']
+                name_b = pair['target']
+                score = pair['score']
+                
+                # Double check with LLM if they are just "related" or actually "the same"
+                logger.info(f"Vector score {score:.2f} for '{name_a}' and '{name_b}'. Asking LLM for final confirmation...")
+                if self.llm.compare_entities(name_a, name_b):
+                    self.gm.add_edge(name_a, name_b, "MAYBE_SAME_AS", weight=0.0)
+                    logger.info(f"Gardener marked {name_a} and {name_b} as potential duplicates.")
+                
+            # If embeddings are on, we skip the slow python loop for safety and scale.
+            return
+            
+        # 2. String-Fallback Strategy (No Embeddings)
+        # O(N^2) loop, but heavily protected by string distance
+        nodes = self.gm.get_all_nodes()
+        node_names = sorted(list(set(n['name'] for n in nodes if "Observation" not in n['labels'])))
         
         for i in range(len(node_names)):
             for j in range(i + 1, len(node_names)):
                 name_a = node_names[i]
                 name_b = node_names[j]
 
-                # Simple string/levenshtein check for MVP
-                # In real life, ask LLM: "Are these the same?"
+                # Robust string matching before asking LLM
                 if self._is_similar(name_a, name_b):
                     self.gm.add_edge(name_a, name_b, "MAYBE_SAME_AS", weight=0.0)
                     logger.info(f"Gardener marked {name_a} and {name_b} as potential duplicates.")
 
     def _is_similar(self, a, b):
+        import difflib
         # 1. Fast Heuristic
         a_norm = a.lower().strip()
         b_norm = b.lower().strip()
@@ -190,22 +212,25 @@ class Gardener:
         
         # Substring match (e.g., "Python" vs "Python 3")
         heuristic = False
-        if a_norm in b_norm or b_norm in a_norm:
-            heuristic = True
-            
-        # Basic prefix/suffix overlap
-        if len(a_norm) > 4 and len(b_norm) > 4:
+        if len(a_norm) > 3 and len(b_norm) > 3:
+            if a_norm in b_norm or b_norm in a_norm:
+                heuristic = True
+                
+            # Basic prefix/suffix overlap
             if a_norm[:4] == b_norm[:4]:
                 heuristic = True
 
         if heuristic:
             return True
             
-        # 2. LLM Deep Check (only if heuristic fails but names have some length)
-        # We don't want to call LLM for every single pair if they are totaly different.
-        # But for MVP let's be thorough if they are at least 3 chars.
-        if len(a) > 2 and len(b) > 2:
-             logger.info(f"Gardener asking LLM to compare '{a}' and '{b}'...")
+        # 2. Strict String Distance Filter
+        # Do not bother LLM if string ratio is low and we have no vectors
+        ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
+        
+        # Example: "AI Agentica" and "Riscaldamento" -> ratio ~ 0.1
+        # Example: "Piscina Coperta" and "Piscina" -> ratio ~ 0.8
+        if ratio > 0.65 and len(a_norm) > 2 and len(b_norm) > 2:
+             logger.info(f"String ratio {ratio:.2f} high enough. Asking LLM to compare '{a}' and '{b}'...")
              return self.llm.compare_entities(a, b)
 
         return False

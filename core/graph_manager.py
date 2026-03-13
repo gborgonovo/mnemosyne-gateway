@@ -258,6 +258,45 @@ class GraphManager:
                 logger.error(f"Vector search failed: {e}")
                 return []
 
+    def get_highly_similar_node_pairs(self, threshold: float = 0.85, limit: int = 100, scopes: list[str] = None):
+        """
+        Uses Neo4j cosine similarity function to find pairs of nodes that are semantically very close.
+        Avoids O(N^2) Python comparisons.
+        """
+        scope_clause_1 = self._get_scope_filter(scopes, var_name="n1")
+        scope_clause_2 = self._get_scope_filter(scopes, var_name="n2")
+        
+        where_conds = [
+            "id(n1) < id(n2)",
+            "n1.embedding IS NOT NULL",
+            "n2.embedding IS NOT NULL",
+            "NOT 'Observation' IN labels(n1)",
+            "NOT 'Observation' IN labels(n2)"
+        ]
+        if scope_clause_1: where_conds.append(scope_clause_1)
+        if scope_clause_2: where_conds.append(scope_clause_2)
+            
+        where_clause = "WHERE " + " AND ".join(where_conds)
+        
+        query = f"""
+        MATCH (n1:Node), (n2:Node)
+        {where_clause}
+        WITH n1, n2, vector.similarity.cosine(n1.embedding, n2.embedding) as score
+        WHERE score >= $threshold
+        // Ensure they aren't already linked 
+        AND NOT (n1)-[]-(n2)
+        RETURN n1.name as source, n2.name as target, score
+        ORDER BY score DESC LIMIT $limit
+        """
+        
+        with self.driver.session() as session:
+            try:
+                result = session.run(query, threshold=threshold, limit=limit)
+                return [dict(record) for record in result]
+            except Exception as e:
+                logger.error(f"Failed to find similar node pairs: {e}")
+                return []
+
     def semantic_search(self, query: str, llm_provider=None, enable_embeddings: bool = False, scopes: list[str] = None, limit: int = 1):
         """
         Performs semantic search using vector index, falling back to full-text,
