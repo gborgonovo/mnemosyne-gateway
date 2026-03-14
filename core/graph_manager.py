@@ -42,9 +42,18 @@ class GraphManager:
         all_allowed = set()
         for s in scopes:
             all_allowed.update(self.scope_hierarchy.get(s, [s]))
+
+        # Scope labels to check against
+        known_scopes = list(self.scope_hierarchy.keys())
         
-        condition = " OR ".join([f"{var_name}:{s}" for s in all_allowed])
-        return f"({condition})"
+        # Condition 1: Node has one of the allowed labels
+        allowed_condition = " OR ".join([f"{var_name}:{s}" for s in all_allowed])
+        
+        # Condition 2: Node has NONE of the known scope labels (fallback to visible)
+        # This is important for legacy/manually created nodes
+        fallback_condition = " AND ".join([f"NOT {var_name}:{s}" for s in known_scopes])
+        
+        return f"(({allowed_condition}) OR ({fallback_condition}))"
 
     def _extract_primary_type(self, labels: list[str]) -> str:
         """

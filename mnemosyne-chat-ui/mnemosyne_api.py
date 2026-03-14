@@ -81,12 +81,15 @@ def generate_context_from_query(query: str) -> str:
                 
                 if details not in found_concepts:
                     found_concepts.append(details)
+                    print(f"DEBUG: Found concept '{data.get('name')}' with {len(data.get('related', []))} neighbors.")
                     
-            if len(found_concepts) >= 3: # Limit to top 3 hits to keep context small
+            if len(found_concepts) >= 5: # Increased limit for better breadth
                 break
                 
         if found_concepts:
-            return "Specific Memories:\n" + "\n".join(found_concepts)
+            context = "Specific Memories:\n" + "\n".join(found_concepts)
+            print(f"DEBUG: Total context size: {len(context)} chars")
+            return context
         return ""
     except Exception as e:
         print(f"Error fetching search context: {e}")
