@@ -173,7 +173,8 @@ class Gardener:
         logger.info("Gardener looking for semantic duplicates...")
         
         llm_cfg = getattr(self, 'config', {}).get('llm', {})
-        if llm_cfg.get('enable_embeddings', False):
+        emb_cfg = llm_cfg.get('embeddings', {})
+        if emb_cfg.get('enabled', False):
             # 1. Embeddings-First Strategy (Fast & Semantic)
             # Fetch directly from DB nodes with high cosine similarity
             logger.info("Using vector similarity for duplicates...")
@@ -210,32 +211,36 @@ class Gardener:
 
     def _is_similar(self, a, b):
         import difflib
-        # 1. Fast Heuristic
+        import re
+        
         a_norm = a.lower().strip()
         b_norm = b.lower().strip()
         
         if a_norm == b_norm: return True
         
+        # 1. Technical ID / Hash Protection
+        # If strings look like technical IDs (e.g. item_abc123), skip simple heuristics.
+        # These must be a very high match (>95%) to be considered potential duplicates.
+        tech_pattern = re.compile(r'^[a-z0-9_-]+_[a-z0-9]{8,}$', re.I)
+        if tech_pattern.match(a_norm) or tech_pattern.match(b_norm):
+            ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
+            return ratio > 0.95
+
+        # 2. Natural Language Heuristics
         # Substring match (e.g., "Python" vs "Python 3")
-        heuristic = False
         if len(a_norm) > 3 and len(b_norm) > 3:
             if a_norm in b_norm or b_norm in a_norm:
-                heuristic = True
-                
-            # Basic prefix/suffix overlap
-            if a_norm[:4] == b_norm[:4]:
-                heuristic = True
-
-        if heuristic:
-            return True
-            
-        # 2. Strict String Distance Filter
-        # Do not bother LLM if string ratio is low and we have no vectors
+                # If one is a substring of the other, we still verify with a ratio
+                # to avoid cases like "cat" in "category"
+                ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
+                if ratio > 0.7:
+                    return self.llm.compare_entities(a, b)
+                    
+        # 3. Strict String Distance Filter
+        # Do not bother LLM if string ratio is low
         ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
         
-        # Example: "AI Agentica" and "Riscaldamento" -> ratio ~ 0.1
-        # Example: "Piscina Coperta" and "Piscina" -> ratio ~ 0.8
-        if ratio > 0.65 and len(a_norm) > 2 and len(b_norm) > 2:
+        if ratio > 0.75 and len(a_norm) > 2 and len(b_norm) > 2:
              logger.info(f"String ratio {ratio:.2f} high enough. Asking LLM to compare '{a}' and '{b}'...")
              return self.llm.compare_entities(a, b)
 
@@ -247,7 +252,8 @@ class Gardener:
         Only runs if enable_embeddings is true in the config.
         """
         llm_cfg = getattr(self, 'config', {}).get('llm', {})
-        if not llm_cfg.get('enable_embeddings', False):
+        emb_cfg = llm_cfg.get('embeddings', {})
+        if not emb_cfg.get('enabled', False):
             return
 
         logger.info("Gardener checking for missing embeddings (Backfill)...")
