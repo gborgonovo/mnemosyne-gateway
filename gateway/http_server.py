@@ -355,9 +355,19 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         neighbors = gm.get_neighbors(name, scopes=actual_scopes)
         related = []
         if neighbors:
-            limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
+            limit = config.get("retrieval", {}).get("search_neighbors_limit", 5)
             for n in neighbors[:limit]:
-                related.append(f"{n['node']['name']} ({n['rel_type']})")
+                # Extract summary or fallback to a snippet of content
+                n_props = n['node']
+                n_summary = n_props.get('summary') or n_props.get('description')
+                if not n_summary and n_props.get('content'):
+                    n_summary = n_props['content'][:100] + "..."
+                
+                related.append({
+                    "name": n_props['name'],
+                    "rel": n['rel_type'],
+                    "summary": n_summary or ""
+                })
                 
         return {
             "name": name,

@@ -50,7 +50,13 @@ def generate_context_from_query(query: str) -> str:
                     
                 details = f"- {data.get('name', word)}: {summary}"
                 if data.get("related"):
-                    details += f" (Nodi correlati: {', '.join(data['related'][:3])})"
+                    related_details = []
+                    for rel in data["related"][:3]:
+                        rel_info = f"{rel['name']} ({rel['rel']})"
+                        if rel.get('summary'):
+                            rel_info += f": {rel['summary']}"
+                        related_details.append(rel_info)
+                    details += f" (Contesto correlato: {'; '.join(related_details)})"
                 
                 if details not in found_concepts:
                     found_concepts.append(details)
