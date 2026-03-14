@@ -279,12 +279,23 @@ class GraphManager:
         where_clause = "WHERE " + " AND ".join(where_conds)
         
         query = f"""
-        MATCH (n1:Node), (n2:Node)
-        {where_clause}
-        WITH n1, n2, vector.similarity.cosine(n1.embedding, n2.embedding) as score
-        WHERE score >= $threshold
+        MATCH (n1:Node)
+        WHERE n1.embedding IS NOT NULL
+        AND NOT 'Observation' IN labels(n1)
+        {scope_clause_1 if scope_clause_1 else ""}
+        
+        // Use the vector index to find top candidates for each node
+        CALL db.index.vector.queryNodes('mnemosyne_vector_idx', 10, n1.embedding) 
+        YIELD node as n2, score
+        
+        WHERE id(n1) < id(n2) 
+        AND score >= $threshold
+        AND NOT 'Observation' IN labels(n2)
+        {f'AND {scope_clause_2}' if scope_clause_2 else ""}
+        
         // Ensure they aren't already linked 
         AND NOT (n1)-[]-(n2)
+        
         RETURN n1.name as source, n2.name as target, score
         ORDER BY score DESC LIMIT $limit
         """

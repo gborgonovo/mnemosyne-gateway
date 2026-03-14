@@ -314,6 +314,10 @@ if __name__ == "__main__":
             config['graph']['user'], 
             config['graph']['password']
         )
+        # Ensure indexes are ready
+        gm.create_fulltext_index()
+        gm.create_vector_index()
+        
         llm = get_llm_provider(config)
         am = AttentionModel(gm, config=config.get('attention', {}))
         
