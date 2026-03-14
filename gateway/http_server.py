@@ -84,7 +84,9 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)) -> List[str]:
     return api_keys[x_api_key]
 
 def intersect_scopes(requested: str, allowed: List[str]) -> List[str]:
-    requested_list = requested.split(",") if requested else ["Public"]
+    if not requested:
+        return allowed
+    requested_list = requested.split(",")
     if "*" in allowed:
         return requested_list
     return list(set(requested_list) & set(allowed))
@@ -216,7 +218,7 @@ def health_check():
 # --- STANDARD REST API (Nodes CRUD) ---
 
 @app.get("/nodes")
-def list_nodes(type: Optional[str] = None, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def list_nodes(type: Optional[str] = None, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -242,7 +244,7 @@ def list_nodes(type: Optional[str] = None, scopes: Optional[str] = "Public", all
     return {"data": data}
 
 @app.get("/nodes/{name}")
-def get_node(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def get_node(name: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -305,7 +307,7 @@ def delete_node_api(name: str, scopes: Optional[str] = "Public", allowed_scopes:
     return {"status": "success", "message": f"Node '{name}' deleted"}
 
 @app.patch("/nodes/{name}/allow_orphan")
-def allow_orphan_task(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def allow_orphan_task(name: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
     """
     Marks a Task as intentionally isolated so the Gardener stops suggesting to contextualize it.
     """
@@ -321,11 +323,13 @@ def allow_orphan_task(name: str, scopes: Optional[str] = "Public", allowed_scope
     return {"status": "success", "message": f"Task '{name}' has been marked to float freely."}
 
 @app.get("/search")
-def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def search(q: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
-        
+    
+    logger.info(f"API: Searching for '{q}' in scopes {actual_scopes}")
+    
     # Semantic search with resilient fallback in GraphManager
     enable_embeddings = config.get("llm", {}).get("embeddings", {}).get("enabled", True)
     

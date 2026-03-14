@@ -34,36 +34,50 @@ def generate_context_from_query(query: str) -> str:
         url = f"{get_base_url()}/search"
         import re
         # Clean punctuation and split into keywords
-        clean_query = re.sub(r'[^\w\s]', ' ', query)
+        clean_query = re.sub(r'[^\w\s]', ' ', query).strip()
         words = [w for w in clean_query.split() if len(w) > 3]
+        
+        # Add the whole (cleaned) query as the first priority
+        search_terms = []
+        if len(clean_query) > 3:
+            search_terms.append(clean_query)
+        
+        # Add individual words, preventing duplicates
+        for w in reversed(words):
+            if w not in search_terms:
+                search_terms.append(w)
         
         found_concepts = []
         
-        # Search backwards to prioritize the latest concepts in the sentence
-        for word in reversed(words):
+        # Search backward through priority terms
+        for term in search_terms:
             # Increase timeout to 10s to allow for semantic search/LLM processing
-            resp = requests.get(url, params={"q": word}, headers=get_auth_header(), timeout=10)
+            resp = requests.get(url, params={"q": term}, headers=get_auth_header(), timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 
-                # Extract summary safely
-                summary = data.get('properties', {}).get('summary', '').strip()
-                if not summary:
+                # Extract summary/description safely
+                props = data.get('properties', {})
+                summary = props.get('summary') or props.get('description') or props.get('content', '')
+                if summary:
+                    summary = summary.strip()
+                else:
                     summary = "(Solo nome del nodo, nessun dettaglio aggiuntivo presente nel grafo)"
                     
                 details = f"- {data.get('name', word)}: {summary}"
                 if data.get("related"):
                     related_details = []
-                    for rel in data["related"][:10]:
+                    for rel in data["related"][:15]: # Increased limit for better breadth
                         if isinstance(rel, dict):
+                            # Try multiple possible keys for the neighbor description
+                            n_summary = rel.get('summary') or rel.get('description') or rel.get('content')
                             rel_info = f"{rel['name']} ({rel['rel']})"
-                            if rel.get('summary'):
-                                rel_info += f": {rel['summary']}"
+                            if n_summary:
+                                rel_info += f": {n_summary[:200]}" # Limit neighbor snippets
                         else:
-                            # Backward compatibility if Gateway is not yet restarted
                             rel_info = str(rel)
                         related_details.append(rel_info)
-                    details += f" (Contesto correlato: {'; '.join(related_details)})"
+                    details += f"\n  - Connessioni e dettagli correlati: {'; '.join(related_details)}"
                 
                 if details not in found_concepts:
                     found_concepts.append(details)

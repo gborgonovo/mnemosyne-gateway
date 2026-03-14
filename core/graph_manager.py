@@ -35,8 +35,8 @@ class GraphManager:
         """
         Generates a Cypher WHERE clause fragment for scope filtering.
         """
-        if not scopes:
-            return "" # No filtering if no scopes provided (internal use)
+        if not scopes or "*" in scopes:
+            return "" # No filtering if no scopes provided or wildcard used
         
         # Expand scopes based on hierarchy
         all_allowed = set()
