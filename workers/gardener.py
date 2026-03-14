@@ -1,6 +1,12 @@
 import logging
 import time
 import datetime
+import os
+import sys
+
+# Add project root to path BEFORE importing local modules
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from datetime import datetime
 from core.graph_manager import GraphManager
 from butler.llm import LLMProvider
@@ -268,4 +274,46 @@ class Gardener:
                     logger.warning(f"Failed to generate embedding for '{node['name']}'")
             except Exception as e:
                 logger.error(f"Error embedding node '{node['name']}': {e}")
+
+if __name__ == "__main__":
+    import os
+    import sys
+    import yaml
+    
+    # Setup standard logging for CLI use
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+    # Add project root to path
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    
+    from core.graph_manager import GraphManager
+    from butler.llm import get_llm_provider
+    from core.attention import AttentionModel
+
+    def load_config():
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.yaml')
+        if not os.path.exists(config_path):
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.yaml.template')
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+
+    logger.info("Starting Gardener manual cycle...")
+    try:
+        config = load_config()
+        gm = GraphManager(
+            config['graph']['uri'], 
+            config['graph']['user'], 
+            config['graph']['password']
+        )
+        llm = get_llm_provider(config)
+        am = AttentionModel(gm, config=config.get('attention', {}))
+        
+        gardener = Gardener(gm, llm, attention_model=am, config=config)
+        gardener.run_once()
+    except Exception as e:
+        logger.error(f"Gardener manual cycle failed: {e}")
+        sys.exit(1)
 
