@@ -329,9 +329,13 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
     # Semantic search with resilient fallback in GraphManager
     enable_embeddings = config.get("llm", {}).get("embeddings", {}).get("enabled", True)
     
+    # Pre-processing: Clean query of trailing punctuation for better exact matching
+    import re
+    q_clean = re.sub(r'[^\w\s]', '', q).strip()
+    
     try:
         best_match, search_type, score = gm.semantic_search(
-            query=q, 
+            query=q_clean, 
             llm_provider=embedding_llm, 
             enable_embeddings=enable_embeddings, 
             scopes=actual_scopes, 
@@ -355,7 +359,7 @@ def search(q: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] =
         neighbors = gm.get_neighbors(name, scopes=actual_scopes)
         related = []
         if neighbors:
-            limit = config.get("retrieval", {}).get("search_neighbors_limit", 5)
+            limit = config.get("retrieval", {}).get("search_neighbors_limit", 15)
             for n in neighbors[:limit]:
                 # Extract summary or fallback to a snippet of content
                 n_props = n['node']

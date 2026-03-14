@@ -32,14 +32,17 @@ def generate_context_from_query(query: str) -> str:
     """Search Mnemosyne for concepts related to the query."""
     try:
         url = f"{get_base_url()}/search"
-        # We split the query and look for the most relevant keywords (usually nouns > 3 chars)
-        words = [w for w in query.split() if len(w) > 3]
+        import re
+        # Clean punctuation and split into keywords
+        clean_query = re.sub(r'[^\w\s]', ' ', query)
+        words = [w for w in clean_query.split() if len(w) > 3]
         
         found_concepts = []
         
         # Search backwards to prioritize the latest concepts in the sentence
         for word in reversed(words):
-            resp = requests.get(url, params={"q": word}, headers=get_auth_header(), timeout=2)
+            # Increase timeout to 10s to allow for semantic search/LLM processing
+            resp = requests.get(url, params={"q": word}, headers=get_auth_header(), timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
                 
@@ -51,7 +54,7 @@ def generate_context_from_query(query: str) -> str:
                 details = f"- {data.get('name', word)}: {summary}"
                 if data.get("related"):
                     related_details = []
-                    for rel in data["related"][:3]:
+                    for rel in data["related"][:10]:
                         if isinstance(rel, dict):
                             rel_info = f"{rel['name']} ({rel['rel']})"
                             if rel.get('summary'):
