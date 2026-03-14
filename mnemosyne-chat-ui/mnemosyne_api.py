@@ -52,9 +52,13 @@ def generate_context_from_query(query: str) -> str:
                 if data.get("related"):
                     related_details = []
                     for rel in data["related"][:3]:
-                        rel_info = f"{rel['name']} ({rel['rel']})"
-                        if rel.get('summary'):
-                            rel_info += f": {rel['summary']}"
+                        if isinstance(rel, dict):
+                            rel_info = f"{rel['name']} ({rel['rel']})"
+                            if rel.get('summary'):
+                                rel_info += f": {rel['summary']}"
+                        else:
+                            # Backward compatibility if Gateway is not yet restarted
+                            rel_info = str(rel)
                         related_details.append(rel_info)
                     details += f" (Contesto correlato: {'; '.join(related_details)})"
                 
