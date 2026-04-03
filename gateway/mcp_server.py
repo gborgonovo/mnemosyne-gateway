@@ -61,14 +61,15 @@ def trigger_gardening_cycle() -> str:
     return "Gardening cycle completed successfully. Memory sanitized and updated."
 
 @mcp.tool()
-def query_knowledge(query: str, scopes: str = "Public", depth: int = 1) -> str:
+def query_knowledge(query: str, scopes: str = "Public", namespaces: str = None, depth: int = 1) -> str:
     """
     Search the Mnemosyne knowledge graph for entities and their relationships.
     Use this to retrieve context about specific people, projects, or concepts.
     scopes: Comma-separated list of scopes to search (e.g., 'Private,Public').
     """
     scope_list = scopes.split(",") if scopes else ["Public"]
-    node = gm.get_node(query, scopes=scope_list)
+    namespace_list = namespaces.split(",") if namespaces else None
+    node = gm.get_node(query, scopes=scope_list, namespaces=namespace_list)
     if not node:
         return f"Concept '{query}' not found in memory (Scopes: {scopes})."
     
@@ -80,7 +81,7 @@ def query_knowledge(query: str, scopes: str = "Public", depth: int = 1) -> str:
         for k, v in props.items():
             res += f"  - {k}: {v}\n"
     
-    neighbors = gm.get_neighbors(query, scopes=scope_list)
+    neighbors = gm.get_neighbors(query, scopes=scope_list, namespaces=namespace_list)
     if neighbors:
         limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
         res += "Related Context:\n"
@@ -107,14 +108,15 @@ def add_observation(content: str, scope: str = "Public") -> str:
         return f"Error recording observation: {e}"
 
 @mcp.tool()
-def get_memory_briefing(scopes: str = "Public") -> str:
+def get_memory_briefing(scopes: str = "Public", namespaces: str = None) -> str:
     """
     Get a briefing on currently active (hot) topics and proactive suggestions from The Butler.
     Useful at the start of a session or when feeling lost.
     scopes: Comma-separated list of scopes (e.g., 'Private,Public').
     """
     scope_list = scopes.split(",") if scopes else ["Public"]
-    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=scope_list)
+    namespace_list = namespaces.split(",") if namespaces else None
+    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=scope_list, namespaces=namespace_list)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
     
     # The Butler's Proactive Voice
@@ -215,7 +217,7 @@ def provide_feedback(target_id: str, feedback_type: str, comment: str = "") -> s
     return json.dumps({"status": "received", "message": "Feedback logged successfully."}, indent=2)
 
 @mcp.tool()
-def forget_knowledge_node(name: str, scopes: str = "Private,Public") -> str:
+def forget_knowledge_node(name: str, scopes: str = "Private,Public", namespaces: str = None) -> str:
     """
     Completely erases a specific entity or concept from Mnemosyne's memory.
     Use this only when explicitly requested by the user to forget something, 
@@ -223,9 +225,10 @@ def forget_knowledge_node(name: str, scopes: str = "Private,Public") -> str:
     scopes: Comma-separated list of scopes (e.g., 'Private,Public').
     """
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
+    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
     logger.info(f"MCP forget_knowledge_node request for '{name}' in scopes {scope_list}")
     
-    success = gm.delete_node(name, scopes=scope_list)
+    success = gm.delete_node(name, scopes=scope_list, namespaces=namespace_list)
     
     if success:
         return json.dumps({
@@ -239,7 +242,7 @@ def forget_knowledge_node(name: str, scopes: str = "Private,Public") -> str:
         }, indent=2)
 
 @mcp.tool()
-def update_knowledge_node(name: str, updates: str, scopes: str = "Public") -> str:
+def update_knowledge_node(name: str, updates: str, scopes: str = "Public", namespaces: str = None) -> str:
     """
     Updates or corrects the properties of an existing entity in memory.
     'updates' must be a valid JSON string of key-value pairs.
@@ -247,6 +250,7 @@ def update_knowledge_node(name: str, updates: str, scopes: str = "Public") -> st
     scopes: Comma-separated list of scopes (e.g., 'Public').
     """
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
+    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
     logger.info(f"MCP update_knowledge_node request for '{name}'")
     
     try:
@@ -257,7 +261,7 @@ def update_knowledge_node(name: str, updates: str, scopes: str = "Public") -> st
             "message": "The 'updates' argument must be a valid JSON string."
         }, indent=2)
          
-    result = gm.update_node_properties(name, properties_dict, scopes=scope_list)
+    result = gm.update_node_properties(name, properties_dict, scopes=scope_list, namespaces=namespace_list)
     
     if result:
         return json.dumps({
@@ -272,7 +276,7 @@ def update_knowledge_node(name: str, updates: str, scopes: str = "Public") -> st
         }, indent=2)
 
 @mcp.tool()
-def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public") -> str:
+def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public", namespaces: str = None) -> str:
     """
     Creates a new high-level strategic Goal.
     name: Short, unique name (e.g., 'Launch Mnemosyne')
@@ -280,13 +284,14 @@ def create_goal(name: str, description: str = "", deadline: str = "", scopes: st
     deadline: Optional ISO 8601 date (e.g., '2026-06-01T00:00:00')
     """
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
+    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
     props = {"status": "active"}
     if description:
         props["description"] = description
     if deadline:
         props["deadline"] = deadline
         
-    gm.add_node(name, primary_label="Goal", properties=props, scope=scope_list[0])
+    gm.add_node(name, primary_label="Goal", properties=props, scope=scope_list[0], namespace=namespace_list[0] if namespace_list else None)
     
     return json.dumps({
         "status": "success",
@@ -295,7 +300,7 @@ def create_goal(name: str, description: str = "", deadline: str = "", scopes: st
     }, indent=2)
 
 @mcp.tool()
-def create_task(name: str, goal_name: str, due_date: str = "", scopes: str = "Private,Public") -> str:
+def create_task(name: str, goal_name: str, due_date: str = "", scopes: str = "Private,Public", namespaces: str = None) -> str:
     """
     Creates an actionable Task and links it to an existing Goal.
     name: Short task description (e.g., 'Write README')
@@ -303,12 +308,13 @@ def create_task(name: str, goal_name: str, due_date: str = "", scopes: str = "Pr
     due_date: Optional ISO 8601 date.
     """
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
+    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
     props = {"status": "todo"}
     if due_date:
         props["due_date"] = due_date
         
     # Create the task node
-    gm.add_node(name, primary_label="Task", properties=props, scope=scope_list[0])
+    gm.add_node(name, primary_label="Task", properties=props, scope=scope_list[0], namespace=namespace_list[0] if namespace_list else None)
     
     # Link to Goal
     if goal_name:
@@ -320,7 +326,7 @@ def create_task(name: str, goal_name: str, due_date: str = "", scopes: str = "Pr
     }, indent=2)
 
 @mcp.tool()
-def update_task_status(name: str, status: str, scopes: str = "Private,Public") -> str:
+def update_task_status(name: str, status: str, scopes: str = "Private,Public", namespaces: str = None) -> str:
     """
     Updates the status of a Task or Goal.
     status: 'todo', 'in_progress', 'done', 'discarded'
@@ -330,7 +336,8 @@ def update_task_status(name: str, status: str, scopes: str = "Private,Public") -
          return json.dumps({"error": f"Invalid status. Use one of {valid_statuses}."})
          
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
-    result = gm.update_node_properties(name, {"status": status}, scopes=scope_list)
+    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
+    result = gm.update_node_properties(name, {"status": status}, scopes=scope_list, namespaces=namespace_list)
     
     if result:
         return json.dumps({

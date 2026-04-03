@@ -31,29 +31,55 @@ class GraphManager:
     def close(self):
         self.driver.close()
 
-    def _get_scope_filter(self, scopes: list[str], var_name: str = "n") -> str:
+    def _get_filter_clause(self, scopes: list[str], namespaces: list[str] = None, var_name: str = "n") -> str:
         """
-        Generates a Cypher WHERE clause fragment for scope filtering.
+        Generates a Cypher WHERE clause fragment for scope and namespace filtering.
+        `namespaces` format expected: ["progettoA:rw", "progettoB:r", ":r"]
         """
-        if not scopes or "*" in scopes:
-            return "" # No filtering if no scopes provided or wildcard used
-        
-        # Expand scopes based on hierarchy
-        all_allowed = set()
-        for s in scopes:
-            all_allowed.update(self.scope_hierarchy.get(s, [s]))
+        # 1. Scope Filter Logic
+        scope_condition = ""
+        if scopes and "*" not in scopes:
+            all_allowed = set()
+            for s in scopes:
+                all_allowed.update(self.scope_hierarchy.get(s, [s]))
+            known_scopes = list(self.scope_hierarchy.keys())
+            
+            allowed_cond = " OR ".join([f"{var_name}:{s}" for s in all_allowed])
+            fallback_cond = " AND ".join([f"NOT {var_name}:{s}" for s in known_scopes])
+            scope_condition = f"(({allowed_cond}) OR ({fallback_cond}))"
+            
+        # 2. Namespace Filter Logic
+        namespace_condition = ""
+        if namespaces and "*" not in namespaces:
+            allowed_namespaces = []
+            can_read_globals = False
+            
+            for ns in namespaces:
+                if ns == ":r" or ns == ":rw":
+                    can_read_globals = True
+                else:
+                    parts = ns.split(":")
+                    if parts[0]: allowed_namespaces.append(parts[0])
+            
+            ns_conds = []
+            if allowed_namespaces:
+                # Need to use ANY to check if any of the target namespaces exists in the node's namespace array
+                # BUT since Neo4j params are better, we will format it directly here for the specific elements 
+                ns_array_str = "[" + ",".join([f"'{ns}'" for ns in allowed_namespaces]) + "]"
+                ns_conds.append(f"ANY(ns IN {var_name}.namespaces WHERE ns IN {ns_array_str})")
+            
+            if can_read_globals:
+                ns_conds.append(f"({var_name}.namespaces IS NULL OR size({var_name}.namespaces) = 0)")
+                
+            if ns_conds:
+                namespace_condition = f"({' OR '.join(ns_conds)})"
 
-        # Scope labels to check against
-        known_scopes = list(self.scope_hierarchy.keys())
+        # Combine conditions
+        clauses = []
+        if scope_condition: clauses.append(scope_condition)
+        if namespace_condition: clauses.append(namespace_condition)
         
-        # Condition 1: Node has one of the allowed labels
-        allowed_condition = " OR ".join([f"{var_name}:{s}" for s in all_allowed])
-        
-        # Condition 2: Node has NONE of the known scope labels (fallback to visible)
-        # This is important for legacy/manually created nodes
-        fallback_condition = " AND ".join([f"NOT {var_name}:{s}" for s in known_scopes])
-        
-        return f"(({allowed_condition}) OR ({fallback_condition}))"
+        return " AND ".join(clauses) if clauses else ""
 
     def _extract_primary_type(self, labels: list[str]) -> str:
         """
@@ -66,12 +92,13 @@ class GraphManager:
         type_labels = [l for l in labels if l not in exclusion_list]
         return type_labels[0] if type_labels else labels[0]
 
-    def add_node(self, name: str, primary_label: str = "Topic", tags: list = None, properties: dict = None, scope: str = "Public"):
+    def add_node(self, name: str, primary_label: str = "Topic", tags: list = None, properties: dict = None, scope: str = "Public", namespace: str = None):
         """
         Creates or updates a node.
         primary_label: Entity, Topic, Resource, Goal, Task, Document, DocumentChunk, or Node.
         tags: List of secondary labels.
         scope: Public, Internal, Private.
+        namespace: Logical isolation identifier (optional).
         """
         if primary_label not in ["Entity", "Topic", "Resource", "Node", "Observation", "Goal", "Task", "Document", "DocumentChunk"]:
             logger.warning(f"Unknown primary label '{primary_label}', falling back to 'Node'.")
@@ -84,6 +111,11 @@ class GraphManager:
         properties['last_seen'] = datetime.now().isoformat()
         if 'activation_level' not in properties:
              properties['activation_level'] = 1.0
+
+        if namespace:
+             # Ensure the array contains the namespace
+             # The MERGE SET will overwrite, but we merge logic handling if it already had other namespaces or just override
+             properties['namespaces'] = [namespace]
 
         # Construct Labels
         labels_cypher = f":{primary_label}:{scope}"
@@ -128,11 +160,11 @@ class GraphManager:
             session.run(query, source=source_name, target=target_name, 
                         weight=weight, timestamp=datetime.now().isoformat())
 
-    def get_node(self, name: str, scopes: list[str] = None):
+    def get_node(self, name: str, scopes: list[str] = None, namespaces: list[str] = None):
         """
         Retrieves a node by name, respecting scope filtering.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
 
         # 1. Try exact match
@@ -208,12 +240,12 @@ class GraphManager:
         except Exception as e:
             logger.warning(f"Could not check/create vector index: {e}")
 
-    def search_nodes_fulltext(self, search_text: str, scopes: list[str] = None, limit: int = 5):
+    def search_nodes_fulltext(self, search_text: str, scopes: list[str] = None, namespaces: list[str] = None, limit: int = 5):
         """
         Searches nodes using the Neo4j full-text index 'mnemosyne_text_idx'.
         Applies basic fuzzy matching by appending '~' to search terms.
         """
-        scope_clause = self._get_scope_filter(scopes, var_name="node")
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces, var_name="node")
         
         # very basic sanitization: remove lucene special characters
         safe_text = ''.join(c for c in search_text if c.isalnum() or c.isspace())
@@ -243,12 +275,12 @@ class GraphManager:
                 logger.error(f"Full-text search failed: {e}")
                 return []
 
-    def search_nodes_vector(self, query_embedding: list[float], scopes: list[str] = None, limit: int = 5):
+    def search_nodes_vector(self, query_embedding: list[float], scopes: list[str] = None, namespaces: list[str] = None, limit: int = 5):
         """
         Searches nodes using the Neo4j vector index 'mnemosyne_vector_idx'.
         Requires that the vector index is already created.
         """
-        scope_clause = self._get_scope_filter(scopes, var_name="node")
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces, var_name="node")
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
         
         # We query the vector index and return the top match
@@ -267,13 +299,13 @@ class GraphManager:
                 logger.error(f"Vector search failed: {e}")
                 return []
 
-    def get_highly_similar_node_pairs(self, threshold: float = 0.85, limit: int = 100, scopes: list[str] = None):
+    def get_highly_similar_node_pairs(self, threshold: float = 0.85, limit: int = 100, scopes: list[str] = None, namespaces: list[str] = None):
         """
         Uses Neo4j cosine similarity function to find pairs of nodes that are semantically very close.
         Avoids O(N^2) Python comparisons.
         """
-        scope_clause_1 = self._get_scope_filter(scopes, var_name="n1")
-        scope_clause_2 = self._get_scope_filter(scopes, var_name="n2")
+        scope_clause_1 = self._get_filter_clause(scopes, namespaces=namespaces, var_name="n1")
+        scope_clause_2 = self._get_filter_clause(scopes, namespaces=namespaces, var_name="n2")
         
         where_conds = [
             "id(n1) < id(n2)",
@@ -305,6 +337,9 @@ class GraphManager:
         // Ensure they aren't already linked 
         AND NOT (n1)-[]-(n2)
         
+        // Compartimentalization: Ensure they share the exact same namespaces or are both global
+        AND coalesce(n1.namespaces, []) = coalesce(n2.namespaces, [])
+        
         RETURN n1.name as source, n2.name as target, score
         ORDER BY score DESC LIMIT $limit
         """
@@ -317,14 +352,14 @@ class GraphManager:
                 logger.error(f"Failed to find similar node pairs: {e}")
                 return []
 
-    def semantic_search(self, query: str, llm_provider=None, enable_embeddings: bool = False, scopes: list[str] = None, limit: int = 1):
+    def semantic_search(self, query: str, llm_provider=None, enable_embeddings: bool = False, scopes: list[str] = None, namespaces: list[str] = None, limit: int = 1):
         """
         Performs semantic search using vector index, falling back to full-text,
         and finally to exact/fuzzy name match.
         Returns a tuple: (best_match_node, search_type, score) or (None, None, None)
         """
         # 1. EXACT NAME MATCH (Highest priority, most reliable)
-        node = self.get_node(query, scopes=scopes)
+        node = self.get_node(query, scopes=scopes, namespaces=namespaces)
         if node:
             return node, "exact", 1.0
 
@@ -333,21 +368,21 @@ class GraphManager:
             try:
                 query_embedding = llm_provider.embed(query)
                 if query_embedding:
-                    vector_results = self.search_nodes_vector(query_embedding, scopes=scopes, limit=limit)
+                    vector_results = self.search_nodes_vector(query_embedding, scopes=scopes, namespaces=namespaces, limit=limit)
                     if vector_results:
                         return vector_results[0]['node'], "vector", vector_results[0]['score']
             except Exception as e:
                 logger.warning(f"Vector embedding failed, falling back to full-text: {e}")
                 
         # 3. SEMANTIC FALLBACK (Full-Text)
-        results = self.search_nodes_fulltext(query, scopes=scopes, limit=limit)
+        results = self.search_nodes_fulltext(query, scopes=scopes, namespaces=namespaces, limit=limit)
         if results:
             return results[0]['node'], "full-text", results[0]['score']
             
         return None, None, None
 
-    def get_all_nodes(self, label: str = None, scopes: list[str] = None):
-        scope_clause = self._get_scope_filter(scopes)
+    def get_all_nodes(self, label: str = None, scopes: list[str] = None, namespaces: list[str] = None):
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         
         conditions = []
         if label:
@@ -363,12 +398,12 @@ class GraphManager:
         with self.driver.session() as session:
             return [dict(record) for record in session.run(query)]
 
-    def delete_node(self, name: str, scopes: list[str] = None) -> bool:
+    def delete_node(self, name: str, scopes: list[str] = None, namespaces: list[str] = None) -> bool:
         """
         Deletes a node and all its relationships, respecting scope filtering.
         Returns True if a node was actually deleted.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
         
         query = f"""
@@ -383,7 +418,7 @@ class GraphManager:
             record = result.single()
             return record["deleted_count"] > 0 if record else False
 
-    def update_node_properties(self, name: str, properties: dict, scopes: list[str] = None) -> dict:
+    def update_node_properties(self, name: str, properties: dict, scopes: list[str] = None, namespaces: list[str] = None) -> dict:
         """
         Updates properties of a node, respecting scope filtering.
         Returns the updated properties dictionary or None if not found.
@@ -391,7 +426,7 @@ class GraphManager:
         if not properties:
             return None
             
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
         
         # Don't allow changing core identifier via property update
@@ -410,8 +445,8 @@ class GraphManager:
             record = result.single()
             return dict(record["updated_props"]) if record else None
 
-    def get_active_nodes(self, threshold: float = 0.5, scopes: list[str] = None):
-        scope_clause = self._get_scope_filter(scopes)
+    def get_active_nodes(self, threshold: float = 0.5, scopes: list[str] = None, namespaces: list[str] = None):
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_condition = f"n.activation_level > $threshold"
         if scope_clause:
             where_condition += f" AND {scope_clause}"
@@ -437,9 +472,9 @@ class GraphManager:
         with self.driver.session() as session:
             session.run(query, name=node_name, alias=alias)
 
-    def get_neighbors(self, name: str, scopes: list[str] = None):
+    def get_neighbors(self, name: str, scopes: list[str] = None, namespaces: list[str] = None):
         """Returns list of (neighbor_node, relationship_type, weight, direction, rel_props)"""
-        scope_clause = self._get_scope_filter(scopes, var_name="m")
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces, var_name="m")
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
         
         query = f"""
@@ -464,11 +499,11 @@ class GraphManager:
                 })
         return neighbors
 
-    def trace_dependencies(self, start_node_name: str, max_depth: int = 3, scopes: list[str] = None):
+    def trace_dependencies(self, start_node_name: str, max_depth: int = 3, scopes: list[str] = None, namespaces: list[str] = None):
         """
         Traces downstream dependencies, filtered by scope.
         """
-        scope_clause = self._get_scope_filter(scopes, var_name="m")
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces, var_name="m")
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
         
         query = f"""
@@ -481,19 +516,60 @@ class GraphManager:
             results = session.run(query, name=start_node_name)
             return [dict(record) for record in results]
 
-    def merge_nodes(self, keep_id: int, discard_id: int):
+    def merge_nodes(self, keep: int | str, discard: int | str):
+        where_k = "id(k) = $keep" if isinstance(keep, int) else "k.name = $keep"
+        where_d = "id(d) = $discard" if isinstance(discard, int) else "d.name = $discard"
+        
+        query = f"""
+        MATCH (k), (d)
+        WHERE {where_k} AND {where_d}
+        
+        // Remove direct relationships between them
+        OPTIONAL MATCH (k)-[rel]-(d)
+        DELETE rel
+
+        WITH k, d
+        // Move OUT relationships
+        CALL {{
+            WITH k, d
+            MATCH (d)-[r]->(out)
+            WHERE out <> k
+            CALL apoc.create.relationship(k, type(r), properties(r), out) YIELD rel AS newOutRel
+            DELETE r
+            RETURN count(r) AS moved_out
+        }}
+
+        WITH k, d
+        // Move IN relationships
+        CALL {{
+            WITH k, d
+            MATCH (in)-[r]->(d)
+            WHERE in <> k
+            CALL apoc.create.relationship(in, type(r), properties(r), k) YIELD rel AS newInRel
+            DELETE r
+            RETURN count(r) AS moved_in
+        }}
+
+        WITH k, d
+        // Tombstone 'd'
+        CALL apoc.create.removeLabels(d, labels(d)) YIELD node AS rmd
+        CALL apoc.create.addLabels(rmd, ['Archived', 'Tombstone']) YIELD node AS finalD
+        SET finalD.merged_into = id(k)
+        
+        RETURN k
+        """
         with self.driver.session() as session:
-            session.run("""
-                MATCH (k), (d)
-                WHERE id(k) = $keep_id AND id(d) = $discard_id
-                CALL apoc.refactor.mergeNodes([k, d], {properties:"combine", mergeRels:true})
-                YIELD node
-                RETURN node
-            """, keep_id=keep_id, discard_id=discard_id)
+            try:
+                res = session.run(query, keep=keep, discard=discard)
+                record = res.single()
+                return dict(record[0]) if record else None
+            except Exception as e:
+                logger.error(f"Failed to safe-merge nodes: {e}")
+                return None
             
-    def get_stats(self, scopes: list[str] = None) -> dict:
+    def get_stats(self, scopes: list[str] = None, namespaces: list[str] = None) -> dict:
         """Returns basic statistics about the graph, filtered by scope."""
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_clause = f"WHERE {scope_clause}" if scope_clause else ""
         
         query = f"""
@@ -509,12 +585,120 @@ class GraphManager:
                 return {"nodes": record["nodes"], "relationships": record["relationships"]}
             return {"nodes": 0, "relationships": 0}
 
-    def get_all_aliases(self, scopes: list[str] = None) -> dict[str, str]:
+    def get_schema(self, scopes: list[str] = None, namespaces: list[str] = None) -> dict:
+        """
+        Returns all unique labels and property keys present in the specified namespace.
+        """
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        
+        query_labels = f"""
+        MATCH (n) {where_clause}
+        UNWIND labels(n) as label
+        RETURN label, count(n) as count
+        ORDER BY count DESC
+        """
+        query_props = f"""
+        MATCH (n) {where_clause}
+        UNWIND keys(n) as prop
+        RETURN prop, count(n) as count
+        ORDER BY count DESC
+        """
+        schema = {"labels": [], "properties": []}
+        with self.driver.session() as session:
+            for record in session.run(query_labels):
+                schema["labels"].append({"label": record["label"], "count": record["count"]})
+            for record in session.run(query_props):
+                schema["properties"].append({"property": record["prop"], "count": record["count"]})
+        return schema
+        
+    def advanced_search(self, filters: dict, scopes: list[str] = None, namespaces: list[str] = None, limit: int = 50) -> list[dict]:
+        """
+        Generates a safe structural query based on filters dict.
+        filters: {"type": "Task", "status": "todo", "name": "something"}
+        """
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
+        
+        conds = []
+        if scope_clause:
+            conds.append(scope_clause)
+            
+        params = {"limit": limit}
+        
+        node_label = "Node"
+        if "type" in filters and filters["type"]:
+            node_label = filters["type"]
+            
+        for k, v in filters.items():
+            if k == "type": continue
+            # Prevent cypher injection in property keys
+            safe_k = ''.join(c for c in k if c.isalnum() or c == '_')
+            if not safe_k: continue
+            
+            conds.append(f"n.{safe_k} = ${safe_k}")
+            params[safe_k] = v
+            
+        where_clause = "WHERE " + " AND ".join(conds) if conds else ""
+        
+        query = f"""
+        MATCH (n:{node_label})
+        {where_clause}
+        RETURN n.name as name, labels(n) as labels, properties(n) as props
+        LIMIT $limit
+        """
+        
+        with self.driver.session() as session:
+            results = session.run(query, **params)
+            return [dict(record) for record in results]
+
+    def export_graph(self, scopes: list[str] = None, namespaces: list[str] = None, limit: int = 5000) -> dict:
+        """
+        Exports a snapshot of nodes and relationships within the requested scope/namespace limit.
+        """
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces, var_name="n")
+        where_clause = f"WHERE {scope_clause}" if scope_clause else ""
+        scope_clause_m = self._get_filter_clause(scopes, namespaces=namespaces, var_name="m")
+        if scope_clause_m: scope_clause_m = "WHERE " + scope_clause_m
+        else: scope_clause_m = ""
+        
+        query = f"""
+        MATCH (n)
+        {where_clause}
+        OPTIONAL MATCH (n)-[r]->(m)
+        {scope_clause_m}
+        WITH n, r, m LIMIT $limit
+        RETURN collect(DISTINCT n) as nodes, collect(DISTINCT r) as rels
+        """
+        with self.driver.session() as session:
+            result = session.run(query, limit=limit)
+            record = result.single()
+            
+            nodes = []
+            rels = []
+            if record:
+                for n in record.get("nodes", []):
+                    # Neo4j 4/5 API parsing
+                    element_id = n.element_id if hasattr(n, 'element_id') else n.id
+                    nodes.append({"id": element_id, "name": dict(n).get("name"), "labels": list(n.labels), "properties": dict(n)})
+                for r in record.get("rels", []):
+                    if r is not None:
+                        source_id = r.start_node.element_id if hasattr(r.start_node, 'element_id') else r.start_node.id
+                        target_id = r.end_node.element_id if hasattr(r.end_node, 'element_id') else r.end_node.id
+                        rels.append({
+                            "type": r.type, 
+                            "source": source_id, 
+                            "target": target_id, 
+                            "properties": dict(r)
+                        })
+                        
+            return {"nodes": nodes, "relationships": rels}
+
+    def get_all_aliases(self, scopes: list[str] = None, namespaces: list[str] = None) -> dict[str, str]:
         """
         Returns a dictionary mapping lowercased aliases/names to their canonical node names.
         Used for selective fuzzy matching against existing Entities/Topics.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_clause = f"({scope_clause}) AND ('Entity' IN labels(n) OR 'Topic' IN labels(n))" if scope_clause else "('Entity' IN labels(n) OR 'Topic' IN labels(n))"
         query = f"""
         MATCH (n) WHERE {where_clause}
@@ -557,7 +741,7 @@ class GraphManager:
         """
         props = {"file_path": file_path} if file_path else {}
         doc_node = self.add_node(title, primary_label="Document", properties=props, scope=scope)
-        alias_map = self.get_all_aliases(scopes=[scope])
+        alias_map = self.get_all_aliases(scopes=[scope])  # Namespace skipped for document extraction context
         
         prev_chunk_name = None
         for i, text in enumerate(chunks):
@@ -578,12 +762,12 @@ class GraphManager:
             # 4. Selective Fuzzy Matching
             self._fuzzy_link_chunk(chunk_name, text, alias_map)
 
-    def get_dormant_projects(self, threshold_days: int = 30, limit: int = 5, scopes: list[str] = None) -> list[dict]:
+    def get_dormant_projects(self, threshold_days: int = 30, limit: int = 5, scopes: list[str] = None, namespaces: list[str] = None) -> list[dict]:
         """
         Finds 'Goal', 'Project', or heavy 'Topic' nodes that haven't been seen recently
         but had significant connections in the past.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_scope = f"AND {scope_clause}" if scope_clause else ""
         
         query = f"""
@@ -605,11 +789,11 @@ class GraphManager:
             results = session.run(query, threshold_days=threshold_days, limit=limit)
             return [dict(record) for record in results]
             
-    def get_temporal_trends(self, days_ago: int = 7, limit: int = 5, scopes: list[str] = None) -> list[dict]:
+    def get_temporal_trends(self, days_ago: int = 7, limit: int = 5, scopes: list[str] = None, namespaces: list[str] = None) -> list[dict]:
         """
         Finds nodes that were highly active or created within the last N days.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_scope = f"AND {scope_clause}" if scope_clause else ""
         
         query = f"""
@@ -657,11 +841,11 @@ class GraphManager:
             logger.error(f"GRAPH DELETE FAILED for '{title}': {e}")
             raise e
 
-    def get_nodes_missing_embeddings(self, limit: int = 10, scopes: list[str] = None) -> list[dict]:
+    def get_nodes_missing_embeddings(self, limit: int = 10, scopes: list[str] = None, namespaces: list[str] = None) -> list[dict]:
         """
         Retrieves nodes that are eligible for vector search but don't have an embedding yet.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_scope = f"AND {scope_clause}" if scope_clause else ""
         
         # We target :Node and :Observation (which are the main entity types)
@@ -690,12 +874,12 @@ class GraphManager:
             result = session.run(query, name=name, embedding=embedding)
             return result.single() is not None
 
-    def get_orphan_tasks(self, scopes: list[str] = None) -> list[dict]:
+    def get_orphan_tasks(self, scopes: list[str] = None, namespaces: list[str] = None) -> list[dict]:
         """
         Finds Task nodes that have NO relationships attached to them AND
         are not explicitly marked to be kept as orphans.
         """
-        scope_clause = self._get_scope_filter(scopes)
+        scope_clause = self._get_filter_clause(scopes, namespaces=namespaces)
         where_scope = f"AND {scope_clause}" if scope_clause else ""
         
         query = f"""

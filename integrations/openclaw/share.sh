@@ -8,4 +8,5 @@ fi
 
 curl -s -X POST "${MNEMOSYNE_HOST}/share" \
      -H "Content-Type: application/json" \
-     -d "{\"node_name\": \"$1\", \"to_scope\": \"$2\"}" | jq . || curl -s -X POST "${MNEMOSYNE_HOST}/share" -H "Content-Type: application/json" -d "{\"node_name\": \"$1\", \"to_scope\": \"$2\"}"
+     -H "X-API-Key: ${MNEMOSYNE_KEY}" \
+     -d "{\"node_name\": \"$1\", \"to_scope\": \"$2\"}" | jq . || curl -s -X POST "${MNEMOSYNE_HOST}/share" -H "Content-Type: application/json" -H "X-API-Key: ${MNEMOSYNE_KEY}" -d "{\"node_name\": \"$1\", \"to_scope\": \"$2\"}"

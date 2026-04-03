@@ -3,7 +3,7 @@ title: Mnemosyne Gateway Connector
 author: GiodaLab
 author_url: https://github.com/giodalab/mnemosyne
 funding_url: https://github.com/giodalab/mnemosyne
-version: 0.2.0
+version: 0.3.0
 license: MIT
 """
 
@@ -18,6 +18,10 @@ class Filter:
         mnemosyne_url: str = Field(
             default="http://host.docker.internal:4001",
             description="The URL of the Mnemosyne Gateway API."
+        )
+        api_key: str = Field(
+            default="",
+            description="The API Key for Mnemosyne (if configured)."
         )
         project_context: str = Field(
             default="",
@@ -69,11 +73,19 @@ class Filter:
             return body
 
         try:
+            headers = {}
+            if self.valves.api_key:
+                headers["X-API-Key"] = self.valves.api_key
+
             context_parts = []
             
             # 1. Fetch Briefing/Context
             print(f"DEBUG: Calling {self.valves.mnemosyne_url}/briefing")
-            response = requests.get(f"{self.valves.mnemosyne_url}/briefing", timeout=5)
+            response = requests.get(
+                f"{self.valves.mnemosyne_url}/briefing", 
+                headers=headers,
+                timeout=5
+            )
             
             if response.status_code == 200:
                 data = response.json()
@@ -82,32 +94,31 @@ class Filter:
                 if data.get("butler_log"):
                     context_parts.append(f"The Butler's Insight: {data['butler_log']}")
 
-            # 2. Targeted Search
+            # 2. Optimized Semantic Search
             search_query = last_user_message
             if self.valves.project_context:
-                search_query = f"{self.valves.project_context} {search_query}"
+                search_query = f"[{self.valves.project_context}] {search_query}"
+            
+            print(f"DEBUG: Calling {self.valves.mnemosyne_url}/search for '{search_query}'")
+            search_resp = requests.get(
+                f"{self.valves.mnemosyne_url}/search", 
+                params={"q": search_query}, 
+                headers=headers,
+                timeout=5
+            )
+
+            if search_resp.status_code == 200:
+                concept_data = search_resp.json()
+                found_concepts = []
                 
-            keywords = search_query.split()
-            found_concepts = []
-
-            # Reverse to give priority to the end of the sentence
-            for word in reversed(keywords):
-                if len(word) < 4: continue
-                try:
-                    search_resp = requests.get(f"{self.valves.mnemosyne_url}/search", params={"q": word}, timeout=2)
-                    if search_resp.status_code == 200:
-                        concept_data = search_resp.json()
-                        details = f"- {concept_data['name']}: {concept_data.get('properties', {}).get('summary', '')}"
-                        if concept_data.get("related"):
-                            details += f" (Related: {', '.join(concept_data['related'][:3])})"
-                        if details not in found_concepts:
-                            found_concepts.append(details)
-                    if len(found_concepts) >= 2: break
-                except:
-                    continue
-
-            if found_concepts:
-                context_parts.append(f"Specific Memories:\n" + "\n".join(found_concepts))
+                details = f"- {concept_data['name']}: {concept_data.get('properties', {}).get('summary', concept_data.get('properties', {}).get('description', ''))}"
+                if concept_data.get("related"):
+                    related_names = [r['name'] if isinstance(r, dict) else r for r in concept_data['related']]
+                    details += f" (Related: {', '.join(related_names[:3])})"
+                found_concepts.append(details)
+                
+                if found_concepts:
+                    context_parts.append(f"Specific Memories:\n" + "\n".join(found_concepts))
                 
             if context_parts:
                 full_context = "\n".join(context_parts)
@@ -156,9 +167,14 @@ class Filter:
                 if self.valves.project_context:
                     payload["content"] = f"[Project context: {self.valves.project_context}]\n" + content_to_save
                 
+                headers = {}
+                if self.valves.api_key:
+                    headers["X-API-Key"] = self.valves.api_key
+
                 requests.post(
                     f"{self.valves.mnemosyne_url}/add",
                     json=payload,
+                    headers=headers,
                     timeout=5
                 )
                 print("DEBUG: Memory segment successfully sent to Mnemosyne.")

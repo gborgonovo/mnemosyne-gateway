@@ -9,4 +9,5 @@ fi
 scope=${2:-"Public"}
 curl -s -X POST "${MNEMOSYNE_HOST}/add?scope=${scope}" \
      -H "Content-Type: application/json" \
-     -d "{\"content\": \"$1\"}" | jq . || curl -s -X POST "${MNEMOSYNE_HOST}/add?scope=${scope}" -H "Content-Type: application/json" -d "{\"content\": \"$1\"}"
+     -H "X-API-Key: ${MNEMOSYNE_KEY}" \
+     -d "{\"content\": \"$1\"}" | jq . || curl -s -X POST "${MNEMOSYNE_HOST}/add?scope=${scope}" -H "Content-Type: application/json" -H "X-API-Key: ${MNEMOSYNE_KEY}" -d "{\"content\": \"$1\"}"

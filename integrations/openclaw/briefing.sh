@@ -2,4 +2,4 @@
 source "$(dirname "$0")/config.sh"
 
 scopes=${1:-"Public"}
-curl -s "${MNEMOSYNE_HOST}/briefing?scopes=${scopes}" | jq . || curl -s "${MNEMOSYNE_HOST}/briefing?scopes=${scopes}"
+curl -s "${MNEMOSYNE_HOST}/briefing?scopes=${scopes}" -H "X-API-Key: ${MNEMOSYNE_KEY}" | jq . || curl -s "${MNEMOSYNE_HOST}/briefing?scopes=${scopes}" -H "X-API-Key: ${MNEMOSYNE_KEY}"

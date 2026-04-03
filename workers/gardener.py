@@ -188,8 +188,8 @@ class Gardener:
                 # Double check with LLM if they are just "related" or actually "the same"
                 logger.info(f"Vector score {score:.2f} for '{name_a}' and '{name_b}'. Asking LLM for final confirmation...")
                 if self.llm.compare_entities(name_a, name_b):
-                    self.gm.add_edge(name_a, name_b, "MAYBE_SAME_AS", weight=0.0)
-                    logger.info(f"Gardener marked {name_a} and {name_b} as potential duplicates.")
+                    logger.info(f"Gardener marked {name_a} and {name_b} as duplicates. Triggering safe-merge...")
+                    self.gm.merge_nodes(name_a, name_b)
                 
             # If embeddings are on, we skip the slow python loop for safety and scale.
             return
@@ -206,8 +206,8 @@ class Gardener:
 
                 # Robust string matching before asking LLM
                 if self._is_similar(name_a, name_b):
-                    self.gm.add_edge(name_a, name_b, "MAYBE_SAME_AS", weight=0.0)
-                    logger.info(f"Gardener marked {name_a} and {name_b} as potential duplicates.")
+                    logger.info(f"Gardener marked {name_a} and {name_b} as duplicates. Triggering safe-merge...")
+                    self.gm.merge_nodes(name_a, name_b)
 
     def _is_similar(self, a, b):
         import difflib

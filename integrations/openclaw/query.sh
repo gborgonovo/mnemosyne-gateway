@@ -8,4 +8,4 @@ fi
 
 encoded_q=$(urlencode "$1")
 scopes=${2:-"Public"}
-curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}&scopes=${scopes}" | jq . || curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}&scopes=${scopes}"
+curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}&scopes=${scopes}" -H "X-API-Key: ${MNEMOSYNE_KEY}" | jq . || curl -s "${MNEMOSYNE_HOST}/search?q=${encoded_q}&scopes=${scopes}" -H "X-API-Key: ${MNEMOSYNE_KEY}"

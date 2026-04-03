@@ -37,10 +37,11 @@ Implements a **Knowledge Graph architecture** that goes beyond simple text files
 
 ### 1. Configure Connection
 
-Edit `config.sh` to point to your Mnemosyne Gateway (default is port `4001`):
+Edit `config.sh` to point to your Mnemosyne Gateway (default is port `4001`) and set your API key:
 
 ```bash
 MNEMOSYNE_HOST="http://localhost:4001"
+MNEMOSYNE_KEY="your-api-key-here"
 ```
 
 ### 2. Record Observations
@@ -69,6 +70,14 @@ MNEMOSYNE_HOST="http://localhost:4001"
 **`share.sh <node> <to_scope>`** - Promote knowledge between scopes
 **`history.sh`** - Audit recent activity (last 10 memories)
 **`status.sh`** - Check system health and graph statistics
+
+### Analytical & Exploration Commands
+**`types.sh [scopes]`** - List all existing labels in the knowledge graph.
+**`schema.sh [scopes]`** - View full schema of what labels and properties exist.
+**`stats.sh [scopes]`** - Get hard statistics/counts of nodes and relationships.
+**`related.sh <node_name> [scopes]`** - Graph-walk by retrieving all nodes directly connected to a specific node.
+**`search-advanced.sh '<json_payload>' [scopes] [limit]`** - Execute precise queries filtered by exact properties. Example: `search-advanced.sh '{"type": "Task", "status": "todo"}'`
+**`export.sh [scopes] [limit]`** - Dump a complete JSON snapshot slice of the graph locally.
 
 ## Why This Architecture?
 

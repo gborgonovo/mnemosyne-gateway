@@ -99,9 +99,14 @@ The `scripts/` directory contains tools for managing the Mnemosyne lifecycle and
 
 ---
 
+* **Graph Exploration**: New analytical endpoints (`/graph/schema`, `/graph/stats`) and CLI tools for deep graph walking.
+* **Automatic Safe-Merge**: The Gardener now consolidation semantic duplicates into *Tombstones* without data loss.
+
+---
+
 ## 🔌 Integrations
 
-* **OpenClaw**: Use the Skill in `integrations/openclaw/`.
+* **OpenClaw**: Use the Skill and the new analytical suite in `integrations/openclaw/`.
 * **Open WebUI**: Use the Filter Function in `integrations/open_webui/`.
 * **MCP Clients**: Point your settings to `gateway/mcp_server.py`.
 

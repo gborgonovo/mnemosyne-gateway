@@ -66,14 +66,15 @@ if os.path.exists(API_KEYS_FILE):
 else:
     logger.warning("No api_keys.yaml found. Gateway running WITHOUT authentication.")
 
-def verify_api_key(x_api_key: Optional[str] = Header(None)) -> List[str]:
+def verify_api_key(x_api_key: Optional[str] = Header(None)) -> Dict[str, List[str]]:
     """
     Dependency to check the API Key against the configured api_keys.yaml.
-    If no config exists, it returns a wildcard to allow any scope.
+    If no config exists, it returns a wildcard to allow any scope and namespace.
     If it exists, it expects the header X-API-Key to be valid.
+    Returns a dict with 'scopes' and 'namespaces' extracted from the key.
     """
     if not api_keys:
-        return ["*"] # Wildcard for 'allow all' when no auth is configured
+        return {"scopes": ["*"], "namespaces": ["*:rw", ":r"]} # Wildcard for 'allow all' when no auth is configured
         
     if not x_api_key:
         raise HTTPException(status_code=401, detail="X-API-Key header missing")
@@ -81,7 +82,11 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)) -> List[str]:
     if x_api_key not in api_keys:
         raise HTTPException(status_code=403, detail="Invalid API Key")
         
-    return api_keys[x_api_key]
+    key_config = api_keys[x_api_key]
+    scopes = key_config if isinstance(key_config, list) else key_config.get("scopes", ["Public"])
+    namespaces = key_config.get("namespaces", [":r"]) if isinstance(key_config, dict) else [":r"]
+    
+    return {"scopes": scopes, "namespaces": namespaces}
 
 def intersect_scopes(requested: str, allowed: List[str]) -> List[str]:
     if not requested:
@@ -216,14 +221,73 @@ def health_check():
     return {"status": "ok", "service": "mnemosyne-gateway"}
 
 # --- STANDARD REST API (Nodes CRUD) ---
+# --- SPECIFIC ENTITY CRUD (Phase 2) ---
+
+class EntityPayload(BaseModel):
+    description: str = ""
+    status: str = "active"
+    due_date: str = None
+    goal_name: str = None
+
+@app.post("/goals/{name}")
+def create_goal_api(name: str, payload: EntityPayload, scopes: str = "Private", api_auth: dict = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    props = {"status": payload.status}
+    if payload.description: props["description"] = payload.description
+    if payload.due_date: props["deadline"] = payload.due_date
+    
+    node = gm.add_node(name, primary_label="Goal", properties=props, scope=actual_scopes[0], namespace=allowed_namespaces[0] if allowed_namespaces else None)
+    return {"status": "success", "data": dict(node)}
+
+@app.post("/tasks/{name}")
+def create_task_api(name: str, payload: EntityPayload, scopes: str = "Private", api_auth: dict = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    props = {"status": payload.status or "todo"}
+    if payload.description: props["description"] = payload.description
+    if payload.due_date: props["due_date"] = payload.due_date
+    
+    node = gm.add_node(name, primary_label="Task", properties=props, scope=actual_scopes[0], namespace=allowed_namespaces[0] if allowed_namespaces else None)
+    
+    if payload.goal_name:
+        gm.add_edge(payload.goal_name, name, "REQUIRES", weight=0.8)
+        
+    return {"status": "success", "data": dict(node)}
+
+@app.post("/topics/{name}")
+def create_topic_api(name: str, payload: EntityPayload, scopes: str = "Public", api_auth: dict = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    props = {}
+    if payload.description: props["description"] = payload.description
+    
+    node = gm.add_node(name, primary_label="Topic", properties=props, scope=actual_scopes[0], namespace=allowed_namespaces[0] if allowed_namespaces else None)
+    return {"status": "success", "data": dict(node)}
+
+
 
 @app.get("/nodes")
-def list_nodes(type: Optional[str] = None, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
+def list_nodes(type: Optional[str] = None, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
     
-    nodes_raw = gm.get_all_nodes(label=type, scopes=actual_scopes)
+    nodes_raw = gm.get_all_nodes(label=type, scopes=actual_scopes, namespaces=allowed_namespaces)
     data = []
     for n in nodes_raw:
         # Determine primary type using GraphManager helper
@@ -244,12 +308,14 @@ def list_nodes(type: Optional[str] = None, scopes: Optional[str] = None, allowed
     return {"data": data}
 
 @app.get("/nodes/{name}")
-def get_node(name: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
+def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
-    node = gm.get_node(name, scopes=actual_scopes)
+    node = gm.get_node(name, scopes=actual_scopes, namespaces=allowed_namespaces)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
         
@@ -274,13 +340,23 @@ def get_node(name: str, scopes: Optional[str] = None, allowed_scopes: List[str] 
     return {"data": item}
 
 @app.put("/nodes/{name}")
-def upsert_node(name: str, payload: Dict[str, Any] = Body(...), scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def upsert_node(name: str, payload: Dict[str, Any] = Body(...), scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
     primary_label = payload.get("type", "Node")
     props = payload.get("properties", {})
+    # Phase 2: Immutability for Observation and Document
+    existing_node = gm.get_node(name, scopes=actual_scopes, namespaces=allowed_namespaces)
+    if existing_node:
+        existing_labels = list(existing_node.labels)
+        if "Observation" in existing_labels or "Document" in existing_labels:
+            raise HTTPException(status_code=405, detail="Method Not Allowed: Observation and Document nodes are immutable. Delete and recreate.")
+    elif primary_label in ["Observation", "Document"]:
+        raise HTTPException(status_code=405, detail="Method Not Allowed: Dedicated endpoints must be used to create Observation or Document.")
     
     # Flatten specific root fields into properties for graph storage
     for f in ["title", "description", "summary", "ai_context", "cover_image_id"]:
@@ -291,39 +367,169 @@ def upsert_node(name: str, payload: Dict[str, Any] = Body(...), scopes: Optional
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
     
-    node = gm.add_node(name, primary_label=primary_label, tags=tags, properties=props, scope=actual_scopes[0])
+    node = gm.add_node(name, primary_label=primary_label, tags=tags, properties=props, scope=actual_scope, namespace=allowed_namespaces[0] if allowed_namespaces else Nones[0])
     return {"status": "success", "data": dict(node)}
 
 @app.delete("/nodes/{name}")
-def delete_node_api(name: str, scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def delete_node_api(name: str, scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
-    success = gm.delete_node(name, scopes=actual_scopes)
+    success = gm.delete_node(name, scopes=actual_scopes, namespaces=allowed_namespaces)
     if not success:
          raise HTTPException(status_code=404, detail=f"Node '{name}' not found or already deleted")
          
     return {"status": "success", "message": f"Node '{name}' deleted"}
 
 @app.patch("/nodes/{name}/allow_orphan")
-def allow_orphan_task(name: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
+def allow_orphan_task(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     """
     Marks a Task as intentionally isolated so the Gardener stops suggesting to contextualize it.
     """
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
     # We remove the hidden flag and set the explicit allow flag
-    result = gm.update_node_properties(name, {"allow_orphan": True, "_is_orphan": None}, scopes=actual_scopes)
+    result = gm.update_node_properties(name, {"allow_orphan": True, "_is_orphan": None}, scopes=actual_scopes, namespaces=allowed_namespaces)
     if not result:
         raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
         
     return {"status": "success", "message": f"Task '{name}' has been marked to float freely."}
 
+
+@app.put("/goals/{name}")
+def update_goal_api(name: str, payload: EntityPayload, scopes: str = "Private", api_auth: dict = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    props = {}
+    if payload.description: props["description"] = payload.description
+    if payload.status: props["status"] = payload.status
+    if payload.due_date: props["deadline"] = payload.due_date
+    
+    result = gm.update_node_properties(name, props, scopes=actual_scopes, namespaces=allowed_namespaces)
+    if not result:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"status": "success", "data": result}
+
+@app.delete("/goals/{name}")
+def delete_goal_api(name: str, scopes: str = "Private", api_auth: dict = Depends(verify_api_key)):
+    return delete_node_api(name, scopes, api_auth)
+
+@app.put("/tasks/{name}")
+def update_task_api(name: str, payload: EntityPayload, scopes: str = "Private", api_auth: dict = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    props = {}
+    if payload.description: props["description"] = payload.description
+    if payload.status: props["status"] = payload.status
+    if payload.due_date: props["due_date"] = payload.due_date
+    
+    result = gm.update_node_properties(name, props, scopes=actual_scopes, namespaces=allowed_namespaces)
+    if not result:
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    if payload.goal_name:
+        gm.add_edge(payload.goal_name, name, "REQUIRES", weight=0.8)
+        
+    return {"status": "success", "data": result}
+
+@app.delete("/tasks/{name}")
+def delete_task_api(name: str, scopes: str = "Private", api_auth: dict = Depends(verify_api_key)):
+    return delete_node_api(name, scopes, api_auth)
+
+@app.put("/topics/{name}")
+def update_topic_api(name: str, payload: EntityPayload, scopes: str = "Public", api_auth: dict = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    props = {}
+    if payload.description: props["description"] = payload.description
+    
+    result = gm.update_node_properties(name, props, scopes=actual_scopes, namespaces=allowed_namespaces)
+    if not result:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return {"status": "success", "data": result}
+
+@app.delete("/topics/{name}")
+def delete_topic_api(name: str, scopes: str = "Public", api_auth: dict = Depends(verify_api_key)):
+    return delete_node_api(name, scopes, api_auth)
+
+@app.get("/graph/schema")
+def get_graph_schema(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    schema = gm.get_schema(scopes=actual_scopes, namespaces=allowed_namespaces)
+    return {"status": "success", "data": schema}
+
+@app.get("/graph/stats")
+def get_graph_stats(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    stats = gm.get_stats(scopes=actual_scopes, namespaces=allowed_namespaces)
+    return {"status": "success", "data": stats}
+
+@app.get("/graph/export")
+def get_graph_export(scopes: Optional[str] = None, limit: int = 5000, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    data = gm.export_graph(scopes=actual_scopes, namespaces=allowed_namespaces, limit=limit)
+    return {"status": "success", "data": data}
+
+@app.post("/search/advanced")
+def search_advanced(payload: Dict[str, Any] = Body(...), scopes: Optional[str] = None, limit: int = 50, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    results = gm.advanced_search(filters=payload, scopes=actual_scopes, namespaces=allowed_namespaces, limit=limit)
+    return {"status": "success", "data": results}
+
+@app.get("/nodes/{name}/neighbors")
+def get_neighbors(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
+    actual_scopes = intersect_scopes(scopes, allowed_scopes)
+    if not actual_scopes:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    neighbors = gm.get_neighbors(name, scopes=actual_scopes, namespaces=allowed_namespaces)
+    return {"status": "success", "data": neighbors}
+
 @app.get("/search")
-def search(q: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Depends(verify_api_key)):
+def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -360,7 +566,7 @@ def search(q: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Dep
         # Energize the node to trigger initiatives/propagation
         am.propagate_activation(name, initial_boost=1.0)
         
-        neighbors = gm.get_neighbors(name, scopes=actual_scopes)
+        neighbors = gm.get_neighbors(name, scopes=actual_scopes, namespaces=allowed_namespaces)
         related = []
         if neighbors:
             limit = config.get("retrieval", {}).get("search_neighbors_limit", 15)
@@ -391,7 +597,9 @@ def search(q: str, scopes: Optional[str] = None, allowed_scopes: List[str] = Dep
         raise HTTPException(status_code=500, detail=f"Internal Server Error during search: {str(e)}")
 
 @app.post("/add")
-def add_observation(obs: Observation, scope: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def add_observation(obs: Observation, scope: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scope, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -426,8 +634,10 @@ async def ingest_document(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...), 
     scope: Optional[str] = "Public",
-    allowed_scopes: List[str] = Depends(verify_api_key)
+    api_auth: Dict[str, List[str]] = Depends(verify_api_key)
 ):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scope, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -466,8 +676,10 @@ async def ingest_document(
     }
 
 @app.get("/documents")
-def list_documents(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def list_documents(scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     """Lists all Document nodes in the graph."""
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -498,11 +710,13 @@ def download_document(name: str):
     return FileResponse(path=storage_path, filename=name, media_type='application/octet-stream')
 
 @app.delete("/document/{name}")
-def delete_document(name: str, scope: str = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def delete_document(name: str, scope: str = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     """
     Deletes a document from the graph and the physical storage.
     This is a 'Deep Delete' that removes all associated chunks.
     """
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scope, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
@@ -511,7 +725,7 @@ def delete_document(name: str, scope: str = "Public", allowed_scopes: List[str] 
     # 1. Remove from graph
     try:
         # We'll add a deep_delete_document to GraphManager
-        success = gm.delete_document(name, scope=actual_scope)
+        success = gm.delete_document(name, scope=actual_scope, namespace=allowed_namespaces[0] if allowed_namespaces else None)
         if not success:
              logger.warning(f"DELETE: Document '{name}' not found in graph for scope '{actual_scope}'")
     except Exception as e:
@@ -531,10 +745,11 @@ def delete_document(name: str, scope: str = "Public", allowed_scopes: List[str] 
 
 
 @app.post("/share")
-def share_knowledge(node_name: str, from_scope: str, to_scope: str, allowed_scopes: List[str] = Depends(verify_api_key)):
+def share_knowledge(node_name: str, from_scope: str, to_scope: str, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     """
     Explicitly moves/links knowledge between scopes.
     """
+    allowed_scopes = api_auth["scopes"]
     if "*" not in allowed_scopes:
         if from_scope not in allowed_scopes or to_scope not in allowed_scopes:
             raise HTTPException(status_code=403, detail="Not authorized to share between requested scopes")
@@ -558,13 +773,15 @@ def share_knowledge(node_name: str, from_scope: str, to_scope: str, allowed_scop
     return {"status": "shared", "node": node_name, "new_scope": to_scope}
 
 @app.get("/briefing")
-def get_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def get_briefing(scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
         
     # 1. Active Topics
-    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=actual_scopes)
+    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=actual_scopes, namespaces=allowed_namespaces)
     hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
 
     # 2. Proactive Context (The Butler)
@@ -581,7 +798,7 @@ def get_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = D
     }
 
 @app.get("/briefing/longitudinal")
-def get_longitudinal_briefing(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def get_longitudinal_briefing(scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     """
     Generates a historical briefing of dormant projects and temporal trends.
     """
@@ -589,13 +806,15 @@ def get_longitudinal_briefing(scopes: Optional[str] = "Public", allowed_scopes: 
     if not long_cfg.get('enabled', True):
         raise HTTPException(status_code=403, detail="Longitudinal analysis is disabled in configuration.")
         
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
     
     threshold = long_cfg.get('dormancy_threshold_days', 30)
-    dormant_projects = gm.get_dormant_projects(threshold_days=threshold, limit=5, scopes=actual_scopes)
-    recent_trends = gm.get_temporal_trends(days_ago=7, limit=5, scopes=actual_scopes)
+    dormant_projects = gm.get_dormant_projects(threshold_days=threshold, limit=5, scopes=actual_scopes, namespaces=allowed_namespaces)
+    recent_trends = gm.get_temporal_trends(days_ago=7, limit=5, scopes=actual_scopes, namespaces=allowed_namespaces)
     
     return {
         "status": "success",
@@ -710,11 +929,13 @@ def get_status():
     return status
         
 @app.get("/stats")
-def get_stats(scopes: Optional[str] = "Public", allowed_scopes: List[str] = Depends(verify_api_key)):
+def get_stats(scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    allowed_scopes = api_auth["scopes"]
+    allowed_namespaces = api_auth["namespaces"]
     actual_scopes = intersect_scopes(scopes, allowed_scopes)
     if not actual_scopes:
         raise HTTPException(status_code=403, detail="Not authorized to access requested scopes")
-    return gm.get_stats(scopes=actual_scopes)
+    return gm.get_stats(scopes=actual_scopes, namespaces=allowed_namespaces)
 
 @app.get("/history")
 def get_history():

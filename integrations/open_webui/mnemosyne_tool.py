@@ -2,7 +2,7 @@
 title: Mnemosyne Memory Search
 author: GiodaLab
 author_url: https://github.com/giodalab/mnemosyne
-version: 0.1.0
+version: 0.2.0
 description: A tool that allows the LLM to search for past memories, concepts, and project contexts stored in Mnemosyne.
 """
 
@@ -15,6 +15,10 @@ class Tools:
         mnemosyne_url: str = Field(
             default="http://host.docker.internal:4001",
             description="The URL of the Mnemosyne Gateway API."
+        )
+        api_key: str = Field(
+            default="",
+            description="The API Key for Mnemosyne (if configured)."
         )
 
     def __init__(self):
@@ -34,9 +38,14 @@ class Tools:
             search_query = f"{project_context} {query}".strip()
             print(f"DEBUG Tool: Searching Mnemosyne for '{search_query}'")
             
+            headers = {}
+            if self.valves.api_key:
+                headers["X-API-Key"] = self.valves.api_key
+
             response = requests.get(
                 f"{self.valves.mnemosyne_url}/search", 
                 params={"q": search_query}, 
+                headers=headers,
                 timeout=5
             )
             
