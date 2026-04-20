@@ -4,6 +4,8 @@ import os
 import yaml
 import logging
 import json
+import uuid
+import re
 from datetime import datetime
 
 # Setup Logging
@@ -21,11 +23,9 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from mcp.server.fastmcp import FastMCP
-from core.graph_manager import GraphManager
-from butler.llm import get_llm_provider
-from butler.perception import PerceptionModule
+from core.kuzu_manager import KuzuManager
+from core.vector_store import VectorStore
 from core.attention import AttentionModel
-from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 
 # Configuration
@@ -36,17 +36,37 @@ def load_config():
 
 config = load_config()
 
-# Initialize Core
-gm = GraphManager(
-    config['graph']['uri'], 
-    config['graph']['user'], 
-    config['graph']['password']
-)
-llm = get_llm_provider(config)
-am = AttentionModel(gm, config=config.get('attention', {}))
-pm = PerceptionModule(gm, llm, am)
-ie = InitiativeEngine(gm, config=config)
-gd = Gardener(gm, llm, am, config=config)
+# Directories
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+KNOWLEDGE_DIR = os.path.join(BASE_DIR, "knowledge")
+os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+
+# Initialize Core Services (Reads only - Writes mostly go to FileSystem)
+kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_db"))
+vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"))
+am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
+gd = Gardener(am, config=config)
+
+# Helper for local files
+def get_file_path(name: str):
+    # Basic sanitization
+    safe_name = re.sub(r'[^\w\s-]', '', name).strip()
+    return os.path.join(KNOWLEDGE_DIR, f"{safe_name}.md")
+
+def read_markdown(name: str):
+    path = get_file_path(name)
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read()
+    return None
+
+def write_markdown(name: str, frontmatter: dict, body: str):
+    path = get_file_path(name)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write("---\n")
+        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
+        f.write("---\n\n")
+        f.write(body)
 
 # Create FastMCP Server
 mcp = FastMCP("Mnemosyne-Memory")
@@ -54,309 +74,212 @@ mcp = FastMCP("Mnemosyne-Memory")
 @mcp.tool()
 def trigger_gardening_cycle() -> str:
     """
-    Manually trigger a gardening cycle to clean up duplicates, 
-    apply temporal decay to thoughts, and check for urgent deadlines.
+    Manually trigger a gardening cycle to apply temporal decay to network heat.
     """
     gd.run_once()
-    return "Gardening cycle completed successfully. Memory sanitized and updated."
+    return "Gardening cycle completed successfully. Memory network heat decayed."
 
 @mcp.tool()
-def query_knowledge(query: str, scopes: str = "Public", namespaces: str = None, depth: int = 1) -> str:
+def query_knowledge(query: str, limit: int = 3) -> str:
     """
-    Search the Mnemosyne knowledge graph for entities and their relationships.
-    Use this to retrieve context about specific people, projects, or concepts.
-    scopes: Comma-separated list of scopes to search (e.g., 'Private,Public').
+    Semantic search of the Mnemosyne knowledge base.
+    Returns the literal Markdown content of the most relevant files,
+    reranked by their current cognitive heat (activation level) to provide the most relevant context.
     """
-    scope_list = scopes.split(",") if scopes else ["Public"]
-    namespace_list = namespaces.split(",") if namespaces else None
-    node = gm.get_node(query, scopes=scope_list, namespaces=namespace_list)
-    if not node:
-        return f"Concept '{query}' not found in memory (Scopes: {scopes})."
+    # 1. Semantic Search
+    results = vector_store.semantic_search(query, limit=limit * 2)
     
-    # Build a readable summary of the node and its neighbors
-    res = f"### [CONCEPT: {node['name']}]\n"
-    props = {k: v for k, v in dict(node).items() if k not in ['name', 'last_seen', 'activation_level', 'labels']}
-    if props:
-        res += "Properties:\n"
-        for k, v in props.items():
-            res += f"  - {k}: {v}\n"
+    if not results:
+        return f"No concepts matching '{query}' found in memory."
+        
+    # 2. Thermal Re-ranking
+    ranked_results = []
+    for r in results:
+        name = r['name']
+        node_state = kuzu_mgr.get_node(name)
+        heat = node_state['activation_level'] if node_state else 0.1
+        # Score = Semantic Distance inverted (lower is closer) + Heat 
+        # (This is a simplified reranking algorithm)
+        combined_score = (1.0 / (r['distance'] + 0.001)) * (heat + 0.5)
+        ranked_results.append((combined_score, name))
+        
+    ranked_results.sort(key=lambda x: x[0], reverse=True)
     
-    neighbors = gm.get_neighbors(query, scopes=scope_list, namespaces=namespace_list)
-    if neighbors:
-        limit = config.get("retrieval", {}).get("search_neighbors_limit", 10)
-        res += "Related Context:\n"
-        for n in neighbors[:limit]:
-            res += f"  - {n['node']['name']} ({n['rel_type']})\n"
+    # 3. Retrieve markdown content
+    output = ""
+    for score, name in ranked_results[:limit]:
+        content = read_markdown(name)
+        if content:
+             output += f"### FILE: {name}.md (Relevance Score: {score:.2f})\n```markdown\n{content}\n```\n\n"
+             # Simulate attention logic
+             am.stimulate([name], boost_amount=0.5)
     
-    return res
-
-from butler.knowledge_queue import KnowledgeQueue
-kq = KnowledgeQueue()
+    return output
 
 @mcp.tool()
 def add_observation(content: str, scope: str = "Public") -> str:
     """
-    Record a new piece of information into memory. 
-    This triggers entity extraction and relationship mapping automatically via background workers.
-    scope: The privacy scope for this observation (Private, Internal, Public).
+    Record a new raw piece of unstructured information into memory. 
+    The background watcher will process it automatically.
     """
+    obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
+    frontmatter = {"type": "Observation", "scope": scope}
     try:
-        obs_name = pm.create_observation(content, scope=scope)
-        job_id = kq.enqueue(content, obs_name, scope=scope)
-        return f"Observation recorded in scope '{scope}' and queued for semantic enrichment (Job ID: {job_id})."
+        write_markdown(obs_id, frontmatter, content)
+        return f"Observation recorded as {obs_id}.md in scope '{scope}'."
     except Exception as e:
         return f"Error recording observation: {e}"
 
 @mcp.tool()
-def get_memory_briefing(scopes: str = "Public", namespaces: str = None) -> str:
+def get_memory_briefing() -> str:
     """
-    Get a briefing on currently active (hot) topics and proactive suggestions from The Butler.
-    Useful at the start of a session or when feeling lost.
-    scopes: Comma-separated list of scopes (e.g., 'Private,Public').
+    Get a briefing on currently active (hot) topics in the system based on cognitive activation.
     """
-    scope_list = scopes.split(",") if scopes else ["Public"]
-    namespace_list = namespaces.split(",") if namespaces else None
-    active_nodes = gm.get_active_nodes(threshold=0.7, scopes=scope_list, namespaces=namespace_list)
-    hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
+    active_nodes = kuzu_mgr.get_active_nodes(threshold=0.5)
     
-    # The Butler's Proactive Voice
-    briefing = f"Current active entities: {', '.join(hot_topics) if hot_topics else 'None'}\n"
-    proactive_context = ie.get_proactive_context(scopes=scope_list)
-    if proactive_context:
-        briefing += f"\n#### The Butler's Internal Log:\n{proactive_context}\n"
-        
-    # Specific Suggestions
-    suggestions = ie.generate_initiatives(scopes=scope_list)
-    if suggestions:
-        briefing += "\n#### The Butler's Suggestions:\n"
-        for s in suggestions:
-            briefing += f"- {s['message']} (Context: {s['reason']})\n"
+    if not active_nodes:
+         return "The memory is currently resting. No active thoughts."
+         
+    # Sort by activation
+    active_nodes.sort(key=lambda x: x['activation_level'], reverse=True)
+    hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")][:10]
+    
+    briefing = f"Current active internal thoughts (Hot Nodes):\n"
+    for title in hot_topics:
+         # Read briefly from file
+         content = read_markdown(title)
+         preview = content[:150].replace('\n', ' ') + "..." if content else "File not found"
+         briefing += f"- {title} (Context: {preview})\n"
             
     return briefing
 
 @mcp.tool()
 def get_system_status() -> str:
     """
-    Checks the health of Mnemosyne's core components (Neo4j, Ollama).
-    Returns a JSON string with connection status and graph statistics.
+    Checks the status of the hybrid architecture databases and file system.
     """
     status = {
         "timestamp": datetime.now().isoformat(),
-        "components": {
-            "neo4j": "unknown",
-            "ollama": "unknown"
+        "architecture": "Hybrid File-First",
+        "file_system": {
+            "path": KNOWLEDGE_DIR,
+            "markdown_files": len([f for f in os.listdir(KNOWLEDGE_DIR) if f.endswith('.md')])
         },
-        "graph_stats": {
-            "nodes": 0,
-            "relationships": 0
+        "kuzu_thermal_graph": {
+            "active_nodes": len(kuzu_mgr.get_active_nodes(threshold=0.1))
+        },
+        "chromadb_semantic": {
+            "total_documents": len(vector_store.list_nodes())
         }
     }
-    
-    # Check Neo4j
-    try:
-        gm.verify_connection()
-        status["components"]["neo4j"] = "connected"
-        stats = gm.get_stats()
-        status["graph_stats"] = stats
-    except Exception as e:
-        status["components"]["neo4j"] = f"error: {str(e)}"
-        
-    # Check Ollama/LLM
-    try:
-        # Simple generation check
-        llm.generate("test")
-        status["components"]["ollama"] = "connected" if config["llm"]["mode"] == "ollama" else "mock/start"
-    except Exception as e:
-        status["components"]["ollama"] = f"error: {str(e)}"
-        
     return json.dumps(status, indent=2)
 
 @mcp.tool()
-def inspect_node_details(name: str) -> str:
+def inspect_file_raw(name: str) -> str:
     """
-    Returns the raw internal metadata of a specific node in JSON format.
-    Useful for debugging entity properties and labels.
+    Read the direct markdown file from the file system.
     """
-    node = gm.get_node(name)
-    if not node:
-        return json.dumps({"error": f"Node '{name}' not found"}, indent=2)
-    
-    # Convert Neo4j node to dict
-    node_dict = dict(node)
-    node_dict["labels"] = list(node.labels)
-    return json.dumps(node_dict, indent=2)
+    content = read_markdown(name)
+    if not content:
+        return json.dumps({"error": f"File '{name}.md' not found"}, indent=2)
+    return content
 
 @mcp.tool()
-def get_recent_logs(lines: int = 20) -> str:
+def forget_knowledge_node(name: str) -> str:
     """
-    Retrieves the last N lines from the Mnemosyne debug log.
-    Returns plain text.
+    Completely erases a concept by deleting its Markdown file.
+    The background watcher will delete it from all databases.
     """
-    log_path = "/tmp/mnemosyne.log"
-    if not os.path.exists(log_path):
-        return "Log file not found."
+    path = get_file_path(name)
+    if os.path.exists(path):
+         os.remove(path)
+         return json.dumps({"status": "success", "message": f"File '{name}.md' deleted."}, indent=2)
+    return json.dumps({"status": "error", "message": f"File '{name}.md' not found."}, indent=2)
+
+@mcp.tool()
+def update_knowledge_frontmatter(name: str, updates: str) -> str:
+    """
+    Updates the YAML frontmatter properties of an existing entity.
+    'updates' must be a JSON string of key-value pairs.
+    """
+    path = get_file_path(name)
+    if not os.path.exists(path):
+        return json.dumps({"status": "error", "message": f"Entity '{name}' not found."})
         
-    try:
-        # Simple tail implementation
-        with open(log_path, 'r') as f:
-            all_lines = f.readlines()
-            last_n = all_lines[-lines:]
-            return "".join(last_n)
-    except Exception as e:
-        return f"Error reading logs: {str(e)}"
-
-@mcp.tool()
-def provide_feedback(target_id: str, feedback_type: str, comment: str = "") -> str:
-    """
-    Log user or agent feedback about a specific entity or interaction.
-    target_id: The name of the node or ID of the interaction.
-    feedback_type: 'positive', 'negative', 'correction', 'missing_info'
-    """
-    # For now, just log it. Future: Store in a 'Feedback' node or dedicated DB.
-    logger.info(f"FEEDBACK [{feedback_type}] for '{target_id}': {comment}")
-    return json.dumps({"status": "received", "message": "Feedback logged successfully."}, indent=2)
-
-@mcp.tool()
-def forget_knowledge_node(name: str, scopes: str = "Private,Public", namespaces: str = None) -> str:
-    """
-    Completely erases a specific entity or concept from Mnemosyne's memory.
-    Use this only when explicitly requested by the user to forget something, 
-    or to remove completely erroneous information.
-    scopes: Comma-separated list of scopes (e.g., 'Private,Public').
-    """
-    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
-    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
-    logger.info(f"MCP forget_knowledge_node request for '{name}' in scopes {scope_list}")
-    
-    success = gm.delete_node(name, scopes=scope_list, namespaces=namespace_list)
-    
-    if success:
-        return json.dumps({
-            "status": "success", 
-            "message": f"Entity '{name}' has been completely forgotten from memory."
-        }, indent=2)
-    else:
-        return json.dumps({
-            "status": "error", 
-            "message": f"Entity '{name}' not found or could not be deleted in the specified scopes."
-        }, indent=2)
-
-@mcp.tool()
-def update_knowledge_node(name: str, updates: str, scopes: str = "Public", namespaces: str = None) -> str:
-    """
-    Updates or corrects the properties of an existing entity in memory.
-    'updates' must be a valid JSON string of key-value pairs.
-    Example updates: '{"description": "New info", "status": "resolved"}'
-    scopes: Comma-separated list of scopes (e.g., 'Public').
-    """
-    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
-    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
-    logger.info(f"MCP update_knowledge_node request for '{name}'")
-    
     try:
         properties_dict = json.loads(updates)
     except json.JSONDecodeError:
-         return json.dumps({
-            "status": "error", 
-            "message": "The 'updates' argument must be a valid JSON string."
-        }, indent=2)
+         return json.dumps({"error": "The 'updates' argument must be valid JSON."})
          
-    result = gm.update_node_properties(name, properties_dict, scopes=scope_list, namespaces=namespace_list)
-    
-    if result:
-        return json.dumps({
-            "status": "success", 
-            "message": f"Entity '{name}' updated successfully.",
-            "new_properties": result
-        }, indent=2)
-    else:
-         return json.dumps({
-            "status": "error", 
-            "message": f"Entity '{name}' not found in the specified scopes."
-        }, indent=2)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', content, re.DOTALL)
+        if yaml_match:
+            frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
+            body = yaml_match.group(2)
+        else:
+            frontmatter = {}
+            body = content
+            
+        # Update
+        for k, v in properties_dict.items():
+             frontmatter[k] = v
+             
+        write_markdown(name, frontmatter, body)
+        return json.dumps({"status": "success", "message": f"File '{name}.md' frontmatter updated."})
+    except Exception as e:
+         return json.dumps({"error": str(e)})
 
 @mcp.tool()
-def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public", namespaces: str = None) -> str:
+def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public") -> str:
     """
-    Creates a new high-level strategic Goal.
-    name: Short, unique name (e.g., 'Launch Mnemosyne')
-    description: Longer explanation of the goal
-    deadline: Optional ISO 8601 date (e.g., '2026-06-01T00:00:00')
+    Creates a new high-level strategic Goal as a Markdown file.
     """
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
-    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
-    props = {"status": "active"}
-    if description:
-        props["description"] = description
-    if deadline:
-        props["deadline"] = deadline
-        
-    gm.add_node(name, primary_label="Goal", properties=props, scope=scope_list[0], namespace=namespace_list[0] if namespace_list else None)
+    frontmatter = {
+         "type": "Goal",
+         "status": "active",
+         "scope": scope_list[0]
+    }
+    if deadline: frontmatter["deadline"] = deadline
+    body = f"# {name}\n\n{description}"
     
-    return json.dumps({
-        "status": "success",
-        "message": f"Goal '{name}' created successfully.",
-        "details": props
-    }, indent=2)
+    write_markdown(name, frontmatter, body)
+    return json.dumps({"status": "success", "message": f"Goal '{name}' created."})
 
 @mcp.tool()
-def create_task(name: str, goal_name: str, due_date: str = "", scopes: str = "Private,Public", namespaces: str = None) -> str:
+def create_task(name: str, goal_name: str, description: str = "", due_date: str = "", scopes: str = "Private,Public") -> str:
     """
-    Creates an actionable Task and links it to an existing Goal.
-    name: Short task description (e.g., 'Write README')
-    goal_name: The exact name of the parent Goal this task REQUIRES.
-    due_date: Optional ISO 8601 date.
+    Creates an actionable Task and links it to an existing Goal via wikilinks.
     """
     scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
-    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
-    props = {"status": "todo"}
-    if due_date:
-        props["due_date"] = due_date
-        
-    # Create the task node
-    gm.add_node(name, primary_label="Task", properties=props, scope=scope_list[0], namespace=namespace_list[0] if namespace_list else None)
+    frontmatter = {
+         "type": "Task",
+         "status": "todo",
+         "scope": scope_list[0]
+    }
+    if due_date: frontmatter["due_date"] = due_date
     
-    # Link to Goal
-    if goal_name:
-        gm.add_edge(goal_name, name, "REQUIRES", weight=0.8)
-        
-    return json.dumps({
-        "status": "success",
-        "message": f"Task '{name}' created and linked to '{goal_name}'.",
-    }, indent=2)
+    body = f"# {name}\n\n**Linked Goal:** [[{goal_name}]]\n\n{description}"
+    
+    write_markdown(name, frontmatter, body)
+    return json.dumps({"status": "success", "message": f"Task '{name}' created and linked to '{goal_name}'."})
 
 @mcp.tool()
-def update_task_status(name: str, status: str, scopes: str = "Private,Public", namespaces: str = None) -> str:
+def update_task_status(name: str, status: str) -> str:
     """
-    Updates the status of a Task or Goal.
-    status: 'todo', 'in_progress', 'done', 'discarded'
+    Updates the status of a Task or Goal. Valid: 'todo', 'in_progress', 'done', 'discarded' 
     """
-    valid_statuses = ['todo', 'in_progress', 'done', 'completed', 'active', 'discarded']
-    if status not in valid_statuses:
-         return json.dumps({"error": f"Invalid status. Use one of {valid_statuses}."})
-         
-    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
-    namespace_list = [n.strip() for n in namespaces.split(",")] if namespaces else None
-    result = gm.update_node_properties(name, {"status": status}, scopes=scope_list, namespaces=namespace_list)
-    
-    if result:
-        return json.dumps({
-            "status": "success", 
-            "message": f"Status of '{name}' updated to '{status}'.",
-        }, indent=2)
-    else:
-         return json.dumps({
-            "status": "error", 
-            "message": f"Task or Goal '{name}' not found."
-        }, indent=2)
+    return update_knowledge_frontmatter(name, json.dumps({"status": status}))
 
 async def background_gardener():
-    """Periodically runs the gardener in the background."""
+    """Periodically runs the gardener to trigger thermodynamic sleep in KuzuDB."""
     interval = config.get("gardener", {}).get("interval_seconds", 3600)
     while True:
         try:
             logger.info("Background Gardener: Starting cycle...")
-            # Run blocking gardener in a separate thread to avoid freezing the MCP server
             await asyncio.to_thread(gd.run_once)
             logger.info(f"Background Gardener: Cycle complete. Sleeping for {interval}s")
         except Exception as e:

@@ -1,4 +1,6 @@
-neo4j==5.15.0
+kuzu>=0.4.0
+chromadb>=0.4.22
+watchdog>=4.0.0
 streamlit==1.31.0
 pyyaml==6.0.1
 requests==2.31.0

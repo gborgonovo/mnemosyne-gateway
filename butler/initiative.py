@@ -1,158 +1,88 @@
 import logging
 import random
-from core.graph_manager import GraphManager
 
 logger = logging.getLogger(__name__)
 
 class InitiativeEngine:
     """
-    Decides when and how to proactively interact with the user.
-    Based on node activation levels and graph topology.
+    Decides when and how to proactively interact with the user, 
+    based on the cognitive thermodynamics (KùzuDB activation levels).
     """
 
-    def __init__(self, graph_manager: GraphManager, config: dict = None):
-        self.gm = graph_manager
+    def __init__(self, kuzu_manager, config: dict = None):
+        self.kuzu_mgr = kuzu_manager
         config = config or {}
         init_config = config.get("initiative", {})
         self.threshold = init_config.get("initiative_threshold", 0.7)
         self.explanation_threshold = init_config.get("explanation_threshold", 0.5)
-        self.retrieval_config = config.get("retrieval", {})
-        self.blacklist = {"interessante", "utile", "importante", "bene", "ciao", "ok"}
 
-    def get_proactive_context(self, scopes: list[str] = None) -> str:
+    def get_proactive_context(self) -> str:
         """
-        Returns a string summary of active nodes and their 'forgotten' neighbors
-        to be used by the LLM for proactive responses.
-        Filters out suggestions with negative feedback.
+        Returns a string summary of active nodes and their 'forgotten' neighbors.
+        Useful to inject into an LLM system prompt.
         """
-        active_nodes = self.gm.get_active_nodes(threshold=self.threshold, scopes=scopes)
+        active_nodes = self.kuzu_mgr.get_active_nodes(threshold=self.threshold)
         suggestions = []
         
         for node in active_nodes:
-            # Skip if source is an Observation
-            if "Observation" in node.get('labels', []):
-                continue
-                
             name = node['name']
-            neighbors = self.gm.get_neighbors(name, scopes=scopes)
+            if name.startswith("Obs_"): continue # Skip raw observations
+            
+            neighbors = self.kuzu_mgr.get_neighbors(name)
             for neighbor in neighbors:
-                n_node = neighbor['node']
-                n_name = n_node['name']
-                # Skip if active, Observation, or blacklisted
-                if "Observation" in n_node.get('labels', []) or n_name.lower() in self.blacklist:
-                    continue
+                n_name = neighbor['node_name']
+                if n_name.startswith("Obs_"): continue
                 
-                # Check feedback score
-                rel_props = neighbor.get('rel_props', {})
-                feedback = rel_props.get('feedback_score', 0)
-                
-                # Rule: If feedback is negative (< 0), The Butler should NOT mention it.
-                if feedback < 0:
-                    continue
-
+                n_node = self.kuzu_mgr.get_node(n_name)
+                if not n_node: continue
                 n_val = n_node.get('activation_level', 0.0)
+                
                 if n_val < self.explanation_threshold:
                     rel_type = neighbor['rel_type']
-                    suggestion_str = f"- {name} is related to {n_name} via {rel_type}"
-                    if feedback > 0:
-                        suggestion_str += " (User found this relevant previously)"
+                    suggestion_str = f"- L'argomento caldo '{name}' è logicamente collegato a '{n_name}' via [{rel_type}], che al momento è ignorato."
                     suggestions.append(suggestion_str)
         
         if not suggestions:
             return ""
             
-        limit = self.retrieval_config.get("initiative_limit", 3)
-        return "Relevant but currently neglected topics in the user's mind:\n" + "\n".join(suggestions[:limit])
+        return "Insight Proattivi dal Kernel (Idee dormienti ma rilevanti):\n" + "\n".join(suggestions[:3])
 
-    def generate_initiatives(self, scopes: list[str] = None) -> list[dict]:
+    def generate_initiatives(self) -> list[dict]:
         """
-        Scans active nodes and generates proactive suggestions for the sidebar.
+        Scans active nodes and generates proactive suggestions or alerts.
         """
         initiatives = []
-        active_nodes = self.gm.get_active_nodes(threshold=self.threshold, scopes=scopes)
+        active_nodes = self.kuzu_mgr.get_active_nodes(threshold=self.threshold)
         seen_targets = set()
         
         for node in active_nodes:
-            # CRITICAL: Skip technical observation nodes as initiative sources
-            if "Observation" in node.get('labels', []):
-                continue
-                
             name = node['name']
-            neighbors = self.gm.get_neighbors(name, scopes=scopes)
+            if name.startswith("Obs_"): continue
+            
+            neighbors = self.kuzu_mgr.get_neighbors(name)
             for neighbor in neighbors:
-                n_node = neighbor['node']
-                n_name = n_node['name']
+                n_name = neighbor['node_name']
+                if n_name in seen_targets or n_name.startswith("Obs_"): continue
                 
-                # Skip if already suggested, Observation, or blacklisted
-                if n_name in seen_targets or "Observation" in n_node.get('labels', []) or n_name.lower() in self.blacklist:
-                    continue
-                    
+                n_node = self.kuzu_mgr.get_node(n_name)
+                if not n_node: continue
                 n_val = n_node.get('activation_level', 0.0)
+                
                 if n_val < self.explanation_threshold:
-                    # Check feedback score
-                    rel_props = neighbor.get('rel_props', {})
-                    feedback = rel_props.get('feedback_score', 0)
-                    
-                    if feedback < 0:
-                        continue
-                        
                     phrases = [
-                        f"Dato che stiamo parlando di **{name}**, mi viene in mente **{n_name}**.",
-                        f"A proposito di **{name}**, non dimentichiamo **{n_name}**.",
-                        f"Mentre riflettiamo su **{name}**, potremmo considerare anche **{n_name}**.",
-                        f"Il tema di **{name}** mi riporta alla mente **{n_name}**.",
-                        f"Curioso come **{name}** sia collegato a **{n_name}**, non trova?"
+                        f"Dato che stiamo considerando **{name}**, mi viene in mente **{n_name}**.",
+                        f"Mentre riflettiamo su **{name}**, potremmo considerare i collegamenti fisici/logici con **{n_name}**.",
+                        f"Curioso come **{name}** richiami immediatamente alla memoria **{n_name}**, non trova?"
                     ]
-                    message = random.choice(phrases)
                     initiatives.append({
                         "source": name,
                         "target": n_name,
-                        "message": message,
-                        "reason": f"Node '{name}' is active, but '{n_name}' is dormant."
+                        "message": random.choice(phrases),
+                        "reason": f"Sorgente '{name}' è calda nel database termico, ma '{n_name}' no."
                     })
                     seen_targets.add(n_name)
                     
-                    if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3): # Limit sidebar noise
+                    if len(initiatives) >= 3:
                         return initiatives
-        
-        # New: Strategic Planning - Goal Decomposition
-        for node in active_nodes:
-            if "Goal" in node.get('labels', []):
-                name = node['name']
-                neighbors = self.gm.get_neighbors(name)
-                # Check if there are any Tasks linked to this Goal
-                tasks = [n for n in neighbors if "Task" in n['node'].get('labels', [])]
-                
-                if not tasks:
-                    initiatives.append({
-                        "source": name,
-                        "target": "Deconstruction",
-                        "message": f"Il tuo obiettivo **{name}** sembra complesso. Vuoi che proviamo a scomporlo in passi azionabili?",
-                        "reason": f"Goal '{name}' is active but has no linked Tasks."
-                    })
-                    if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3):
-                        return initiatives
-
-        # New: Orphan Tasks
-        orphan_query = f"""
-        MATCH (n:Task)
-        WHERE n._is_orphan = true
-        "{self.gm._get_scope_filter(scopes, var_name='n')}"
-        RETURN n.name as name LIMIT 2
-        """
-        # Quick manual grab via GM driver to save time
-        try:
-            with self.gm.driver.session() as session:
-                for record in session.run(orphan_query.replace('""', '')):
-                    initiatives.append({
-                        "source": record['name'],
-                        "target": "Contextualization",
-                        "message": f"Ho notato il task isolato **{record['name']}**. Desidera collegarlo a un Progetto o lasciarlo libero?",
-                        "reason": f"Orphan Task '{record['name']}' detected."
-                    })
-                    if len(initiatives) >= self.retrieval_config.get("initiative_limit", 3):
-                        return initiatives
-        except Exception as e:
-            logger.error(f"Failed to query orphan tasks in InitiativeEngine: {e}")
-
+                        
         return initiatives

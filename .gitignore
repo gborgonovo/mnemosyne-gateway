@@ -4,6 +4,7 @@
 project_documentation/
 openclaw_workspace/
 wiki_repo/
+knowledge/
 
 # Neo4j Data (Docker volumes)
 docker/neo4j_data/
