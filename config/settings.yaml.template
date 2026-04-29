@@ -2,10 +2,10 @@ system:
   version: 1.0
   debug: true
 
-graph:
-  uri: "bolt://localhost:7687"
-  user: "neo4j"
-  password: "your_password_here"
+# Graph Configuration (v0.3+ Hybrid File-First)
+# The system now uses KùzuDB and ChromaDB automatically.
+# No manual URI/User/Password required for the local-first storage.
+
 
 attention:
   decay_rate: 0.05          # Amount of activation lost per hour (linear)

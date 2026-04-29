@@ -14,7 +14,7 @@ Mnemosyne is not a chatbot; it's the **Knowledge OS** that sits between you and 
 
 ---
 
-## 🏗️ Architecture: The Micro-Kernel Approach
+## 🏗️ Architecture: Hybrid File-First (v0.3)
 
 The project is a distributed ecosystem designed for modularity:
 
@@ -45,35 +45,35 @@ The project is a distributed ecosystem designed for modularity:
 ### Prerequisites
 
 * **Python 3.10+**
-* **Docker** (for Neo4j)
-* **Ollama** (for local LLM inference)
+* **Ollama** (Recommended for local LLM inference)
 
-### Installation
+### Quick Setup (Production)
 
-1. **Clone the repository**:
+Se sei sul tuo server di produzione, abbiamo creato uno script che automatizza tutto:
 
+```bash
+chmod +x scripts/setup_production.sh
+./scripts/setup_production.sh
+```
+
+### Manual Installation
+
+1. **Clone & Environment**:
     ```bash
     git clone https://github.com/gborgonovo/mnemosyne-gateway.git
     cd mnemosyne-gateway
-    ```
-
-2. **Start Neo4j**:
-
-    ```bash
-    docker run -d --name mnemosyne-db -p 7474:7474 -p 7687:7687 \
-    -e NEO4J_AUTH=neo4j/your_password neo4j:latest
-    ```
-
-3. **Setup Environment**:
-
-    ```bash
     python3 -m venv .venv
     source .venv/bin/activate
     pip install -r requirements.txt
     ```
 
-4. **Run the System**:
+2. **Initial Ingestion (Cold Boot)**:
+    Se hai già dei file Markdown in `knowledge/`, esegui l'indicizzazione iniziale:
+    ```bash
+    python3 workers/file_watcher.py --once
+    ```
 
+3. **Run**:
     ```bash
     ./scripts/start.sh
     ```
@@ -82,53 +82,10 @@ The project is a distributed ecosystem designed for modularity:
 
 ## 🛠️ Utility Scripts
 
-The `scripts/` directory contains tools for managing the Mnemosyne lifecycle and data:
-
-### Lifecycle Management
-
-* **`./scripts/start.sh`**: Launches the Gateway and background Workers in `nohup` mode.
-* **`./scripts/stop.sh`**: Gracefully (and forcibly if needed) terminates all Mnemosyne processes.
-* **`./scripts/restart.sh`**: Performs a full stop, wait, and start cycle, followed by a health check of the API.
-* **`./scripts/monitor.sh`**: **(Recommended)** A comprehensive control panel showing process health, DB connectivity, AI status, and graph statistics.
-
-### Data & Connectome
-
-* **`./scripts/backup.sh`**: Exports the entire graph memory to a timestamped JSON file in `data/backups/`.
-* **`./scripts/restore.sh`**: Restores the graph from a backup file (defaults to the latest available).
-* **`./scripts/manage_db.py`**: Python utility for administrative tasks (clear, backup, restore).
-
----
-
-* **Graph Exploration**: New analytical endpoints (`/graph/schema`, `/graph/stats`) and CLI tools for deep graph walking.
-* **Automatic Safe-Merge**: The Gardener now consolidation semantic duplicates into *Tombstones* without data loss.
-
----
-
-## 🔌 Integrations
-
-* **OpenClaw**: Use the Skill and the new analytical suite in `integrations/openclaw/`.
-* **Open WebUI**: Use the Filter Function in `integrations/open_webui/`.
-* **MCP Clients**: Point your settings to `gateway/mcp_server.py`.
-
----
-
-## 📄 Documentation
-
-For detailed guides, please visit our **[GitHub Wiki](https://github.com/gborgonovo/mnemosyne-gateway/wiki)**:
-
-* [Getting Started](https://github.com/gborgonovo/mnemosyne-gateway/wiki/User_Getting_Started)
-* [Architecture Overview](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Dev_Architecture_Overview)
-* [The Theory of the Liquid Graph](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_Liquid_Graph)
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please refer to the **[Long-term Vision](https://github.com/gborgonovo/mnemosyne-gateway/wiki/Theory_Semantic_Gland)** for architectural principles.
-
-## ⚖️ License
-
-Project licensed under the MIT License.
+* **`./scripts/setup_production.sh`**: Configurazione automatica e indicizzazione iniziale.
+* **`./scripts/start.sh`**: Avvia Gateway e File Watcher in background.
+* **`./scripts/stop.sh`**: Ferma tutti i processi Mnemosyne.
+* **`./scripts/monitor.sh`**: Controllo stato e salute del sistema.
 
 ---
 
