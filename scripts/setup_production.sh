@@ -17,8 +17,7 @@ echo "📥 Installazione dipendenze..."
 # 2. Creazione struttura cartelle
 echo "📂 Creazione struttura directory..."
 mkdir -p knowledge
-mkdir -p data/kuzu_db
-mkdir -p data/chroma_db
+mkdir -p data
 mkdir -p logs
 
 # 3. Configurazione .env

@@ -7,8 +7,7 @@ cd "$(dirname "$0")/.."
 # Crea le cartelle necessarie
 mkdir -p logs
 mkdir -p knowledge
-mkdir -p data/kuzu_db
-mkdir -p data/chroma_db
+mkdir -p data
 
 export PYTHONPATH=.
 
