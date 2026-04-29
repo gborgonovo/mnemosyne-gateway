@@ -78,6 +78,28 @@ app = FastAPI(title="Mnemosyne File-First API", version="2.0.0")
 
 class Observation(BaseModel):
     content: str
+    scope: str = "Public"
+
+class Goal(BaseModel):
+    name: str
+    description: str = ""
+    deadline: str = ""
+    scopes: str = "Private,Public"
+
+class Task(BaseModel):
+    name: str
+    goal_name: str
+    description: str = ""
+    due_date: str = ""
+    scopes: str = "Private,Public"
+
+def write_markdown(name: str, frontmatter: dict, body: str):
+    path = get_file_path(name)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write("---\n")
+        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
+        f.write("---\n\n")
+        f.write(body)
 
 @app.get("/")
 def health_check():
@@ -149,3 +171,35 @@ def get_briefing():
         "hot_topics": hot_topics,
         "suggestions": ["System operates in file-first mode. Edit .md directly!"]
     }
+@app.post("/observations")
+def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
+    frontmatter = {"type": "Observation", "scope": obs.scope}
+    write_markdown(obs_id, frontmatter, obs.content)
+    return {"status": "success", "id": obs_id}
+
+@app.post("/goals")
+def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    scope_list = [s.strip() for s in goal.scopes.split(",")] if goal.scopes else ["Private"]
+    frontmatter = {
+         "type": "Goal",
+         "status": "active",
+         "scope": scope_list[0]
+    }
+    if goal.deadline: frontmatter["deadline"] = goal.deadline
+    body = f"# {goal.name}\n\n{goal.description}"
+    write_markdown(goal.name, frontmatter, body)
+    return {"status": "success", "name": goal.name}
+
+@app.post("/tasks")
+def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    scope_list = [s.strip() for s in task.scopes.split(",")] if task.scopes else ["Private"]
+    frontmatter = {
+         "type": "Task",
+         "status": "todo",
+         "scope": scope_list[0]
+    }
+    if task.due_date: frontmatter["due_date"] = task.due_date
+    body = f"# {task.name}\n\n**Linked Goal:** [[{task.goal_name}]]\n\n{task.description}"
+    write_markdown(task.name, frontmatter, body)
+    return {"status": "success", "name": task.name}
