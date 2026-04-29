@@ -6,6 +6,7 @@ import logging
 import uuid
 import re
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 # Setup Logging
@@ -102,8 +103,14 @@ def write_markdown(name: str, frontmatter: dict, body: str):
         f.write(body)
 
 @app.get("/")
+@app.get("/status")
 def health_check():
-    return {"status": "ok", "service": "mnemosyne-gateway", "architecture": "file-first"}
+    return {
+        "status": "ok", 
+        "service": "mnemosyne-gateway", 
+        "architecture": "file-first",
+        "timestamp": datetime.now().isoformat()
+    }
 
 @app.get("/search")
 def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
