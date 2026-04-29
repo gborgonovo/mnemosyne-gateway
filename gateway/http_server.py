@@ -203,3 +203,8 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
     body = f"# {task.name}\n\n**Linked Goal:** [[{task.goal_name}]]\n\n{task.description}"
     write_markdown(task.name, frontmatter, body)
     return {"status": "success", "name": task.name}
+
+if __name__ == "__main__":
+    host = config.get('gateway', {}).get('host', "0.0.0.0")
+    port = config.get('gateway', {}).get('port', 4001)
+    uvicorn.run(app, host=host, port=port)
