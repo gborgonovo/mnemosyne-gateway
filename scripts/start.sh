@@ -25,11 +25,8 @@ GATEWAY_PID=$!
 echo $GATEWAY_PID > logs/gateway.pid
 echo "✅ Gateway avviato (PID: $GATEWAY_PID). Log: logs/gateway.log"
 
-# Avvia il File Watcher (Sincronizzazione real-time)
-nohup .venv/bin/python3 workers/file_watcher.py > logs/file_watcher.log 2>&1 &
-WATCHER_PID=$!
-echo $WATCHER_PID > logs/file_watcher.pid
-echo "✅ File Watcher avviato (PID: $WATCHER_PID). Log: logs/file_watcher.log"
+# Il File Watcher è ora integrato nel Gateway (http_server.py)
+# per garantire l'accesso esclusivo al database Kùzu.
 
 # Avvia i Worker di intelligenza (opzionali ma raccomandati)
 nohup .venv/bin/python3 workers/llm_worker.py > logs/llm_worker.log 2>&1 &

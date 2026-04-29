@@ -20,6 +20,8 @@ from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel
 from workers.gardener import Gardener
+from workers.file_watcher import WikiSyncHandler
+from watchdog.observers import Observer
 from pydantic import BaseModel
 
 # Configuration
@@ -59,7 +61,15 @@ try:
     kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"))
     vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"))
     am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
-    logger.info("✅ Hybrid File-First Backend Initialized")
+    
+    # 🔄 Integrazione File Watcher interna per evitare conflitti di lock
+    logger.info(f"🔄 Avvio FileWatcher interno su {KNOWLEDGE_DIR}...")
+    event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR)
+    observer = Observer()
+    observer.schedule(event_handler, KNOWLEDGE_DIR, recursive=True)
+    observer.start()
+    
+    logger.info("✅ Hybrid File-First Backend Initialized (with internal watcher)")
 except Exception as e:
     logger.error(f"❌ Error initializing backend: {e}")
     sys.exit(1)
