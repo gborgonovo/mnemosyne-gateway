@@ -50,7 +50,16 @@ if [ -f logs/briefing_worker.pid ]; then
   rm logs/briefing_worker.pid
 fi
 
+# Ferma il File Watcher
+if [ -f logs/file_watcher.pid ]; then
+  PID=$(cat logs/file_watcher.pid)
+  kill $PID 2>/dev/null && echo "✅ File Watcher fermato ($PID)"
+  rm logs/file_watcher.pid
+fi
+
 # Pulisci eventuali processi zombie
+pkill -f "gateway/http_server.py" 2>/dev/null
+pkill -f "workers/file_watcher.py" 2>/dev/null
 pkill -f "workers/llm_worker.py" 2>/dev/null
 pkill -f "workers/briefing_worker.py" 2>/dev/null
 
