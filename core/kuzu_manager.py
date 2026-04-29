@@ -12,11 +12,11 @@ class KuzuManager:
     Schema: Nodes have normalized names as PK, and original display names.
     """
     def __init__(self, db_path="./data/kuzu_db"):
-        # Assicuriamoci che il path sia trattato come una directory (alcune versioni di Kuzu preferiscono lo slash finale)
-        if not db_path.endswith('/'):
-            db_path += '/'
+        # Assicuriamoci che la cartella padre esista, ma lasciamo che Kùzu gestisca la propria directory
+        parent_dir = os.path.dirname(db_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         self.db_path = db_path
-        os.makedirs(self.db_path, exist_ok=True)
         self.db = kuzu.Database(self.db_path)
         self.conn = kuzu.Connection(self.db)
         self._init_schema()
