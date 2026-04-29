@@ -117,7 +117,7 @@ def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):
     if not os.path.exists(knowledge_path):
         os.makedirs(knowledge_path, exist_ok=True)
 
-    kuzu_mgr = KuzuManager(db_path=os.path.join(base_dir, "data", "kuzu_db"))
+    kuzu_mgr = KuzuManager(db_path=os.path.join(base_dir, "data", "kuzu_main"))
     vector_store = VectorStore(db_path=os.path.join(base_dir, "data", "chroma_db"))
     
     event_handler = WikiSyncHandler(kuzu_mgr, vector_store, knowledge_path)

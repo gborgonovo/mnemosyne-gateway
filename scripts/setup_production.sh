@@ -20,11 +20,9 @@ mkdir -p knowledge
 mkdir -p data
 mkdir -p logs
 
-# Correzione Kùzu: Se kuzu_db esiste come file (errore comune), rimuovilo
-if [ -f "data/kuzu_db" ]; then
-    echo "🧹 Rimozione vecchio file di lock/database corrotto..."
-    rm "data/kuzu_db"
-fi
+# Correzione Kùzu: Se kuzu_db o kuzu_main esistono come file (errore comune), rimuovili
+if [ -f "data/kuzu_db" ]; then rm "data/kuzu_db"; fi
+if [ -f "data/kuzu_main" ]; then rm "data/kuzu_main"; fi
 
 # 3. Configurazione .env
 if [ ! -f ".env" ]; then

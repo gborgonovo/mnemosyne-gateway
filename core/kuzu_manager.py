@@ -11,15 +11,20 @@ class KuzuManager:
     Manages the topological graph and thermal state (activation) of Mnemosyne.
     Schema: Nodes have normalized names as PK, and original display names.
     """
-    def __init__(self, db_path="./data/kuzu_db"):
-        # Assicuriamoci che la cartella padre esista, ma lasciamo che Kùzu gestisca la propria directory
-        parent_dir = os.path.dirname(db_path)
-        if parent_dir:
-            os.makedirs(parent_dir, exist_ok=True)
-        self.db_path = db_path
-        self.db = kuzu.Database(self.db_path)
-        self.conn = kuzu.Connection(self.db)
-        self._init_schema()
+    def __init__(self, db_path="./data/kuzu_main"):
+        # Assicuriamoci che la cartella padre esista
+        self.db_path = os.path.abspath(db_path)
+        parent_dir = os.path.dirname(self.db_path)
+        os.makedirs(parent_dir, exist_ok=True)
+        
+        logger.info(f"Inizializzazione KuzuDatabase su: {self.db_path}")
+        try:
+            self.db = kuzu.Database(self.db_path)
+            self.conn = kuzu.Connection(self.db)
+            self._init_schema()
+        except Exception as e:
+            logger.error(f"Errore critico durante l'apertura di Kùzu: {e}")
+            raise
 
     def _init_schema(self):
         try:

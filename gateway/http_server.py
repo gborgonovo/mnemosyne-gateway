@@ -56,7 +56,7 @@ def intersect_scopes(requested: str, allowed: List[str]) -> List[str]:
 
 # Initialize Core
 try:
-    kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_db"))
+    kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"))
     vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"))
     am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
     logger.info("✅ Hybrid File-First Backend Initialized")

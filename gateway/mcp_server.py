@@ -42,7 +42,7 @@ KNOWLEDGE_DIR = os.path.join(BASE_DIR, "knowledge")
 os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
 
 # Initialize Core Services (Reads only - Writes mostly go to FileSystem)
-kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_db"))
+kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"))
 vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"))
 am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
 gd = Gardener(am, config=config)
