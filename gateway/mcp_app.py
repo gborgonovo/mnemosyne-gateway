@@ -1,4 +1,5 @@
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 import json
 import uuid
 import re
@@ -7,7 +8,14 @@ import yaml
 from datetime import datetime
 
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
-    mcp = FastMCP("Mnemosyne-Memory")
+    # Security Configuration for Remote Access
+    security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["memory.borgonovo.org", "localhost", "127.0.0.1"],
+        allowed_origins=["https://memory.borgonovo.org"]
+    )
+    
+    mcp = FastMCP("Mnemosyne-Memory", transport_security=security)
 
     # Helper functions
     def get_file_path(name: str):
