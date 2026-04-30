@@ -112,12 +112,19 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     @mcp.tool()
     def get_system_status() -> str:
         """Checks the status of the hybrid architecture databases and file system."""
+        all_md_files = []
+        for root, dirs, files in os.walk(knowledge_dir):
+            for f in files:
+                if f.endswith('.md'):
+                    all_md_files.append(os.path.join(root, f))
+
         status = {
             "timestamp": datetime.now().isoformat(),
             "architecture": "Hybrid File-First",
             "file_system": {
-                "path": knowledge_dir,
-                "markdown_files": len([f for f in os.listdir(knowledge_dir) if f.endswith('.md')])
+                "base_path": knowledge_dir,
+                "total_markdown_files": len(all_md_files),
+                "top_level_files": len([f for f in os.listdir(knowledge_dir) if f.endswith('.md')])
             },
             "kuzu_thermal_graph": {
                 "active_nodes": len(kuzu_mgr.get_active_nodes(threshold=0.1))
@@ -127,6 +134,15 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             }
         }
         return json.dumps(status, indent=2)
+
+    @mcp.tool()
+    def debug_filesystem() -> str:
+        """Lists all files found by the recursive search to debug path issues."""
+        files_found = []
+        for root, dirs, files in os.walk(knowledge_dir):
+            for f in files:
+                files_found.append(os.path.relpath(os.path.join(root, f), knowledge_dir))
+        return "\n".join(files_found)
 
     @mcp.tool()
     def inspect_file_raw(name: str) -> str:
