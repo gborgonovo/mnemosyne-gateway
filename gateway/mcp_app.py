@@ -19,12 +19,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     # Helper functions
     def find_file_recursive(name: str):
-        """Locate a markdown file by name anywhere within the knowledge directory."""
-        safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-        filename = f"{safe_name}.md"
+        """Locate a markdown file by name (case-insensitive) anywhere within the knowledge directory."""
+        safe_name = re.sub(r'[^\w\s-]', '', name).strip().lower()
         for root, dirs, files in os.walk(knowledge_dir):
-            if filename in files:
-                return os.path.join(root, filename)
+            for f in files:
+                if f.lower() == f"{safe_name}.md":
+                    return os.path.join(root, f)
         return None
 
     def read_markdown(name: str):
@@ -155,8 +155,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     @mcp.tool()
     def forget_knowledge_node(name: str) -> str:
         """Completely erases a concept by deleting its Markdown file."""
-        path = get_file_path(name)
-        if os.path.exists(path):
+        path = find_file_recursive(name)
+        if path and os.path.exists(path):
              os.remove(path)
              return json.dumps({"status": "success", "message": f"File '{name}.md' deleted."}, indent=2)
         return json.dumps({"status": "error", "message": f"File '{name}.md' not found."}, indent=2)
@@ -164,8 +164,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     @mcp.tool()
     def update_knowledge_frontmatter(name: str, updates: str) -> str:
         """Updates the YAML frontmatter properties of an existing entity."""
-        path = get_file_path(name)
-        if not os.path.exists(path):
+        path = find_file_recursive(name)
+        if not path or not os.path.exists(path):
             return json.dumps({"status": "error", "message": f"Entity '{name}' not found."})
         try:
             properties_dict = json.loads(updates)
