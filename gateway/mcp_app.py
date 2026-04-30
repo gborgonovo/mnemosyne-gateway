@@ -18,19 +18,30 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     mcp = FastMCP("Mnemosyne-Memory", transport_security=security)
 
     # Helper functions
-    def get_file_path(name: str):
+    def find_file_recursive(name: str):
+        """Locate a markdown file by name anywhere within the knowledge directory."""
         safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-        return os.path.join(knowledge_dir, f"{safe_name}.md")
+        filename = f"{safe_name}.md"
+        for root, dirs, files in os.walk(knowledge_dir):
+            if filename in files:
+                return os.path.join(root, filename)
+        return None
 
     def read_markdown(name: str):
-        path = get_file_path(name)
-        if os.path.exists(path):
+        path = find_file_recursive(name)
+        if path:
             with open(path, 'r', encoding='utf-8') as f:
                 return f.read()
         return None
 
     def write_markdown(name: str, frontmatter: dict, body: str):
-        path = get_file_path(name)
+        # Try to find existing file to update it in place
+        path = find_file_recursive(name)
+        if not path:
+            # New file, put it in the root
+            safe_name = re.sub(r'[^\w\s-]', '', name).strip()
+            path = os.path.join(knowledge_dir, f"{safe_name}.md")
+        
         with open(path, 'w', encoding='utf-8') as f:
             f.write("---\n")
             yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
