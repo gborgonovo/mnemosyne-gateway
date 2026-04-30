@@ -23,6 +23,8 @@ from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler
 from watchdog.observers import Observer
 from pydantic import BaseModel
+from mcp.server.fastapi import create_fastapi_app
+from gateway.mcp_app import create_mcp_server
 
 # Configuration
 def load_config():
@@ -70,6 +72,13 @@ try:
     observer.start()
     
     logger.info("✅ Hybrid File-First Backend Initialized (with internal watcher)")
+
+    # 🚀 Inizializzazione MCP SSE
+    from workers.gardener import Gardener
+    gd = Gardener(am, config=config)
+    mcp_instance = create_mcp_server(kuzu_mgr, vector_store, am, gd, config, KNOWLEDGE_DIR)
+    mcp_app = create_fastapi_app(mcp_instance)
+    
 except Exception as e:
     logger.error(f"❌ Error initializing backend: {e}")
     sys.exit(1)
@@ -220,6 +229,9 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
     body = f"# {task.name}\n\n**Linked Goal:** [[{task.goal_name}]]\n\n{task.description}"
     write_markdown(task.name, frontmatter, body)
     return {"status": "success", "name": task.name}
+
+# Mount MCP
+app.mount("/mcp", mcp_app)
 
 if __name__ == "__main__":
     host = config.get('gateway', {}).get('host', "0.0.0.0")
