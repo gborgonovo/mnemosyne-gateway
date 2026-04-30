@@ -23,7 +23,6 @@ from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler
 from watchdog.observers import Observer
 from pydantic import BaseModel
-from mcp.server.fastapi import create_fastapi_app
 from gateway.mcp_app import create_mcp_server
 
 # Configuration
@@ -77,7 +76,7 @@ try:
     from workers.gardener import Gardener
     gd = Gardener(am, config=config)
     mcp_instance = create_mcp_server(kuzu_mgr, vector_store, am, gd, config, KNOWLEDGE_DIR)
-    mcp_app = create_fastapi_app(mcp_instance)
+    mcp_app = mcp_instance.sse_app()
     
 except Exception as e:
     logger.error(f"❌ Error initializing backend: {e}")

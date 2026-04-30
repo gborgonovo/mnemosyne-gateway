@@ -1,5 +1,4 @@
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastapi import create_fastapi_app
 import json
 import uuid
 import re
