@@ -11,7 +11,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     # Security Configuration for Remote Access
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=["memory.borgonovo.org", "localhost", "127.0.0.1"],
+        allowed_hosts=["memory.borgonovo.org:*", "memory.borgonovo.org", "localhost:*", "localhost", "127.0.0.1:*", "127.0.0.1"],
         allowed_origins=["https://memory.borgonovo.org"]
     )
     
