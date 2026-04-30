@@ -12,7 +12,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=["memory.borgonovo.org:*", "memory.borgonovo.org", "localhost:*", "localhost", "127.0.0.1:*", "127.0.0.1"],
-        allowed_origins=["https://memory.borgonovo.org"]
+        allowed_origins=["https://claude.ai", "https://memory.borgonovo.org", "http://localhost:*", "http://127.0.0.1:*"]
     )
     
     mcp = FastMCP("Mnemosyne-Memory", transport_security=security)

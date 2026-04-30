@@ -24,6 +24,7 @@ from workers.file_watcher import WikiSyncHandler
 from watchdog.observers import Observer
 from pydantic import BaseModel
 from gateway.mcp_app import create_mcp_server
+from fastapi.middleware.cors import CORSMiddleware
 
 # Configuration
 def load_config():
@@ -94,6 +95,15 @@ def read_markdown(name: str):
     return None
 
 app = FastAPI(title="Mnemosyne File-First API", version="2.0.0")
+
+# 🌍 CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Observation(BaseModel):
     content: str
