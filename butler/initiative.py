@@ -36,12 +36,12 @@ class InitiativeEngine:
                 if n_val < self.explanation_threshold:
                     rel_type = neighbor['rel_type']
                     suggestions.append(
-                        f"- L'argomento caldo '{name}' è collegato a '{n_name}' via [{rel_type}], attualmente inattivo."
+                        f"- Hot topic '{name}' is linked to '{n_name}' via [{rel_type}], currently inactive."
                     )
 
         if not suggestions:
             return ""
-        return "Insight Proattivi (idee dormienti ma rilevanti):\n" + "\n".join(suggestions[:3])
+        return "Proactive Insights (dormant but relevant ideas):\n" + "\n".join(suggestions[:3])
 
     def generate_initiatives(self, scopes: list = None) -> list:
         initiatives = []
@@ -62,15 +62,15 @@ class InitiativeEngine:
                     continue
                 if n_node.get('activation_level', 0.0) < self.explanation_threshold:
                     phrases = [
-                        f"Dato che stiamo considerando **{name}**, mi viene in mente **{n_name}**.",
-                        f"Mentre riflettiamo su **{name}**, potremmo considerare i collegamenti con **{n_name}**.",
-                        f"Curioso come **{name}** richiami alla memoria **{n_name}**, non trova?",
+                        f"Since we are considering **{name}**, **{n_name}** comes to mind.",
+                        f"While reflecting on **{name}**, we might consider its connections with **{n_name}**.",
+                        f"Curious how **{name}** recalls **{n_name}**, isn't it?",
                     ]
                     initiatives.append({
                         "source": name,
                         "target": n_name,
                         "message": random.choice(phrases),
-                        "reason": f"'{name}' è caldo ma '{n_name}' è inattivo.",
+                        "reason": f"'{name}' is hot but '{n_name}' is inactive.",
                     })
                     seen_targets.add(n_name)
                     if len(initiatives) >= 3:

@@ -17,13 +17,13 @@ class KuzuManager:
         parent_dir = os.path.dirname(self.db_path)
         os.makedirs(parent_dir, exist_ok=True)
 
-        logger.info(f"Inizializzazione KuzuDatabase su: {self.db_path}")
+        logger.info(f"Initializing KuzuDatabase at: {self.db_path}")
         try:
             self.db = kuzu.Database(self.db_path)
             self.conn = kuzu.Connection(self.db)
             self._init_schema()
         except Exception as e:
-            logger.error(f"Errore critico durante l'apertura di Kùzu: {e}")
+            logger.error(f"Critical error opening KuzuDB: {e}")
             raise
 
     def _init_schema(self):

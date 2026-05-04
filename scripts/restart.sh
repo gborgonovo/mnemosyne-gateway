@@ -1,25 +1,23 @@
 #!/bin/bash
-# restart.sh - Riavvia Mnemosyne e i Worker verificando lo stato
+# restart.sh - Restart Mnemosyne and workers, then verify status
 
-# Spostati nella root del progetto
 cd "$(dirname "$0")/.."
 
-echo "♻️  Riavvio di Mnemosyne in corso..."
+echo "♻️  Restarting Mnemosyne..."
 
-# 1. Ferma tutto
+# 1. Stop everything
 ./scripts/stop.sh
 
-# Breve attesa per assicurarsi che le porte siano libere
+# Brief pause to ensure ports are free
 sleep 1
 
-# 2. Avvia tutto
+# 2. Start everything
 ./scripts/start.sh
 
-echo "⏳ In attesa che il Gateway sia pronto..."
-# Attesa di 3 secondi per l'inizializzazione del gateway
+echo "⏳ Waiting for Gateway to be ready..."
 sleep 5
 
-# Estrazione porta (Python -> Grep -> Default)
+# Extract port (Python -> Grep -> Default)
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
 PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null)
@@ -28,15 +26,15 @@ if [ -z "$PORT" ]; then
 fi
 if [ -z "$PORT" ]; then PORT=4002; fi
 
-# 3. Verifica dello stato
-echo "🔍 Verifica dello stato sulla porta $PORT..."
+# 3. Verify status
+echo "🔍 Checking Gateway status on port $PORT..."
 if curl -s -f http://localhost:$PORT/status > /dev/null; then
     curl -s http://localhost:$PORT/status | $PYTHON_CMD -m json.tool
-    echo "✅ Sistema riavviato correttamente!"
+    echo "✅ System restarted successfully!"
 else
-    echo "❌ Errore nella verifica del Gateway sulla porta $PORT."
-    echo "Controlla i log con: tail -n 20 logs/gateway.log"
+    echo "❌ Error checking Gateway on port $PORT."
+    echo "Check logs with: tail -n 20 logs/gateway.log"
 fi
 
 echo ""
-echo "🚀 Operazione di restart completata."
+echo "🚀 Restart operation completed."

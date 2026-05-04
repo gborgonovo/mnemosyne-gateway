@@ -20,26 +20,26 @@ def load_config():
     return {}
 
 def run_briefing():
-    logger.info("Generazione del Briefing Proattivo in corso (Hybrid DB)...")
+    logger.info("Generating proactive briefing (Hybrid DB)...")
     config = load_config()
     kuzu_mgr = KuzuManager(db_path=os.path.join(os.path.dirname(__file__), '..', 'data', 'kuzu_db'))
     ie = InitiativeEngine(kuzu_mgr, config=config)
-    
+
     initiatives = ie.generate_initiatives()
-    
+
     if not initiatives:
-        logger.info("Il Kernel è in uno stato di quiete ideale. Nessun suggerimento proattivo al momento.")
+        logger.info("Knowledge graph is quiet. No proactive suggestions at this time.")
         return
-        
+
     print("\n" + "="*50)
-    print(" 🎩 IL MAGGIORDOMO CONSIGLIA (Insight Termici)")
+    print(" 🎩 THE BUTLER SUGGESTS (Thermal Insights)")
     print("="*50)
     for idx, ini in enumerate(initiatives, 1):
         print(f"\n⚡ Initiative #{idx}")
-        print(f"Sorgente Calda  : {ini['source']}")
-        print(f"Target Seggerito: {ini['target']}")
-        print(f"Messaggio       : \"{ini['message']}\"")
-        print(f"Logica          : {ini['reason']}")
+        print(f"Hot Source : {ini['source']}")
+        print(f"Target     : {ini['target']}")
+        print(f"Message    : \"{ini['message']}\"")
+        print(f"Reason     : {ini['reason']}")
     print("\n" + "="*50)
 
 if __name__ == "__main__":

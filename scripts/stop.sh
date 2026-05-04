@@ -1,22 +1,22 @@
 #!/bin/bash
-# stop.sh - Ferma Mnemosyne e i Worker
+# stop.sh - Stop Mnemosyne and its workers
 
 cd "$(dirname "$0")/.."
 
-echo "🛑 Spegnimento di Mnemosyne..."
+echo "🛑 Shutting down Mnemosyne..."
 
-# Ferma il Gateway
-# 1. Tenta prima con il file PID (se esiste)
+# Stop the Gateway
+# 1. Try PID file first (if it exists)
 if [ -f logs/gateway.pid ]; then
   PID=$(cat logs/gateway.pid)
-  # kill -0 verifica se il processo esiste senza inviare segnali
+  # kill -0 checks if process exists without sending a signal
   if kill -0 $PID 2>/dev/null; then
-    kill $PID 2>/dev/null && echo "✅ Gateway fermato tramite PID ($PID)"
+    kill $PID 2>/dev/null && echo "✅ Gateway stopped via PID ($PID)"
   fi
   rm logs/gateway.pid
 fi
 
-# Estrazione porta (Python -> Grep -> Default)
+# Extract port (Python -> Grep -> Default)
 PYTHON_CMD="python3"
 if [ -f ".venv/bin/python3" ]; then PYTHON_CMD=".venv/bin/python3"; fi
 PORT=$($PYTHON_CMD -c "import yaml; print(yaml.safe_load(open('config/settings.yaml'))['gateway']['port'])" 2>/dev/null)
@@ -25,42 +25,42 @@ if [ -z "$PORT" ]; then
 fi
 if [ -z "$PORT" ]; then PORT=4002; fi
 
-# 2. FALLBACK FONDAMENTALE: Verifica se la porta è ancora occupata
-# (Indipendentemente dal file PID, se la porta è piena il restart fallirà)
+# 2. ESSENTIAL FALLBACK: check if port is still occupied
+# (regardless of PID file, a busy port will cause restart to fail)
 PORT_PID=$(lsof -t -i :$PORT 2>/dev/null)
 if [ ! -z "$PORT_PID" ]; then
-  echo "⚠  Porta $PORT ancora occupata dal processo $PORT_PID. Terminazione forzata..."
-  kill -9 $PORT_PID 2>/dev/null && echo "✅ Gateway rimosso dalla porta $PORT"
+  echo "⚠  Port $PORT still in use by process $PORT_PID. Force terminating..."
+  kill -9 $PORT_PID 2>/dev/null && echo "✅ Gateway removed from port $PORT"
 fi
 
-# 3. PULIZIA FINALE: Per sicurezza, cerca eventuali processi rimasti per nome
+# 3. FINAL CLEANUP: kill any remaining processes by name
 pkill -f "gateway/http_server.py" 2>/dev/null
 
-# Ferma LLM Worker
+# Stop LLM Worker
 if [ -f logs/llm_worker.pid ]; then
   PID=$(cat logs/llm_worker.pid)
-  kill $PID 2>/dev/null && echo "✅ LLM Worker fermato ($PID)"
+  kill $PID 2>/dev/null && echo "✅ LLM Worker stopped ($PID)"
   rm logs/llm_worker.pid
 fi
 
-# Ferma Briefing Worker
+# Stop Briefing Worker
 if [ -f logs/briefing_worker.pid ]; then
   PID=$(cat logs/briefing_worker.pid)
-  kill $PID 2>/dev/null && echo "✅ Briefing Worker fermato ($PID)"
+  kill $PID 2>/dev/null && echo "✅ Briefing Worker stopped ($PID)"
   rm logs/briefing_worker.pid
 fi
 
-# Ferma il File Watcher
+# Stop File Watcher
 if [ -f logs/file_watcher.pid ]; then
   PID=$(cat logs/file_watcher.pid)
-  kill $PID 2>/dev/null && echo "✅ File Watcher fermato ($PID)"
+  kill $PID 2>/dev/null && echo "✅ File Watcher stopped ($PID)"
   rm logs/file_watcher.pid
 fi
 
-# Pulisci eventuali processi zombie
+# Kill any zombie processes
 pkill -f "gateway/http_server.py" 2>/dev/null
 pkill -f "workers/file_watcher.py" 2>/dev/null
 pkill -f "workers/llm_worker.py" 2>/dev/null
 pkill -f "workers/briefing_worker.py" 2>/dev/null
 
-echo "💤 Tutti i processi sono stati fermati."
+echo "💤 All processes have been stopped."

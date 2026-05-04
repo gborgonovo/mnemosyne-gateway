@@ -125,7 +125,7 @@ class OpenAILLM(LLMProvider):
             return response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM Response generation error: {e}")
-            return "Mi scusi signore, sto riscontrando qualche difficoltà nel processare la sua richiesta."
+            return "I'm sorry, I'm having some difficulty processing your request."
 
     def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
         context_nodes = context_nodes or []
@@ -264,7 +264,7 @@ class OllamaLLM(LLMProvider):
             return res.get("message", {}).get("content", "I am sorry, I am having trouble thinking right now.")
         except Exception as e:
             logger.error(f"Ollama chat error: {e}")
-            return "Mi scusi signore, sto riscontrando qualche difficoltà nel processare la sua richiesta locale."
+            return "I'm sorry, I'm having some difficulty processing your local request."
 
     def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
         context_nodes = context_nodes or []
@@ -382,12 +382,12 @@ def get_llm_provider(config_block: dict, root_config: dict = None) -> LLMProvide
     api_key = None
     
     if api_key_raw:
-        # Se la stringa è lunga o contiene caratteri tipici delle chiavi, la usiamo letteralmente
-        # Le chiavi OpenAI iniziano con sk-, quelle Gemini con AIza...
+        # If the string looks like a literal key (long or has key-specific prefix), use it directly.
+        # OpenAI keys start with sk-, Gemini keys with AIza...
         if api_key_raw.startswith("sk-") or api_key_raw.startswith("AIza") or len(api_key_raw) > 30:
             api_key = api_key_raw
         else:
-            # Altrimenti prova a cercarla come variabile d'ambiente
+            # Otherwise treat it as an environment variable name
             api_key = os.getenv(api_key_raw)
             
     # Fallback finale

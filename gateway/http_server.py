@@ -64,8 +64,8 @@ try:
     vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"))
     am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
     
-    # 🔄 Integrazione File Watcher interna per evitare conflitti di lock
-    logger.info(f"🔄 Avvio FileWatcher interno su {KNOWLEDGE_DIR}...")
+    # File Watcher runs inside the Gateway to hold the exclusive KuzuDB writer lock
+    logger.info(f"Starting internal FileWatcher on {KNOWLEDGE_DIR}...")
     event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR, am=am)
     # Cold boot: sync all existing files without triggering activation boosts
     import os as _os
@@ -79,7 +79,7 @@ try:
     
     logger.info("✅ Hybrid File-First Backend Initialized (with internal watcher)")
 
-    # 🚀 Inizializzazione MCP SSE
+    # Mount MCP SSE app
     from workers.gardener import Gardener
     gd = Gardener(am, config=config, vector_store=vector_store)
     mcp_instance = create_mcp_server(kuzu_mgr, vector_store, am, gd, config, KNOWLEDGE_DIR)
