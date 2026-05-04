@@ -103,6 +103,34 @@ class VectorStore:
         except ValueError:
             return False
 
+    def find_similar_nodes(self, node_name: str, similarity_threshold: float = 0.85, limit: int = 5):
+        """
+        Returns nodes semantically similar to node_name above the given threshold.
+        Similarity = 1 - cosine_distance. Excludes the node itself and Obs_ nodes.
+        """
+        node_data = self.get_node(node_name)
+        if not node_data:
+            return []
+        document = node_data.get('document', '')
+        if not document or document == '_EMPTY_':
+            return []
+
+        results = self.collection.query(
+            query_texts=[document],
+            n_results=limit + 1,
+        )
+
+        norm_name = normalize_node_name(node_name)
+        similar = []
+        if results and results.get('ids') and results['ids'][0]:
+            for i, doc_id in enumerate(results['ids'][0]):
+                if doc_id == norm_name or doc_id.startswith('obs_'):
+                    continue
+                similarity = 1.0 - results['distances'][0][i]
+                if similarity >= similarity_threshold:
+                    similar.append({'name': doc_id, 'similarity': round(similarity, 4)})
+        return similar
+
     def list_nodes(self):
         """
         Returns all nodes in the collection.

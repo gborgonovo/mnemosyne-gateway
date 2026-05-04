@@ -81,7 +81,7 @@ try:
 
     # 🚀 Inizializzazione MCP SSE
     from workers.gardener import Gardener
-    gd = Gardener(am, config=config)
+    gd = Gardener(am, config=config, vector_store=vector_store)
     mcp_instance = create_mcp_server(kuzu_mgr, vector_store, am, gd, config, KNOWLEDGE_DIR)
     mcp_app = mcp_instance.sse_app()
     
