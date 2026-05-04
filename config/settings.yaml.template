@@ -8,27 +8,38 @@ system:
 
 
 attention:
-  decay_rate: 0.05          # Amount of activation lost per hour (linear)
-  propagation_dampening: 
-    forward: 1.0            # Full strength
-    backward: 0.5           # 50% strength for "evocative" return trip
-  activation_threshold: 0.6 # Minimum heat to be considered "Active" via API
-  
+  activation_threshold: 0.5  # Minimum heat to appear in briefing
+  peak_threshold: 0.7        # Heat level that triggers NODE_ENERGIZED event
+  propagation_dampening:
+    forward: 1.0
+    backward: 0.5
+
+  # Decay rates per node type (applied per hour).
+  # Half-life formula: ln(0.5) / ln(1 - rate)
+  # Use scripts/simulate_decay.py to visualize curves before changing these.
+  decay_rates:
+    Node: 0.0025        # half-life ~11 days
+    Goal: 0.00026       # half-life ~112 days (~4 months)
+    Task: 0.00045       # half-life ~64 days (~2 months)
+    Observation: 0.004  # half-life ~7 days
+
+  # Activation boost per interaction type
+  boost_weights:
+    file_edit: 0.6      # File modified on disk
+    mcp_query: 0.2      # Node retrieved via MCP or API
+    proximity: 0.05     # Indirect boost to semantic neighbors of an interacted node
+
+  # Dormant node detection and resurfacing
+  dormant:
+    resurface_boost: 0.05   # Boost applied each gardener cycle to dormant nodes
+    ceiling: 0.25           # Max activation a dormant node can reach via resurfacing
+    days_node: 27           # Days of inactivity before a Node is considered dormant
+    days_goal_task: 30      # Days of inactivity before a Goal/Task is considered dormant
+    min_interactions: 5     # Min past interactions required to be eligible for dormant detection
+
 initiative:
-  initiative_threshold: 0.6     # Min activation for a source node to trigger checks
-  explanation_threshold: 0.5    # Max activation for a neighbor to be considered "dormant/forgotten"
-
-intentionality:
-  enabled: true              # Master toggle for Proactive Planning
-  differential_decay: true   # Slower decay for active Goals and Tasks
-  time_watcher: true         # Check deadlines and boost node heat
-  deadline_boost: 0.8        # Heat boost for overdue tasks
-  warning_boost: 0.5         # Heat boost for approaching deadlines
-
-longitudinal_analysis:
-  enabled: true              # Toggle for historical briefing and dormant project detection
-  frequency: "weekly"        # Cadence for the briefing (weekly, monthly)
-  dormancy_threshold_days: 30 # Days of inactivity before a project is considered dormant
+  initiative_threshold: 0.5     # Min activation for a source node to trigger checks
+  explanation_threshold: 0.4    # Max activation for a neighbor to be considered forgotten
 
 llm:
   # The Butler: Higher level reasoning, extraction, and initiative.

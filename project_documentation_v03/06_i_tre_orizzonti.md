@@ -13,10 +13,14 @@ Dall'ingresso della versione 0.3, abbiamo ridefinito le basi: non più una compl
 *Obiettivo: Niente si perde, tu possiedi i tuoi dati, il sistema è trasparente e serverless.*
 
 Questo orizzonte è il cuore del refactoring attuale. Abbiamo scelto la semplicità del file system per garantire che la memoria sia eterna e leggibile.
-- **Transizione File-First**: Sostituzione di Neo4j con file Markdown + KùzuDB/ChromaDB.
-- **Trasparenza**: La capacità dell'utente di "aprire la mente" di Mnemosyne semplicemente navigando in una cartella.
-- **Resilienza**: Gli indici AI sono sacrificabili e ricreabili dai file sorgente in ogni momento.
-- **Briefing & Diagnostica**: Strumenti leggeri per monitorare la salute termica e semantica del sistema.
+- **Transizione File-First**: Sostituzione di Neo4j con file Markdown + KùzuDB/ChromaDB. ✓
+- **Trasparenza**: La capacità dell'utente di "aprire la mente" di Mnemosyne semplicemente navigando in una cartella. ✓
+- **Resilienza**: Gli indici AI sono sacrificabili e ricreabili dai file sorgente in ogni momento. ✓
+- **Briefing & Diagnostica**: Strumenti leggeri per monitorare la salute termica e semantica del sistema. ✓
+- **Modello di Attenzione per utilizzo**: Decay differenziale per tipo di nodo (Node/Task/Goal/Observation), basato sull'utilizzo reale anziché sul tempo assoluto. Tre segnali di interazione con pesi distinti (`file_edit`, `mcp_query`, `proximity`). Retroattività al riavvio via `last_decay_applied`. ✓
+- **Rilevamento e resurface dei dormienti**: Il Gardener rileva nodi storicamente attivi ma ora inattivi e li riporta in superficie nel briefing senza interferire con i nodi genuinamente caldi. ✓
+- **Archi semantici automatici**: Il Gardener scopre relazioni implicite tra nodi tramite ChromaDB e crea archi `SEMANTICALLY_RELATED` in KùzuDB. ✓
+- **Briefing scope-aware**: Il briefing filtra i risultati per scope consentiti dall'API key. Nuovo endpoint `/briefing/longitudinal` per analisi storica dei dormienti. ✓
 
 ---
 
@@ -25,7 +29,8 @@ Questo orizzonte è il cuore del refactoring attuale. Abbiamo scelto la semplici
 *Obiettivo: Il sistema mostra il filo che collega i progetti, suggerisce le connessioni dormienti, agisce come un'ombra intelligente.*
 
 In questo orizzonte, Mnemosyne smette di essere solo un archivio e inizia a comportarsi come un partner.
-- **Initiative Engine**: Affinamento degli algoritmi che decidono quando iniettare un'osservazione o un suggerimento basandosi sui picchi di calore.
+- **Initiative Engine scope-aware**: L'engine considera solo i nodi negli scope consentiti. ✓
+- **Embedding remoti configurabili**: La sezione `llm.embeddings` in `settings.yaml` è predisposta per modalità `mock`, `ollama`, `openai`, `remote` — l'implementazione effettiva nel `VectorStore` è da completare.
 - **Scomposizione Obiettivi (Strategic Planning)**: L'AI usa il grafo in KùzuDB per aiutare l'utente a dividere un `Goal` in piccoli `Task` azionabili.
 - **Integrazione Profonda (Obsidian-First)**: Creazione di plugin o workflow che rendono il loop Mnemosyne <-> Obsidian totalmente privo di frizione.
 - **Risoluzione Ambiguità**: Il sistema rileva autonomamente se due note parlano della stessa cosa e suggerisce il merge testuale per mantenere la coerenza.
