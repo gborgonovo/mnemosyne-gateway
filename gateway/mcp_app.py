@@ -72,13 +72,13 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             ranked_results.append((combined_score, name))
             
         ranked_results.sort(key=lambda x: x[0], reverse=True)
-        
+
         output = ""
         for score, name in ranked_results[:limit]:
             content = read_markdown(name)
             if content:
-                 output += f"### FILE: {name}.md (Relevance Score: {score:.2f})\n```markdown\n{content}\n```\n\n"
-                 am.stimulate([name], boost_amount=0.5)
+                output += f"### FILE: {name}.md (Relevance Score: {score:.2f})\n```markdown\n{content}\n```\n\n"
+                am.record_interaction(name, interaction_type="mcp_query")
         return output
 
     @mcp.tool()
@@ -101,12 +101,18 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
              
         active_nodes.sort(key=lambda x: x['activation_level'], reverse=True)
         hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")][:10]
-        
-        briefing = f"Current active internal thoughts (Hot Nodes):\n"
+
+        briefing = "Current active internal thoughts (Hot Nodes):\n"
         for title in hot_topics:
-             content = read_markdown(title)
-             preview = content[:150].replace('\n', ' ') + "..." if content else "File not found"
-             briefing += f"- {title} (Context: {preview})\n"
+            content = read_markdown(title)
+            preview = content[:150].replace('\n', ' ') + "..." if content else "File not found"
+            briefing += f"- {title} (Context: {preview})\n"
+
+        dormant_nodes = kuzu_mgr.get_dormant_nodes()
+        if dormant_nodes:
+            briefing += "\nDormienti (erano attivi, ora inattivi):\n"
+            for n in dormant_nodes[:5]:
+                briefing += f"- {n['name']} ({n['node_type']}, inattivo da {n['days_inactive']}gg)\n"
         return briefing
 
     @mcp.tool()

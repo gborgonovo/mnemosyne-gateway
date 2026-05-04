@@ -66,7 +66,13 @@ try:
     
     # 🔄 Integrazione File Watcher interna per evitare conflitti di lock
     logger.info(f"🔄 Avvio FileWatcher interno su {KNOWLEDGE_DIR}...")
-    event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR)
+    event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR, am=am)
+    # Cold boot: sync all existing files without triggering activation boosts
+    import os as _os
+    for _root, _dirs, _files in _os.walk(KNOWLEDGE_DIR):
+        for _fname in _files:
+            if _fname.endswith('.md'):
+                event_handler._sync_file(_os.path.join(_root, _fname), is_startup_sync=True)
     observer = Observer()
     observer.schedule(event_handler, KNOWLEDGE_DIR, recursive=True)
     observer.start()
@@ -154,7 +160,7 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
     name = best_match['name']
     
     # 2. Thermal stimulus and fetch neighbors from Kuzu
-    am.stimulate([name], boost_amount=1.0)
+    am.record_interaction(name, interaction_type="mcp_query")
     neighbors_data = kuzu_mgr.get_neighbors(name)
     
     related = []
@@ -199,12 +205,57 @@ def get_graph_stats():
     }
 
 @app.get("/briefing")
-def get_briefing():
-    active_nodes = kuzu_mgr.get_active_nodes(threshold=0.6)
-    hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")]
+def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    threshold = config.get("attention", {}).get("activation_threshold", 0.5)
+
+    active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter)
+    hot_topics = [n for n in active_nodes if not n['name'].startswith("Obs_")]
+
+    dormant_cfg = config.get("attention", {}).get("dormant", {})
+    dormant_nodes = kuzu_mgr.get_dormant_nodes(
+        scopes=scope_filter,
+        min_interactions=dormant_cfg.get("min_interactions", 5),
+        days_node=dormant_cfg.get("days_node", 27),
+        days_goal_task=dormant_cfg.get("days_goal_task", 30),
+    )
+
     return {
-        "hot_topics": hot_topics,
-        "suggestions": ["System operates in file-first mode. Edit .md directly!"]
+        "hot_topics": [n['name'] for n in hot_topics],
+        "dormant": [
+            {"name": n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']}
+            for n in dormant_nodes
+        ],
+        "timestamp": datetime.now().isoformat(),
+    }
+
+@app.get("/briefing/longitudinal")
+def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+
+    dormant_cfg = config.get("attention", {}).get("dormant", {})
+    dormant_nodes = kuzu_mgr.get_dormant_nodes(
+        scopes=scope_filter,
+        min_interactions=dormant_cfg.get("min_interactions", 5),
+        days_node=dormant_cfg.get("days_node", 27),
+        days_goal_task=dormant_cfg.get("days_goal_task", 30),
+    )
+
+    goals  = [n for n in dormant_nodes if n['node_type'] == 'Goal']
+    tasks  = [n for n in dormant_nodes if n['node_type'] == 'Task']
+    topics = [n for n in dormant_nodes if n['node_type'] == 'Node']
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "dormant_goals":  goals,
+        "dormant_tasks":  tasks,
+        "dormant_topics": topics,
+        "summary": (
+            f"{len(dormant_nodes)} elementi dormienti: "
+            f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic."
+        ),
     }
 @app.post("/observations")
 def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
