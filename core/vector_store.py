@@ -70,10 +70,11 @@ class VectorStore:
         parsed_results = []
         if results and results.get("ids") and len(results["ids"]) > 0:
             for i, doc_id in enumerate(results["ids"][0]):
+                meta = results["metadatas"][0][i]
                 parsed_results.append({
-                    "name": doc_id,
+                    "name": meta.get("original_name", doc_id),
                     "document": results["documents"][0][i],
-                    "metadata": results["metadatas"][0][i],
+                    "metadata": meta,
                     "distance": results["distances"][0][i]
                 })
         return parsed_results

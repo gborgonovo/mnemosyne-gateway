@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import unittest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -8,15 +9,24 @@ from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 
 class TestHybridArchitecture(unittest.TestCase):
-    
+
     def setUp(self):
-        # Use an in-memory or temporary path for tests if necessary,
-        # but for simplicity we rely on test instances
         self.kuzu_path = "./data/test_kuzu"
         self.chroma_path = "./data/test_chroma"
-        
+        # Always start from a clean state
+        if os.path.exists(self.kuzu_path):
+            os.remove(self.kuzu_path)
+        if os.path.exists(self.chroma_path):
+            shutil.rmtree(self.chroma_path)
         self.kuzu = KuzuManager(db_path=self.kuzu_path)
         self.chroma = VectorStore(db_path=self.chroma_path, collection_name="test_col")
+
+    def tearDown(self):
+        self.kuzu.close()
+        if os.path.exists(self.kuzu_path):
+            os.remove(self.kuzu_path)
+        if os.path.exists(self.chroma_path):
+            shutil.rmtree(self.chroma_path)
 
     def test_kuzu_thermal_propagation(self):
         self.kuzu.add_node("RootNode", initial_activation=1.0)

@@ -89,12 +89,12 @@ class KuzuManager:
             a.scope = $scope,
             a.last_interaction = $now,
             a.last_decay_applied = $now,
-            a.interaction_count = 0
+            a.interaction_count = $zero
         """
         self.conn.execute(query, parameters={
             "name": norm_name, "display": name,
             "act": initial_activation, "node_type": node_type,
-            "scope": scope, "now": now,
+            "scope": scope, "now": now, "zero": 0,
         })
 
     def get_node(self, name: str) -> dict:
