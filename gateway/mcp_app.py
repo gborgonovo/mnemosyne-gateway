@@ -108,7 +108,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             preview = content[:150].replace('\n', ' ') + "..." if content else "File not found"
             briefing += f"- {title} (Context: {preview})\n"
 
-        dormant_nodes = kuzu_mgr.get_dormant_nodes()
+        dormant_cfg = config.get("attention", {}).get("dormant", {})
+        dormant_nodes = kuzu_mgr.get_dormant_nodes(
+            min_interactions=dormant_cfg.get("min_interactions", 5),
+            days_node=dormant_cfg.get("days_node", 27),
+            days_goal_task=dormant_cfg.get("days_goal_task", 30),
+        )
         if dormant_nodes:
             briefing += "\nDormienti (erano attivi, ora inattivi):\n"
             for n in dormant_nodes[:5]:
