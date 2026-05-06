@@ -12,16 +12,42 @@ class VectorStore:
     Manages semantic search, metadata filtering and document embeddings via ChromaDB.
     This acts as the persistence layer for Mnemosyne's frontmatter and document bodies.
     """
-    def __init__(self, db_path="./data/chroma_db", collection_name="mnemosyne_wiki"):
+    def __init__(self, db_path="./data/chroma_db", collection_name="mnemosyne_wiki", embedding_config: dict = None):
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        
+
         self.client = chromadb.PersistentClient(path=self.db_path)
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"}
-        )
-        logger.info(f"Initialized ChromaDB PersistentClient at {self.db_path}")
+        ef = self._build_embedding_function(embedding_config or {})
+        collection_kwargs = {"name": collection_name, "metadata": {"hnsw:space": "cosine"}}
+        if ef:
+            collection_kwargs["embedding_function"] = ef
+        self.collection = self.client.get_or_create_collection(**collection_kwargs)
+        mode = (embedding_config or {}).get("mode", "default")
+        logger.info(f"Initialized ChromaDB at {self.db_path} (embedding mode: {mode})")
+
+    def _build_embedding_function(self, config: dict):
+        mode = config.get("mode", "mock")
+
+        if mode == "openai":
+            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+            api_key_raw = config.get("api_key", "")
+            if api_key_raw and (api_key_raw.startswith("sk-") or len(api_key_raw) > 30):
+                api_key = api_key_raw
+            else:
+                api_key = os.getenv(api_key_raw) if api_key_raw else os.getenv("OPENAI_API_KEY")
+            model = config.get("model_name", "text-embedding-3-small")
+            kwargs = {"api_key": api_key, "model_name": model}
+            if config.get("base_url"):
+                kwargs["api_base"] = config["base_url"]
+            return OpenAIEmbeddingFunction(**kwargs)
+
+        if mode == "ollama":
+            from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
+            url = config.get("base_url", "http://localhost:11434")
+            model = config.get("model_name", "nomic-embed-text")
+            return OllamaEmbeddingFunction(url=url, model_name=model)
+
+        return None  # mock/default: ChromaDB uses all-MiniLM-L6-v2 locally
 
     def upsert_node(self, name: str, body: str, metadata: dict):
         """

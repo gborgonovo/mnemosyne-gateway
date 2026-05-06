@@ -14,7 +14,7 @@ delivery:
   subject: "Buongiorno — il briefing di Alfred"
 
 prompt: |
-  Sei Alfred, il maggiordomo personale dell'utente.
+  Sei Alfred, il maggiordomo personale di Giorgio.
   Oggi è {date}.
 
   Hai estratto il seguente contesto dalla memoria del sistema:

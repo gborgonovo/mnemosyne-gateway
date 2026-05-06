@@ -95,6 +95,15 @@ def deliver(plugin: dict, message: str):
         raise ValueError(f"Unknown delivery tool: '{tool}'. Available: smtp, ntfy")
 
 
+def _context_is_empty(context: dict) -> bool:
+    """Returns True if all list-valued fields across all endpoint responses are empty."""
+    for payload in context.values():
+        if isinstance(payload, dict):
+            if any(isinstance(v, list) and v for v in payload.values()):
+                return False
+    return True
+
+
 def run_plugin(name: str):
     config      = load_config()
     plugin      = load_plugin(name)
@@ -107,6 +116,10 @@ def run_plugin(name: str):
     if all(not v for v in context.values()):
         logger.error("All context endpoints failed — check MNEMOSYNE_API_KEY and gateway availability.")
         sys.exit(1)
+
+    if _context_is_empty(context):
+        logger.info("Briefing context is empty — nothing to report, skipping delivery.")
+        return
 
     llm     = get_llm_provider(config['llm']['butler'], root_config=config)
     message = compose_message(plugin, context, llm)
