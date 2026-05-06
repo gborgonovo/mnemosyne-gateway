@@ -161,7 +161,8 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
     
     # 2. Thermal stimulus and fetch neighbors from Kuzu
     am.record_interaction(name, interaction_type="mcp_query")
-    neighbors_data = kuzu_mgr.get_neighbors(name)
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    neighbors_data = kuzu_mgr.get_neighbors(name, scopes=scope_filter)
     
     related = []
     for n in neighbors_data[:15]:
@@ -180,11 +181,13 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
 
 @app.get("/nodes/{name}")
 def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     node_data = vector_store.get_node(name)
     if not node_data:
         raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
-        
-    return {"data": node_data}
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    neighbors = kuzu_mgr.get_neighbors(name, scopes=scope_filter)
+    return {"data": node_data, "neighbors": neighbors}
 
 @app.delete("/nodes/{name}")
 def delete_node_api(name: str, scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):

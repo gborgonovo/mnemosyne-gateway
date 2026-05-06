@@ -187,16 +187,19 @@ class KuzuManager:
             "weight": weight,
         })
 
-    def get_neighbors(self, name: str):
+    def get_neighbors(self, name: str, scopes: list = None):
         norm_name = normalize_node_name(name)
         query = """
         MATCH (n:Node {name: $name})-[r:RELATES]-(m:Node)
-        RETURN m.name, r.type, r.weight
+        RETURN m.name, r.type, r.weight, m.scope
         """
         res = self.conn.execute(query, parameters={"name": norm_name})
         neighbors = []
         while res.has_next():
             row = res.get_next()
+            neighbor_scope = row[3]
+            if scopes and "*" not in scopes and neighbor_scope not in scopes:
+                continue
             neighbors.append({"node_name": row[0], "rel_type": row[1], "weight": row[2]})
         return neighbors
 
