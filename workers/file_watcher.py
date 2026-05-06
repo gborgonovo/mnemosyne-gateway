@@ -90,7 +90,20 @@ class WikiSyncHandler(FileSystemEventHandler):
             scope = scope[0]
 
         # Sync ChromaDB (semantic layer)
-        self.vector_store.upsert_node(raw_name, body, frontmatter)
+        # During cold boot, skip re-embedding files whose mtime hasn't changed.
+        file_mtime = os.path.getmtime(filepath)
+        skip_embed = False
+        if is_startup_sync:
+            existing = self.vector_store.get_node(raw_name)
+            if existing:
+                stored_mtime = existing.get('metadata', {}).get('_mtime', 0)
+                skip_embed = abs(float(stored_mtime) - file_mtime) < 1.0
+
+        if not skip_embed:
+            frontmatter['_mtime'] = file_mtime
+            self.vector_store.upsert_node(raw_name, body, frontmatter)
+        else:
+            logger.debug(f"Skipping re-embed for '{norm_name}' (mtime unchanged)")
 
         # Ensure node exists in KuzuDB with correct metadata
         self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope)

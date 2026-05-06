@@ -25,15 +25,15 @@ if [ -z "$PORT" ]; then PORT=4002; fi
 
 # 3. Wait for gateway to be ready (up to 30 seconds)
 echo "⏳ Waiting for Gateway on port $PORT..."
-for i in $(seq 1 15); do
+for i in $(seq 1 60); do
     if curl -s -f http://localhost:$PORT/status > /dev/null 2>&1; then
         curl -s http://localhost:$PORT/status | $PYTHON_CMD -m json.tool
         echo "✅ System restarted successfully!"
         break
     fi
     sleep 2
-    if [ $i -eq 15 ]; then
-        echo "❌ Gateway did not respond after 30 seconds."
+    if [ $i -eq 60 ]; then
+        echo "❌ Gateway did not respond after 120 seconds."
         echo "Check logs with: tail -n 20 logs/gateway.log"
     fi
 done
