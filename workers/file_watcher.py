@@ -4,6 +4,7 @@ import time
 import yaml
 import re
 import logging
+import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -43,6 +44,29 @@ class WikiSyncHandler(FileSystemEventHandler):
             self.kuzu_mgr.delete_node(norm_name)
             self.vector_store.delete_node(norm_name)
             logger.info(f"Node '{norm_name}' removed from DBs.")
+
+    def on_moved(self, event):
+        if not event.is_directory and event.dest_path.endswith('.md'):
+            logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
+            src_name = os.path.splitext(os.path.basename(event.src_path))[0]
+            dst_name = os.path.splitext(os.path.basename(event.dest_path))[0]
+            if src_name != dst_name:
+                # Different filename: remove old node, new one will be created by sync
+                self.kuzu_mgr.delete_node(normalize_node_name(src_name))
+                self.vector_store.delete_node(src_name)
+            # Sync destination — picks up new folder defaults (project, scope)
+            self._sync_file(event.dest_path, is_startup_sync=False)
+
+    def _load_folder_defaults(self, filepath: str) -> dict:
+        """Read _defaults.yaml from the file's parent folder, if present."""
+        defaults_path = os.path.join(os.path.dirname(filepath), '_defaults.yaml')
+        if os.path.exists(defaults_path):
+            try:
+                with open(defaults_path, 'r') as f:
+                    return yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.warning(f"Could not read {defaults_path}: {e}")
+        return {}
 
     def _parse_markdown(self, filepath: str):
         """Extracts frontmatter, body, and wikilinks. Returns has_frontmatter flag."""
@@ -89,7 +113,15 @@ class WikiSyncHandler(FileSystemEventHandler):
         if frontmatter is None:
             return
 
+        # Apply folder defaults (_defaults.yaml) for keys not set in the file
         needs_rewrite = False
+        folder_defaults = self._load_folder_defaults(filepath)
+        for key, value in folder_defaults.items():
+            if key not in frontmatter:
+                frontmatter[key] = value
+                needs_rewrite = True
+
+        # Apply system defaults for any still-missing required fields
         if 'title' not in frontmatter:
             frontmatter['title'] = raw_name
             needs_rewrite = True
@@ -100,14 +132,13 @@ class WikiSyncHandler(FileSystemEventHandler):
             frontmatter['scope'] = "Public"
             needs_rewrite = True
         if 'created_at' not in frontmatter:
-            import datetime
             mtime = os.path.getmtime(filepath)
             frontmatter['created_at'] = datetime.date.fromtimestamp(mtime).isoformat()
             needs_rewrite = True
 
         if not has_frontmatter or needs_rewrite:
             self._write_frontmatter(filepath, frontmatter, body)
-            logger.info(f"Added frontmatter to '{norm_name}'")
+            logger.info(f"Frontmatter written for '{norm_name}'")
 
         node_type = frontmatter.get('type', 'Node')
         scope = frontmatter.get('scope', 'Public')
