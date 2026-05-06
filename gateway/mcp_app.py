@@ -83,7 +83,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     @mcp.tool()
     def add_observation(content: str, scope: str = "Public") -> str:
-        """Record a new raw piece of unstructured information into memory."""
+        """
+        Record a raw, unstructured piece of information with an auto-generated ID.
+        Use this ONLY for ephemeral notes or events that don't deserve a named concept.
+        For any named concept (person, project, topic, idea), use create_node instead.
+        """
         obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
         frontmatter = {"type": "Observation", "scope": scope}
         try:
@@ -93,6 +97,32 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             return f"Error recording observation: {e}"
 
     @mcp.tool()
+    def create_node(name: str, content: str, node_type: str = "Node",
+                    scope: str = "Public", links: str = "") -> str:
+        """
+        Create a named knowledge node — a persistent, referenceable concept in memory.
+        Use this for people, projects, topics, ideas, or any concept worth naming.
+        Prefer this over add_observation whenever the information has a clear subject.
+
+        name: meaningful identifier (e.g. 'Progetto Mnemosyne', 'Giorgio', 'Machine Learning')
+        content: body of the node in markdown
+        node_type: 'Node' (default), 'Goal', 'Task'
+        scope: 'Public' (default) or 'Private'
+        links: comma-separated list of related node names to wikilink (e.g. 'Progetto Alpha,Giorgio')
+        """
+        frontmatter = {"type": node_type, "scope": scope}
+        wikilinks = ""
+        if links:
+            targets = [l.strip() for l in links.split(",") if l.strip()]
+            wikilinks = "\n\n" + " ".join(f"[[{t}]]" for t in targets)
+        body = f"# {name}\n\n{content}{wikilinks}"
+        try:
+            write_markdown(name, frontmatter, body)
+            return json.dumps({"status": "success", "message": f"Node '{name}' created with type '{node_type}'."})
+        except Exception as e:
+            return json.dumps({"status": "error", "message": str(e)})
+
+    @mcp.tool()
     def get_memory_briefing() -> str:
         """Get a briefing on currently active (hot) topics."""
         active_nodes = kuzu_mgr.get_active_nodes(threshold=0.5)
@@ -100,7 +130,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
              return "The memory is currently resting. No active thoughts."
              
         active_nodes.sort(key=lambda x: x['activation_level'], reverse=True)
-        hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("Obs_")][:10]
+        hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("obs_")][:10]
 
         briefing = "Current active internal thoughts (Hot Nodes):\n"
         for title in hot_topics:
