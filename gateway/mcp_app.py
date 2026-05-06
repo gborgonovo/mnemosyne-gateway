@@ -37,11 +37,15 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     def write_markdown(name: str, frontmatter: dict, body: str):
         # Try to find existing file to update it in place
         path = find_file_recursive(name)
+        is_new = path is None
         if not path:
             # New file, put it in the root
             safe_name = re.sub(r'[^\w\s-]', '', name).strip()
             path = os.path.join(knowledge_dir, f"{safe_name}.md")
-        
+
+        if is_new and 'created_at' not in frontmatter:
+            frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
+
         with open(path, 'w', encoding='utf-8') as f:
             f.write("---\n")
             yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
@@ -106,7 +110,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
         name: meaningful identifier (e.g. 'Progetto Mnemosyne', 'Giorgio', 'Machine Learning')
         content: body of the node in markdown
-        node_type: 'Node' (default), 'Goal', 'Task'
+        node_type: 'Node' (default), 'Reference' (evergreen, never decays), 'Goal', 'Task'
         scope: 'Public' (default) or 'Private'
         links: comma-separated list of related node names to wikilink (e.g. 'Progetto Alpha,Giorgio')
         """

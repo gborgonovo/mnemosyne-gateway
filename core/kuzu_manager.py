@@ -366,6 +366,8 @@ class KuzuManager:
         default_rate = decay_rates.get("Node", 0.0025)
 
         for name, activation, node_type, last_decay, last_interaction in rows:
+            if node_type == 'Reference':
+                continue  # evergreen nodes never decay
             rate = decay_rates.get(node_type or "Node", default_rate)
             # Use the most recent of last_decay_applied and last_interaction so that
             # a fresh interaction resets the decay clock (no decay accumulates during active use).
