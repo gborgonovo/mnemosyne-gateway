@@ -66,7 +66,11 @@ def compose_message(plugin: dict, context: dict, llm) -> str:
     today = date.today().strftime('%A %d %B %Y')
     context_text = yaml.dump(context, allow_unicode=True, default_flow_style=False)
     prompt = template.format(date=today, context=context_text)
-    return llm.generate(prompt)
+    try:
+        return llm.generate(prompt)
+    except Exception as e:
+        logger.warning(f"LLM composition failed ({e}), sending raw context")
+        return f"Alfred — {today}\n\n{context_text}"
 
 
 def deliver(plugin: dict, message: str):
@@ -99,6 +103,11 @@ def run_plugin(name: str):
 
     logger.info(f"Running plugin: {name}")
     context = gather_context(plugin, gateway_url, api_key)
+
+    if all(not v for v in context.values()):
+        logger.error("All context endpoints failed — check MNEMOSYNE_API_KEY and gateway availability.")
+        sys.exit(1)
+
     llm     = get_llm_provider(config['llm']['butler'], root_config=config)
     message = compose_message(plugin, context, llm)
     deliver(plugin, message)
