@@ -45,14 +45,16 @@ class WikiSyncHandler(FileSystemEventHandler):
             logger.info(f"Node '{norm_name}' removed from DBs.")
 
     def _parse_markdown(self, filepath: str):
-        """Extracts frontmatter, body, and wikilinks."""
+        """Extracts frontmatter, body, and wikilinks. Returns has_frontmatter flag."""
         frontmatter, body, wikilinks = {}, "", []
+        has_frontmatter = False
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
 
             yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', content, re.DOTALL)
             if yaml_match:
+                has_frontmatter = True
                 try:
                     frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
                 except yaml.YAMLError as e:
@@ -66,23 +68,46 @@ class WikiSyncHandler(FileSystemEventHandler):
                 if target:
                     wikilinks.append(normalize_node_name(target))
 
-            return frontmatter, body, wikilinks
+            return frontmatter, body, wikilinks, has_frontmatter
         except Exception as e:
             logger.error(f"Error parsing file {filepath}: {e}")
-            return None, None, []
+            return None, None, [], False
+
+    def _write_frontmatter(self, filepath: str, frontmatter: dict, body: str):
+        """Write frontmatter + body back to file."""
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write("---\n")
+            yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
+            f.write("---\n\n")
+            f.write(body)
 
     def _sync_file(self, filepath: str, is_startup_sync: bool = False):
         raw_name = os.path.splitext(os.path.basename(filepath))[0]
         norm_name = normalize_node_name(raw_name)
 
-        frontmatter, body, normalized_wikilinks = self._parse_markdown(filepath)
+        frontmatter, body, normalized_wikilinks, has_frontmatter = self._parse_markdown(filepath)
         if frontmatter is None:
             return
 
+        needs_rewrite = False
         if 'title' not in frontmatter:
             frontmatter['title'] = raw_name
+            needs_rewrite = True
         if 'type' not in frontmatter:
-            frontmatter['type'] = "Node"
+            frontmatter['type'] = "Reference"
+            needs_rewrite = True
+        if 'scope' not in frontmatter:
+            frontmatter['scope'] = "Public"
+            needs_rewrite = True
+        if 'created_at' not in frontmatter:
+            import datetime
+            mtime = os.path.getmtime(filepath)
+            frontmatter['created_at'] = datetime.date.fromtimestamp(mtime).isoformat()
+            needs_rewrite = True
+
+        if not has_frontmatter or needs_rewrite:
+            self._write_frontmatter(filepath, frontmatter, body)
+            logger.info(f"Added frontmatter to '{norm_name}'")
 
         node_type = frontmatter.get('type', 'Node')
         scope = frontmatter.get('scope', 'Public')
