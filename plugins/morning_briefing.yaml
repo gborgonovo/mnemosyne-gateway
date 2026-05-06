@@ -8,6 +8,7 @@ trigger:
 context:
   endpoints:
     - /briefing
+    - /briefing/longitudinal
 
 delivery:
   tool: smtp

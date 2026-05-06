@@ -247,14 +247,23 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
     tasks  = [n for n in dormant_nodes if n['node_type'] == 'Task']
     topics = [n for n in dormant_nodes if n['node_type'] == 'Node']
 
+    forgotten_hubs = kuzu_mgr.get_dormant_by_connectivity(
+        min_edges=dormant_cfg.get("hub_min_edges", 2),
+        activation_ceiling=dormant_cfg.get("hub_activation_ceiling", 0.3),
+        days_inactive=dormant_cfg.get("hub_days_inactive", 14),
+        scopes=scope_filter,
+    )
+
     return {
         "timestamp": datetime.now().isoformat(),
-        "dormant_goals":  goals,
-        "dormant_tasks":  tasks,
-        "dormant_topics": topics,
+        "dormant_goals":    goals,
+        "dormant_tasks":    tasks,
+        "dormant_topics":   topics,
+        "forgotten_hubs":   forgotten_hubs,
         "summary": (
             f"{len(dormant_nodes)} elementi dormienti: "
-            f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic."
+            f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic. "
+            f"{len(forgotten_hubs)} hub dimenticati."
         ),
     }
 @app.post("/observations")

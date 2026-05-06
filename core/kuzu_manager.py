@@ -280,6 +280,47 @@ class KuzuManager:
             })
         return dormant
 
+    def get_dormant_by_connectivity(self, min_edges: int = 2, activation_ceiling: float = 0.3,
+                                     days_inactive: int = 14, scopes: list = None) -> list:
+        """
+        Returns nodes that are structurally important (many connections) but have gone quiet.
+        These are candidates for longitudinal resurface: forgotten hubs.
+        """
+        query = """
+        MATCH (n:Node)-[r:RELATES]-(m:Node)
+        WHERE NOT n.name STARTS WITH 'obs_'
+        AND n.activation < $ceiling
+        RETURN n.name, n.activation, n.node_type, n.scope, n.last_interaction,
+               n.interaction_count, count(r) AS edge_count
+        ORDER BY edge_count DESC
+        """
+        res = self.conn.execute(query, parameters={"ceiling": activation_ceiling})
+
+        now = time.time()
+        cutoff = now - days_inactive * 86400
+        results = []
+        while res.has_next():
+            row = res.get_next()
+            name, activation, node_type, scope, last_interaction, interaction_count, edge_count = (
+                row[0], row[1], row[2], row[3], row[4] or 0, row[5] or 0, row[6]
+            )
+            if edge_count < min_edges:
+                continue
+            if last_interaction > cutoff:
+                continue
+            if scopes and "*" not in scopes and scope not in scopes:
+                continue
+            results.append({
+                "name": name,
+                "activation": activation,
+                "node_type": node_type,
+                "scope": scope,
+                "edge_count": edge_count,
+                "days_inactive": int((now - last_interaction) / 86400),
+                "interaction_count": interaction_count,
+            })
+        return results
+
     def get_graph_export(self, limit: int = 5000):
         res_nodes = self.conn.execute(
             "MATCH (n:Node) RETURN n.name, n.activation LIMIT $limit",
@@ -310,21 +351,23 @@ class KuzuManager:
         """
         query = """
         MATCH (n:Node)
-        RETURN n.name, n.activation, n.node_type, n.last_decay_applied
+        RETURN n.name, n.activation, n.node_type, n.last_decay_applied, n.last_interaction
         """
         res = self.conn.execute(query)
         rows = []
         while res.has_next():
             row = res.get_next()
-            rows.append((row[0], row[1], row[2], row[3]))
+            rows.append((row[0], row[1], row[2], row[3], row[4]))
 
         now = time.time()
         default_rate = decay_rates.get("Node", 0.0025)
 
-        for name, activation, node_type, last_decay in rows:
+        for name, activation, node_type, last_decay, last_interaction in rows:
             rate = decay_rates.get(node_type or "Node", default_rate)
-            last_decay = last_decay or now
-            hours_elapsed = (now - last_decay) / 3600
+            # Use the most recent of last_decay_applied and last_interaction so that
+            # a fresh interaction resets the decay clock (no decay accumulates during active use).
+            reference = max(last_decay or now, last_interaction or 0)
+            hours_elapsed = (now - reference) / 3600
             factor = (1 - rate) ** hours_elapsed
             new_activation = max((activation or 0.0) * factor, 0.0)
             self.conn.execute(
