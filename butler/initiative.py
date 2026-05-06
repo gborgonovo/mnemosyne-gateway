@@ -22,12 +22,12 @@ class InitiativeEngine:
 
         for node in active_nodes:
             name = node['name']
-            if name.startswith("Obs_"):
+            if name.startswith("obs_"):
                 continue
             neighbors = self.kuzu_mgr.get_neighbors(name)
             for neighbor in neighbors:
                 n_name = neighbor['node_name']
-                if n_name.startswith("Obs_"):
+                if n_name.startswith("obs_"):
                     continue
                 n_node = self.kuzu_mgr.get_node(n_name)
                 if not n_node:
@@ -50,12 +50,12 @@ class InitiativeEngine:
 
         for node in active_nodes:
             name = node['name']
-            if name.startswith("Obs_"):
+            if name.startswith("obs_"):
                 continue
             neighbors = self.kuzu_mgr.get_neighbors(name)
             for neighbor in neighbors:
                 n_name = neighbor['node_name']
-                if n_name in seen_targets or n_name.startswith("Obs_"):
+                if n_name in seen_targets or n_name.startswith("obs_"):
                     continue
                 n_node = self.kuzu_mgr.get_node(n_name)
                 if not n_node:

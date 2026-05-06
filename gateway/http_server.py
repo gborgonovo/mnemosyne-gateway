@@ -211,7 +211,7 @@ def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = 
     threshold = config.get("attention", {}).get("activation_threshold", 0.5)
 
     active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter)
-    hot_topics = [n for n in active_nodes if not n['name'].startswith("Obs_")]
+    hot_topics = [n for n in active_nodes if not n['name'].startswith("obs_")]
 
     dormant_cfg = config.get("attention", {}).get("dormant", {})
     dormant_nodes = kuzu_mgr.get_dormant_nodes(
