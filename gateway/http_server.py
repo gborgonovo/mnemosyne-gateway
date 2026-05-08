@@ -125,7 +125,7 @@ class Task(BaseModel):
     name: str
     goal_name: str
     description: str = ""
-    due_date: str = ""
+    deadline: str = ""
     scopes: str = "Private,Public"
 
 def write_markdown(name: str, frontmatter: dict, body: str):
@@ -297,7 +297,7 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
          "status": "todo",
          "scope": scope_list[0]
     }
-    if task.due_date: frontmatter["due_date"] = task.due_date
+    if task.deadline: frontmatter["deadline"] = task.deadline
     body = f"# {task.name}\n\n**Linked Goal:** [[{task.goal_name}]]\n\n{task.description}"
     write_markdown(task.name, frontmatter, body)
     return {"status": "success", "name": task.name}

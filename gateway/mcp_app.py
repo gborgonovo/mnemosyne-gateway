@@ -244,11 +244,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         return json.dumps({"status": "success", "message": f"Goal '{name}' created."})
 
     @mcp.tool()
-    def create_task(name: str, goal_name: str, description: str = "", due_date: str = "", scopes: str = "Private,Public") -> str:
+    def create_task(name: str, goal_name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public") -> str:
         """Creates an actionable Task and links it to an existing Goal via wikilinks."""
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Task", "status": "todo", "scope": scope_list[0]}
-        if due_date: frontmatter["due_date"] = due_date
+        if deadline: frontmatter["deadline"] = deadline
         body = f"# {name}\n\n**Linked Goal:** [[{goal_name}]]\n\n{description}"
         write_markdown(name, frontmatter, body)
         return json.dumps({"status": "success", "message": f"Task '{name}' created and linked to '{goal_name}'."})
