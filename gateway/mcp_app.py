@@ -34,14 +34,19 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 return f.read()
         return None
 
-    def write_markdown(name: str, frontmatter: dict, body: str):
+    def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
         # Try to find existing file to update it in place
         path = find_file_recursive(name)
         is_new = path is None
         if not path:
-            # New file, put it in the root
+            if folder:
+                target_dir = os.path.join(knowledge_dir, folder)
+                if not os.path.isdir(target_dir):
+                    raise ValueError(f"Folder '{folder}' does not exist. Use create_project first.")
+            else:
+                target_dir = knowledge_dir
             safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-            path = os.path.join(knowledge_dir, f"{safe_name}.md")
+            path = os.path.join(target_dir, f"{safe_name}.md")
 
         if is_new and 'created_at' not in frontmatter:
             frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
@@ -51,6 +56,106 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
             f.write("---\n\n")
             f.write(body)
+
+    def _normalize_folder_name(name: str) -> str:
+        return re.sub(r'[\s_\-]+', '', name).lower()
+
+    def _folder_tree(base_dir: str, prefix: str = "") -> str:
+        try:
+            entries = sorted(os.listdir(base_dir))
+        except PermissionError:
+            return ""
+        dirs = [e for e in entries if os.path.isdir(os.path.join(base_dir, e))
+                and not e.startswith('_') and not e.startswith('.')]
+        lines = []
+        for d in dirs:
+            dir_path = os.path.join(base_dir, d)
+            defaults_path = os.path.join(dir_path, '_defaults.yaml')
+            meta = ""
+            if os.path.exists(defaults_path):
+                try:
+                    with open(defaults_path) as f:
+                        defaults = yaml.safe_load(f) or {}
+                    parts = []
+                    if 'scope' in defaults:
+                        parts.append(f"scope={defaults['scope']}")
+                    if 'description' in defaults:
+                        parts.append(f"'{defaults['description']}'")
+                    if parts:
+                        meta = f" [{', '.join(parts)}]"
+                except Exception:
+                    pass
+            lines.append(f"{prefix}{d}/{meta}")
+            subtree = _folder_tree(dir_path, prefix + "  ")
+            if subtree:
+                lines.append(subtree)
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def list_projects() -> str:
+        """
+        List all project folders in the knowledge base as an indented tree.
+        Call this before create_project to check if a suitable folder already exists.
+        """
+        tree = _folder_tree(knowledge_dir)
+        if not tree:
+            return "No project folders found in the knowledge base."
+        return f"Knowledge folder structure:\n\n{tree}"
+
+    @mcp.tool()
+    def create_project(name: str, description: str = "", scope: str = "Private", parent: str = "") -> str:
+        """
+        Create a new project folder in the knowledge base.
+        IMPORTANT: Call list_projects first to check if a suitable folder already exists.
+
+        name: folder name (will be sanitized; spaces become underscores)
+        description: optional description, saved as index file and in _defaults.yaml
+        scope: default scope for files in this folder ('Private' or 'Public')
+        parent: relative path of an existing folder (e.g. 'Ganaghello/Operativo');
+                leave empty to create at root level
+        """
+        if parent:
+            base_path = os.path.join(knowledge_dir, parent)
+            if not os.path.isdir(base_path):
+                return json.dumps({"status": "error", "message": f"Parent folder '{parent}' does not exist. Use list_projects to see available folders."})
+        else:
+            base_path = knowledge_dir
+
+        safe_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
+
+        existing_dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and not d.startswith('_')]
+        for existing in existing_dirs:
+            if existing.lower() == safe_name.lower():
+                tree = _folder_tree(knowledge_dir)
+                return json.dumps({"status": "error", "message": f"Folder '{existing}' already exists at this level. Use it or choose a different name.\n\nCurrent structure:\n{tree}"})
+
+        warnings = [e for e in existing_dirs if _normalize_folder_name(e) == _normalize_folder_name(safe_name)]
+
+        folder_path = os.path.join(base_path, safe_name)
+        os.makedirs(folder_path, exist_ok=True)
+
+        defaults = {"project": name, "scope": scope}
+        if description:
+            defaults["description"] = description
+        with open(os.path.join(folder_path, '_defaults.yaml'), 'w') as f:
+            yaml.dump(defaults, f, allow_unicode=True, default_flow_style=False)
+
+        if description:
+            index_frontmatter = {"type": "Node", "scope": scope, "created_at": datetime.now().strftime('%Y-%m-%d')}
+            index_body = f"# {name}\n\n{description}"
+            with open(os.path.join(folder_path, f"{safe_name}.md"), 'w') as f:
+                f.write("---\n")
+                yaml.dump(index_frontmatter, f, allow_unicode=True, default_flow_style=False)
+                f.write("---\n\n")
+                f.write(index_body)
+
+        result_path = os.path.join(parent, safe_name) if parent else safe_name
+        msg = f"Project folder '{result_path}' created."
+        if warnings:
+            msg += f"\n\nWarning: similar folder(s) already exist at this level: {', '.join(warnings)}. Verify this is intentional."
+        tree = _folder_tree(knowledge_dir)
+        msg += f"\n\nUpdated structure:\n{tree}"
+        return json.dumps({"status": "success", "message": msg})
 
     @mcp.tool()
     def trigger_gardening_cycle() -> str:
@@ -102,7 +207,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     @mcp.tool()
     def create_node(name: str, content: str, node_type: str = "Node",
-                    scope: str = "Public", links: str = "") -> str:
+                    scope: str = "Public", links: str = "", folder: str = "") -> str:
         """
         Create a named knowledge node — a persistent, referenceable concept in memory.
         Use this for people, projects, topics, ideas, or any concept worth naming.
@@ -113,6 +218,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         node_type: 'Node' (default), 'Reference' (evergreen, never decays), 'Goal', 'Task'
         scope: 'Public' (default) or 'Private'
         links: comma-separated list of related node names to wikilink (e.g. 'Progetto Alpha,Giorgio')
+        folder: relative path of an existing project folder (e.g. 'Ganaghello' or 'Ganaghello/Operativo');
+                leave empty to place in knowledge root
         """
         frontmatter = {"type": node_type, "scope": scope}
         wikilinks = ""
@@ -121,7 +228,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             wikilinks = "\n\n" + " ".join(f"[[{t}]]" for t in targets)
         body = f"# {name}\n\n{content}{wikilinks}"
         try:
-            write_markdown(name, frontmatter, body)
+            write_markdown(name, frontmatter, body, folder=folder)
             return json.dumps({"status": "success", "message": f"Node '{name}' created with type '{node_type}'."})
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
@@ -234,24 +341,38 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
              return json.dumps({"error": str(e)})
 
     @mcp.tool()
-    def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public") -> str:
-        """Creates a new high-level strategic Goal as a Markdown file."""
+    def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public", folder: str = "") -> str:
+        """Creates a new high-level strategic Goal as a Markdown file.
+
+        folder: relative path of an existing project folder (e.g. 'Ganaghello');
+                leave empty to place in knowledge root
+        """
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Goal", "status": "active", "scope": scope_list[0]}
         if deadline: frontmatter["deadline"] = deadline
         body = f"# {name}\n\n{description}"
-        write_markdown(name, frontmatter, body)
-        return json.dumps({"status": "success", "message": f"Goal '{name}' created."})
+        try:
+            write_markdown(name, frontmatter, body, folder=folder)
+            return json.dumps({"status": "success", "message": f"Goal '{name}' created."})
+        except Exception as e:
+            return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool()
-    def create_task(name: str, goal_name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public") -> str:
-        """Creates an actionable Task and links it to an existing Goal via wikilinks."""
+    def create_task(name: str, goal_name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public", folder: str = "") -> str:
+        """Creates an actionable Task and links it to an existing Goal via wikilinks.
+
+        folder: relative path of an existing project folder (e.g. 'Ganaghello');
+                leave empty to place in knowledge root
+        """
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Task", "status": "todo", "scope": scope_list[0]}
         if deadline: frontmatter["deadline"] = deadline
         body = f"# {name}\n\n**Linked Goal:** [[{goal_name}]]\n\n{description}"
-        write_markdown(name, frontmatter, body)
-        return json.dumps({"status": "success", "message": f"Task '{name}' created and linked to '{goal_name}'."})
+        try:
+            write_markdown(name, frontmatter, body, folder=folder)
+            return json.dumps({"status": "success", "message": f"Task '{name}' created and linked to '{goal_name}'."})
+        except Exception as e:
+            return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool()
     def update_task_status(name: str, status: str) -> str:
