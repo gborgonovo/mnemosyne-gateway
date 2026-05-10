@@ -140,10 +140,14 @@ knowledge/*.md          ← Source of Truth (your Markdown files)
 File Watcher            ← Detects changes, parses frontmatter + [[WikiLinks]]
     │
     ├──▶ KùzuDB         ← Graph topology + activation heat (embedded)
-    └──▶ ChromaDB        ← Semantic embeddings (embedded)
-         │
-         ▼
-    Gateway (FastAPI)   ← REST API + MCP SSE on :4001
+    ├──▶ ChromaDB        ← Semantic embeddings (embedded)
+    └──▶ Enrichment Q   ← Files without relations: enqueued for LLM analysis
+              │
+              ▼
+         LLM Provider   ← extract_entities → writes relations: back to file
+              │                               (file watcher picks it up → KùzuDB)
+              ▼
+    Gateway (FastAPI)   ← REST API + MCP SSE on :4001  [all of the above run in-process]
     Gardener (hourly)   ← Decay + dormant resurfacing + semantic edge discovery
 ```
 

@@ -24,11 +24,9 @@ curl http://localhost:4001/status
 
 ### Individual components
 ```bash
-python3 gateway/http_server.py           # Gateway (HTTP :4001 + MCP SSE)
-python3 workers/file_watcher.py          # Continuous file sync
-python3 workers/file_watcher.py --once   # One-time cold-boot sync
+python3 gateway/http_server.py           # Gateway (HTTP :4001 + MCP SSE) — includes file watcher + LLM enrichment
+python3 workers/file_watcher.py --once   # One-time cold-boot sync (outside gateway)
 python3 workers/gardener.py              # Temporal decay worker
-python3 workers/llm_worker.py            # Entity extraction
 python3 workers/briefing_worker.py       # Proactive insights
 ```
 
@@ -49,15 +47,17 @@ python3 test_kuzu.py
 ### Data flow
 1. User writes/edits markdown in `/knowledge/` with YAML frontmatter and `[[WikiLink]]` syntax
 2. **File Watcher** (`workers/file_watcher.py`) detects changes, parses frontmatter + body, normalizes node names
-3. **KuzuDB** (`core/kuzu_manager.py`) stores the topological graph — nodes, edges from wikilinks, activation levels
+3. **KuzuDB** (`core/kuzu_manager.py`) stores the topological graph — nodes, edges from wikilinks + typed relations, activation levels
 4. **ChromaDB** (`core/vector_store.py`) stores semantic embeddings for similarity search
-5. **Gardener** (`workers/gardener.py`) runs hourly, applying thermal decay to activation values
-6. **Gateway** (`gateway/http_server.py`) exposes both REST and MCP SSE endpoints
+5. **LLM Enrichment** (background thread inside the gateway): if the file has no `relations:` and body > 150 chars, calls `llm.extract_entities()` and writes the result to the frontmatter. The File Watcher picks up the re-write and syncs the new edges to KuzuDB.
+6. **Gardener** (`workers/gardener.py`) runs hourly, applying thermal decay to activation values
+7. **Gateway** (`gateway/http_server.py`) exposes both REST and MCP SSE endpoints
 
 ### Key design decisions
 - **File-first**: Databases are derived from markdown files, not the other way around. The source of truth is `/knowledge/`.
 - **Embedded DBs**: KuzuDB replaced Neo4j to eliminate external service dependencies. KuzuDB allows only one writer at a time — the file watcher runs inside the gateway process to avoid lock conflicts.
 - **Activation model**: Each node has a heat value [0.0, 1.0] representing recency/relevance. Decay is applied continuously; adding observations raises activation and propagates to neighbors.
+- **In-process workers**: both the file watcher and the LLM enrichment thread run inside the gateway process. The standalone `workers/llm_worker.py` (PluginBase/HTTP architecture) is superseded and no longer launched by `start.sh`.
 
 ### Components
 
@@ -69,7 +69,7 @@ python3 test_kuzu.py
 | Vector Store | `core/vector_store.py` | ChromaDB wrapper — semantic search |
 | Attention | `core/attention.py` | Activation propagation + decay math |
 | Butler | `butler/llm.py` | LLM reasoning layer (mock/ollama/openai/remote) |
-| File Watcher | `workers/file_watcher.py` | Markdown sync → graph + vectors |
+| File Watcher | `workers/file_watcher.py` | Markdown sync → graph + vectors + LLM enrichment queue |
 
 ### Node data model
 Markdown files use YAML frontmatter:
