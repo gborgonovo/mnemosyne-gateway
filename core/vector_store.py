@@ -54,7 +54,7 @@ class VectorStore:
                     self.timeout = timeout
 
                 def name(self):
-                    return f"ollama_{self.model_name}"
+                    return "ollama"
 
                 def __call__(self, input):
                     embeddings = []
