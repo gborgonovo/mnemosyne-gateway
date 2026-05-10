@@ -63,10 +63,15 @@ try:
     kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"))
     vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"), embedding_config=config.get('llm', {}).get('embeddings'))
     am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
-    
+
+    from butler.llm import get_llm_provider
+    butler_config = config.get('llm', {}).get('butler', {})
+    llm = get_llm_provider(butler_config, root_config=config)
+    logger.info(f"LLM provider: {llm.get_info()}")
+
     # File Watcher runs inside the Gateway to hold the exclusive KuzuDB writer lock
     logger.info(f"Starting internal FileWatcher on {KNOWLEDGE_DIR}...")
-    event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR, am=am)
+    event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR, am=am, llm=llm)
     # Cold boot: sync all existing files without triggering activation boosts
     import os as _os
     for _root, _dirs, _files in _os.walk(KNOWLEDGE_DIR):

@@ -5,6 +5,8 @@ import yaml
 import re
 import logging
 import datetime
+import queue
+import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -19,12 +21,17 @@ logger = logging.getLogger(__name__)
 
 class WikiSyncHandler(FileSystemEventHandler):
     def __init__(self, kuzu_mgr: KuzuManager, vector_store: VectorStore,
-                 knowledge_dir: str, am=None):
+                 knowledge_dir: str, am=None, llm=None):
         super().__init__()
         self.kuzu_mgr = kuzu_mgr
         self.vector_store = vector_store
         self.knowledge_dir = knowledge_dir
         self.am = am
+        self.llm = llm
+        self._enrich_queue = queue.Queue()
+        if llm is not None:
+            t = threading.Thread(target=self._run_enrichment_worker, daemon=True)
+            t.start()
 
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith('.md'):
@@ -56,6 +63,35 @@ class WikiSyncHandler(FileSystemEventHandler):
                 self.vector_store.delete_node(src_name)
             # Sync destination — picks up new folder defaults (project, scope)
             self._sync_file(event.dest_path, is_startup_sync=False)
+
+    def _run_enrichment_worker(self):
+        """Background thread: calls LLM to extract relations and writes them to frontmatter."""
+        while True:
+            item = self._enrich_queue.get()
+            if item is None:
+                break
+            filepath, raw_name, body, context_nodes = item
+            try:
+                norm_name = normalize_node_name(raw_name)
+                _, relationships = self.llm.extract_entities(body, context_nodes=context_nodes)
+                relations = []
+                for rel in relationships:
+                    src = normalize_node_name(str(rel.get('source', '')))
+                    if src == norm_name:
+                        relations.append({
+                            'target': rel.get('target', ''),
+                            'type': str(rel.get('type', 'RELATED_TO')).upper()
+                        })
+                fm, body_now, _, _ = self._parse_markdown(filepath)
+                if fm is None or 'relations' in fm:
+                    continue  # file deleted or already written by another source
+                fm['relations'] = relations
+                self._write_frontmatter(filepath, fm, body_now)
+                logger.info(f"Enrichment: '{norm_name}' → {len(relations)} relations")
+            except Exception as e:
+                logger.error(f"Enrichment error for '{raw_name}': {e}")
+            finally:
+                self._enrich_queue.task_done()
 
     def _load_folder_defaults(self, filepath: str) -> dict:
         """Read _defaults.yaml from the file's parent folder, if present."""
@@ -189,6 +225,14 @@ class WikiSyncHandler(FileSystemEventHandler):
 
         logger.info(f"Sync {'(startup) ' if is_startup_sync else ''}complete for '{norm_name}'. "
                     f"Links: {len(set(normalized_wikilinks))}, type={node_type}, scope={scope}")
+
+        # Enqueue for LLM enrichment if not yet analysed
+        if (not is_startup_sync
+                and self.llm is not None
+                and 'relations' not in frontmatter
+                and len(body) > 150
+                and node_type not in ('Observation',)):
+            self._enrich_queue.put((filepath, raw_name, body, list(set(normalized_wikilinks))))
 
 
 def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):

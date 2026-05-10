@@ -27,12 +27,9 @@ echo "✅ Gateway started (PID: $GATEWAY_PID). Log: logs/gateway.log"
 # The File Watcher runs inside the Gateway (http_server.py)
 # to hold the exclusive KuzuDB writer lock.
 
-# Start intelligence workers (optional but recommended)
-nohup .venv/bin/python3 workers/llm_worker.py > logs/llm_worker.log 2>&1 &
-LLM_PID=$!
-echo $LLM_PID > logs/llm_worker.pid
-echo "✅ LLM Worker started (PID: $LLM_PID). Log: logs/llm_worker.log"
+# LLM enrichment runs in-process inside the Gateway (see workers/file_watcher.py)
 
+# Start intelligence workers (optional but recommended)
 nohup .venv/bin/python3 workers/briefing_worker.py > logs/briefing_worker.log 2>&1 &
 BRIEFING_PID=$!
 echo $BRIEFING_PID > logs/briefing_worker.pid
