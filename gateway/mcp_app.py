@@ -57,6 +57,20 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             f.write("---\n\n")
             f.write(body)
 
+    def _parse_relations(relations_str: str) -> list:
+        """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter."""
+        result = []
+        for item in relations_str.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if ":" in item:
+                target, rel_type = item.rsplit(":", 1)
+                result.append({"target": target.strip(), "type": rel_type.strip().upper()})
+            else:
+                result.append({"target": item, "type": "RELATED_TO"})
+        return result
+
     def _normalize_folder_name(name: str) -> str:
         return re.sub(r'[\s_\-]+', '', name).lower()
 
@@ -247,7 +261,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     @mcp.tool()
     def create_node(name: str, content: str, node_type: str = "Node",
-                    scope: str = "Public", links: str = "", folder: str = "") -> str:
+                    scope: str = "Public", links: str = "", folder: str = "",
+                    relations: str = "") -> str:
         """
         Create a named knowledge node — a persistent, referenceable concept in memory.
         This is the DEFAULT tool for storing information. Use it for people, projects,
@@ -259,11 +274,14 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         content: body of the node in markdown
         node_type: 'Node' (default), 'Reference' (evergreen, never decays), 'Goal', 'Task'
         scope: 'Public' (default) or 'Private'
-        links: comma-separated list of related node names to wikilink (e.g. 'Progetto Alpha,Giorgio')
-        folder: relative path of an existing project folder (e.g. 'Ganaghello' or 'Ganaghello/Operativo');
-                leave empty to place in knowledge root
+        links: comma-separated node names for untyped wikilinks (e.g. 'Progetto Alpha,Giorgio')
+        folder: relative path of an existing project folder (e.g. 'Ganaghello' or 'Ganaghello/Operativo')
+        relations: typed relationships as 'Target:TYPE' pairs (e.g. 'Ganaghello:PART_OF,Giorgio:MANAGES')
+                   valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
         frontmatter = {"type": node_type, "scope": scope}
+        if relations:
+            frontmatter["relations"] = _parse_relations(relations)
         wikilinks = ""
         if links:
             targets = [l.strip() for l in links.split(",") if l.strip()]
@@ -383,15 +401,18 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
              return json.dumps({"error": str(e)})
 
     @mcp.tool()
-    def create_goal(name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public", folder: str = "") -> str:
+    def create_goal(name: str, description: str = "", deadline: str = "",
+                    scopes: str = "Private,Public", folder: str = "", relations: str = "") -> str:
         """Creates a new high-level strategic Goal as a Markdown file.
 
-        folder: relative path of an existing project folder (e.g. 'Ganaghello');
-                leave empty to place in knowledge root
+        folder: relative path of an existing project folder (e.g. 'Ganaghello')
+        relations: typed relationships as 'Target:TYPE' pairs (e.g. 'Progetto:PART_OF')
+                   valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Goal", "status": "active", "scope": scope_list[0]}
         if deadline: frontmatter["deadline"] = deadline
+        if relations: frontmatter["relations"] = _parse_relations(relations)
         body = f"# {name}\n\n{description}"
         try:
             write_markdown(name, frontmatter, body, folder=folder)
@@ -400,15 +421,18 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool()
-    def create_task(name: str, goal_name: str, description: str = "", deadline: str = "", scopes: str = "Private,Public", folder: str = "") -> str:
+    def create_task(name: str, goal_name: str, description: str = "", deadline: str = "",
+                    scopes: str = "Private,Public", folder: str = "", relations: str = "") -> str:
         """Creates an actionable Task and links it to an existing Goal via wikilinks.
 
-        folder: relative path of an existing project folder (e.g. 'Ganaghello');
-                leave empty to place in knowledge root
+        folder: relative path of an existing project folder (e.g. 'Ganaghello')
+        relations: typed relationships beyond the goal link, as 'Target:TYPE' pairs
+                   valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Task", "status": "todo", "scope": scope_list[0]}
         if deadline: frontmatter["deadline"] = deadline
+        if relations: frontmatter["relations"] = _parse_relations(relations)
         body = f"# {name}\n\n**Linked Goal:** [[{goal_name}]]\n\n{description}"
         try:
             write_markdown(name, frontmatter, body, folder=folder)

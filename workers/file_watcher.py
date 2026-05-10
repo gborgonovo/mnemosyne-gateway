@@ -169,6 +169,15 @@ class WikiSyncHandler(FileSystemEventHandler):
         for target_norm in set(normalized_wikilinks):
             self.kuzu_mgr.add_edge(raw_name, target_norm, "LINKED_TO", weight=0.8)
 
+        # Rebuild typed edges from frontmatter relations:
+        relations = frontmatter.get('relations', [])
+        if isinstance(relations, list):
+            for rel in relations:
+                target = str(rel.get('target', '')).strip()
+                rel_type = str(rel.get('type', 'RELATED_TO')).upper()
+                if target:
+                    self.kuzu_mgr.add_edge(raw_name, target, rel_type, weight=1.0)
+
         # Apply file_edit boost only for real changes, not cold boot
         if not is_startup_sync:
             if self.am:
