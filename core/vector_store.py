@@ -42,10 +42,30 @@ class VectorStore:
             return OpenAIEmbeddingFunction(**kwargs)
 
         if mode == "ollama":
-            from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
+            import requests
             url = config.get("base_url", "http://localhost:11434")
             model = config.get("model_name", "nomic-embed-text")
-            return OllamaEmbeddingFunction(url=url, model_name=model)
+            timeout = config.get("timeout", 300)
+
+            class OllamaEmbeddingFunctionWithTimeout:
+                def __init__(self, url, model_name, timeout):
+                    self.url = url.rstrip("/")
+                    self.model_name = model_name
+                    self.timeout = timeout
+
+                def __call__(self, input):
+                    embeddings = []
+                    for text in input:
+                        response = requests.post(
+                            f"{self.url}/api/embeddings",
+                            json={"model": self.model_name, "prompt": text},
+                            timeout=self.timeout
+                        )
+                        response.raise_for_status()
+                        embeddings.append(response.json()["embedding"])
+                    return embeddings
+
+            return OllamaEmbeddingFunctionWithTimeout(url=url, model_name=model, timeout=timeout)
 
         return None  # mock/default: ChromaDB uses all-MiniLM-L6-v2 locally
 
