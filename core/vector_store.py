@@ -56,9 +56,9 @@ class VectorStore:
                 def name(self):
                     return "ollama"
 
-                def __call__(self, input):
+                def _embed(self, texts):
                     embeddings = []
-                    for text in input:
+                    for text in texts:
                         response = requests.post(
                             f"{self.url}/api/embeddings",
                             json={"model": self.model_name, "prompt": text},
@@ -67,6 +67,15 @@ class VectorStore:
                         response.raise_for_status()
                         embeddings.append(response.json()["embedding"])
                     return embeddings
+
+                def __call__(self, input):
+                    return self._embed(input)
+
+                def embed_documents(self, input):
+                    return self._embed(input)
+
+                def embed_query(self, input):
+                    return self._embed(input)
 
             return OllamaEmbeddingFunctionWithTimeout(url=url, model_name=model, timeout=timeout)
 
