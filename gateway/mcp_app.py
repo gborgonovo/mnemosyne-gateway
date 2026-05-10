@@ -158,6 +158,39 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         return json.dumps({"status": "success", "message": msg})
 
     @mcp.tool()
+    def update_project(folder: str, description: str = "", scope: str = "") -> str:
+        """
+        Update the description and/or scope of an existing project folder.
+        Edits the folder's _defaults.yaml in place.
+
+        folder: relative path of the folder to update (e.g. 'Ganaghello' or 'Ganaghello/Operativo')
+        description: new description text (leave empty to keep existing)
+        scope: new default scope for files in this folder (leave empty to keep existing)
+        """
+        folder_path = os.path.join(knowledge_dir, folder)
+        if not os.path.isdir(folder_path):
+            return json.dumps({"status": "error", "message": f"Folder '{folder}' does not exist. Use list_projects to see available folders."})
+
+        defaults_path = os.path.join(folder_path, '_defaults.yaml')
+        defaults = {}
+        if os.path.exists(defaults_path):
+            try:
+                with open(defaults_path) as f:
+                    defaults = yaml.safe_load(f) or {}
+            except Exception as e:
+                return json.dumps({"status": "error", "message": f"Could not read _defaults.yaml: {e}"})
+
+        if description:
+            defaults["description"] = description
+        if scope:
+            defaults["scope"] = scope
+
+        with open(defaults_path, 'w') as f:
+            yaml.dump(defaults, f, allow_unicode=True, default_flow_style=False)
+
+        return json.dumps({"status": "success", "message": f"Project '{folder}' updated.", "current": defaults})
+
+    @mcp.tool()
     def trigger_gardening_cycle() -> str:
         """
         Manually trigger a gardening cycle to apply temporal decay to network heat.
