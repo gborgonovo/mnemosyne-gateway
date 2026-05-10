@@ -52,6 +52,7 @@ class VectorStore:
                     self.url = url.rstrip("/")
                     self.model_name = model_name
                     self.timeout = timeout
+                    self.name = f"ollama_{model_name}"
 
                 def __call__(self, input):
                     embeddings = []
