@@ -193,9 +193,16 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     @mcp.tool()
     def add_observation(content: str, scope: str = "Public") -> str:
         """
-        Record a raw, unstructured piece of information with an auto-generated ID.
-        Use this ONLY for ephemeral notes or events that don't deserve a named concept.
-        For any named concept (person, project, topic, idea), use create_node instead.
+        Record a truly ephemeral, unnamed event or fleeting note (e.g. 'user seemed
+        frustrated', 'quick log entry'). The file gets an auto-generated ID and lands
+        in the knowledge root with no folder.
+
+        DO NOT use this if:
+        - the content has a clear subject or title → use create_node
+        - the note belongs in a project folder → use create_node with folder=
+        - the content is a goal or task → use create_goal / create_task
+
+        When in doubt, prefer create_node.
         """
         obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
         frontmatter = {"type": "Observation", "scope": scope}
@@ -210,8 +217,10 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                     scope: str = "Public", links: str = "", folder: str = "") -> str:
         """
         Create a named knowledge node — a persistent, referenceable concept in memory.
-        Use this for people, projects, topics, ideas, or any concept worth naming.
-        Prefer this over add_observation whenever the information has a clear subject.
+        This is the DEFAULT tool for storing information. Use it for people, projects,
+        topics, ideas, notes, or any content with a clear subject — including simple
+        notes that belong in a project folder. Use add_observation only for truly
+        ephemeral, unnamed events.
 
         name: meaningful identifier (e.g. 'Progetto Mnemosyne', 'Giorgio', 'Machine Learning')
         content: body of the node in markdown
