@@ -89,9 +89,11 @@ class VectorStore:
         # We store the original name in metadata while using normalized for PK
         safe_metadata['original_name'] = name
 
+        # Truncate to avoid exceeding embedding model context window
+        embed_text = body[:4000] if body.strip() else "_EMPTY_"
         self.collection.upsert(
             ids=[norm_name],
-            documents=[body] if body.strip() else ["_EMPTY_"],
+            documents=[embed_text],
             metadatas=[safe_metadata]
         )
         logger.debug(f"Upserted {norm_name} (orig: {name}) in ChromaDB")
