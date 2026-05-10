@@ -105,7 +105,17 @@ Or for local use with Claude Desktop, add to your MCP config:
 }
 ```
 
-Available MCP tools: `query_knowledge`, `add_observation`, `get_memory_briefing`, `create_goal`, `create_task`, `update_task_status`, `update_knowledge_frontmatter`, `forget_knowledge_node`, `trigger_gardening_cycle`, `get_system_status`.
+Available MCP tools:
+
+| Category | Tools |
+|---|---|
+| Retrieval | `query_knowledge`, `get_memory_briefing`, `get_system_status` |
+| Authoring | `add_observation`, `create_node`, `create_goal`, `create_task` |
+| Editing | `update_task_status`, `update_knowledge_frontmatter`, `forget_knowledge_node` |
+| Projects | `list_projects`, `create_project`, `update_project` |
+| Maintenance | `trigger_gardening_cycle`, `inspect_file_raw`, `debug_filesystem` |
+
+Create tools accept a `folder` parameter (places the file in a `knowledge/<folder>/` subdirectory) and a `relations` parameter (`"Target:PART_OF,Other:MANAGES"`) that writes typed relationships to the frontmatter and persists them as graph edges.
 
 ---
 
