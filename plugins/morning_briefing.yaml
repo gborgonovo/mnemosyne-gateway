@@ -24,6 +24,9 @@ prompt: |
 
   Scrivi una breve nota mattutina personale (massimo 10 righe).
   Regole:
+  - Prima riga: solo il saluto ("Buongiorno, Giorgio."). Poi una riga vuota.
+  - Seconda riga: solo la data per esteso, da sola. Poi una riga vuota.
+  - Corpo: uno o due paragrafi separati da una riga vuota ciascuno.
   - Menziona solo ciò che è effettivamente rilevante.
   - Se ci sono argomenti dormienti importanti, ricordali con delicatezza, senza insistere.
   - Se non c'è nulla di urgente, dillo in una riga e taci.
