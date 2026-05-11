@@ -198,7 +198,8 @@ class WikiSyncHandler(FileSystemEventHandler):
             logger.debug(f"Skipping re-embed for '{norm_name}' (mtime unchanged)")
 
         # Ensure node exists in KuzuDB with correct metadata
-        self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope)
+        title = frontmatter.get('title', raw_name)
+        self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope, display_name=title)
         self.kuzu_mgr.update_node_metadata(norm_name, node_type=node_type, scope=scope)
 
         # Rebuild edges from wikilinks

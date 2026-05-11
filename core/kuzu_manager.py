@@ -77,8 +77,10 @@ class KuzuManager:
     # ─── Node CRUD ────────────────────────────────────────────────────────────
 
     def add_node(self, name: str, initial_activation: float = 0.5,
-                 node_type: str = "Node", scope: str = "Public"):
+                 node_type: str = "Node", scope: str = "Public",
+                 display_name: str = None):
         norm_name = normalize_node_name(name)
+        display = display_name or name
         now = time.time()
         query = """
         MERGE (a:Node {name: $name})
@@ -90,9 +92,11 @@ class KuzuManager:
             a.last_interaction = $now,
             a.last_decay_applied = $now,
             a.interaction_count = $zero
+        ON MATCH SET
+            a.display_name = $display
         """
         self.conn.execute(query, parameters={
-            "name": norm_name, "display": name,
+            "name": norm_name, "display": display,
             "act": initial_activation, "node_type": node_type,
             "scope": scope, "now": now, "zero": 0,
         })
