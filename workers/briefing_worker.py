@@ -22,7 +22,7 @@ def load_config():
 def run_briefing():
     logger.info("Generating proactive briefing (Hybrid DB)...")
     config = load_config()
-    kuzu_mgr = KuzuManager(db_path=os.path.join(os.path.dirname(__file__), '..', 'data', 'kuzu_db'))
+    kuzu_mgr = KuzuManager(db_path=os.path.join(os.path.dirname(__file__), '..', 'data', 'kuzu_main'))
     ie = InitiativeEngine(kuzu_mgr, config=config)
 
     initiatives = ie.generate_initiatives()
