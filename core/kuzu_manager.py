@@ -214,17 +214,18 @@ class KuzuManager:
         query = """
         MATCH (n:Node)
         WHERE n.activation > $threshold
-        RETURN n.name, n.activation, n.node_type, n.scope
+        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope
         """
         res = self.conn.execute(query, parameters={"threshold": threshold})
         active = []
         while res.has_next():
             row = res.get_next()
-            name, activation, node_type, scope = row[0], row[1], row[2], row[3]
+            name, display_name, activation, node_type, scope = row[0], row[1], row[2], row[3], row[4]
             if scopes and "*" not in scopes and scope not in scopes:
                 continue
             active.append({
                 "name": name,
+                "display_name": display_name,
                 "activation_level": activation,
                 "node_type": node_type,
                 "scope": scope,
@@ -253,7 +254,7 @@ class KuzuManager:
         WHERE NOT n.name STARTS WITH 'Obs_'
         AND n.node_type IN ['Goal', 'Task', 'Node']
         AND COALESCE(n.interaction_count, 0) >= $min_interactions
-        RETURN n.name, n.activation, n.node_type, n.scope, n.last_interaction, n.interaction_count
+        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.last_interaction, n.interaction_count
         """
         res = self.conn.execute(query, parameters={"min_interactions": min_interactions})
 
@@ -261,8 +262,8 @@ class KuzuManager:
         dormant = []
         while res.has_next():
             row = res.get_next()
-            name, activation, node_type, scope, last_interaction, count = (
-                row[0], row[1], row[2], row[3], row[4] or 0, row[5] or 0
+            name, display_name, activation, node_type, scope, last_interaction, count = (
+                row[0], row[1], row[2], row[3], row[4], row[5] or 0, row[6] or 0
             )
             time_inactive = now - last_interaction
             days_inactive = time_inactive / 86400
@@ -280,6 +281,7 @@ class KuzuManager:
 
             dormant.append({
                 "name": name,
+                "display_name": display_name,
                 "activation": activation,
                 "node_type": node_type,
                 "scope": scope,
@@ -298,7 +300,7 @@ class KuzuManager:
         MATCH (n:Node)-[r:RELATES]-(m:Node)
         WHERE NOT n.name STARTS WITH 'obs_'
         AND n.activation < $ceiling
-        RETURN n.name, n.activation, n.node_type, n.scope, n.last_interaction,
+        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.last_interaction,
                n.interaction_count, count(r) AS edge_count
         ORDER BY edge_count DESC
         """
@@ -309,8 +311,8 @@ class KuzuManager:
         results = []
         while res.has_next():
             row = res.get_next()
-            name, activation, node_type, scope, last_interaction, interaction_count, edge_count = (
-                row[0], row[1], row[2], row[3], row[4] or 0, row[5] or 0, row[6]
+            name, display_name, activation, node_type, scope, last_interaction, interaction_count, edge_count = (
+                row[0], row[1], row[2], row[3], row[4], row[5] or 0, row[6] or 0, row[7]
             )
             if edge_count < min_edges:
                 continue
@@ -320,6 +322,7 @@ class KuzuManager:
                 continue
             results.append({
                 "name": name,
+                "display_name": display_name,
                 "activation": activation,
                 "node_type": node_type,
                 "scope": scope,

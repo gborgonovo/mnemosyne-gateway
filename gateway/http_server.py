@@ -262,12 +262,15 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         scopes=scope_filter,
     )
 
+    def fmt(nodes):
+        return [{"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']} for n in nodes]
+
     return {
         "timestamp": datetime.now().isoformat(),
-        "dormant_goals":    goals,
-        "dormant_tasks":    tasks,
-        "dormant_topics":   topics,
-        "forgotten_hubs":   forgotten_hubs,
+        "dormant_goals":    fmt(goals),
+        "dormant_tasks":    fmt(tasks),
+        "dormant_topics":   fmt(topics),
+        "forgotten_hubs":   [{"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive'], "edge_count": n['edge_count']} for n in forgotten_hubs],
         "summary": (
             f"{len(dormant_nodes)} elementi dormienti: "
             f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic. "
