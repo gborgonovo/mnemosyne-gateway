@@ -159,7 +159,7 @@ class WikiSyncHandler(FileSystemEventHandler):
 
         # Apply system defaults for any still-missing required fields
         if 'title' not in frontmatter:
-            frontmatter['title'] = raw_name
+            frontmatter['title'] = raw_name.replace('_', ' ')
             needs_rewrite = True
         if 'type' not in frontmatter:
             frontmatter['type'] = "Reference"
@@ -198,7 +198,7 @@ class WikiSyncHandler(FileSystemEventHandler):
             logger.debug(f"Skipping re-embed for '{norm_name}' (mtime unchanged)")
 
         # Ensure node exists in KuzuDB with correct metadata
-        title = frontmatter.get('title', raw_name)
+        title = frontmatter.get('title', raw_name.replace('_', ' ')).replace('_', ' ')
         self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope, display_name=title)
         self.kuzu_mgr.update_node_metadata(norm_name, node_type=node_type, scope=scope)
 
