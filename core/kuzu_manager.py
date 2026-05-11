@@ -162,7 +162,8 @@ class KuzuManager:
     def delete_node(self, name: str):
         norm_name = normalize_node_name(name)
         try:
-            self.conn.execute("MATCH (n:Node {name: $name})-[r]-() DELETE r", parameters={"name": norm_name})
+            self.conn.execute("MATCH (n:Node {name: $name})-[r:RELATES]->() DELETE r", parameters={"name": norm_name})
+            self.conn.execute("MATCH ()-[r:RELATES]->(n:Node {name: $name}) DELETE r", parameters={"name": norm_name})
             self.conn.execute("MATCH (n:Node {name: $name}) DELETE n", parameters={"name": norm_name})
             return True
         except Exception as e:

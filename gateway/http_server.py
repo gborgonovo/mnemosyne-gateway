@@ -230,9 +230,9 @@ def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = 
     )
 
     return {
-        "hot_topics": [n['name'] for n in hot_topics],
+        "hot_topics": [n.get('display_name') or n['name'] for n in hot_topics],
         "dormant": [
-            {"name": n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']}
+            {"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']}
             for n in dormant_nodes
         ],
         "timestamp": datetime.now().isoformat(),
