@@ -24,7 +24,7 @@ curl http://localhost:4001/status
 
 ### Individual components
 ```bash
-python3 gateway/http_server.py           # Gateway (HTTP :4001 + MCP SSE) — includes file watcher + LLM enrichment
+python3 gateway/http_server.py           # Gateway (HTTP :4001 + MCP Streamable HTTP) — includes file watcher + LLM enrichment
 python3 workers/file_watcher.py --once   # One-time cold-boot sync (outside gateway)
 python3 workers/gardener.py              # Temporal decay worker
 python3 workers/briefing_worker.py       # Proactive insights
@@ -51,7 +51,7 @@ python3 test_kuzu.py
 4. **ChromaDB** (`core/vector_store.py`) stores semantic embeddings for similarity search
 5. **LLM Enrichment** (background thread inside the gateway): if the file has no `relations:` and body > 150 chars, calls `llm.extract_entities()` and writes the result to the frontmatter. The File Watcher picks up the re-write and syncs the new edges to KuzuDB.
 6. **Gardener** (`workers/gardener.py`) runs hourly, applying thermal decay to activation values
-7. **Gateway** (`gateway/http_server.py`) exposes both REST and MCP SSE endpoints
+7. **Gateway** (`gateway/http_server.py`) exposes both REST and MCP Streamable HTTP endpoints
 
 ### Key design decisions
 - **File-first**: Databases are derived from markdown files, not the other way around. The source of truth is `/knowledge/`.
@@ -64,7 +64,7 @@ python3 test_kuzu.py
 | Component | File | Role |
 |---|---|---|
 | Gateway | `gateway/http_server.py` | FastAPI app, mounts REST + MCP |
-| MCP Server | `gateway/mcp_app.py` | MCP tools exposed via SSE transport |
+| MCP Server | `gateway/mcp_app.py` | MCP tools exposed via Streamable HTTP transport (`/mcp/`) |
 | Graph DB | `core/kuzu_manager.py` | KuzuDB wrapper — nodes, edges, activation |
 | Vector Store | `core/vector_store.py` | ChromaDB wrapper — semantic search |
 | Attention | `core/attention.py` | Activation propagation + decay math |
@@ -120,5 +120,6 @@ Node names are normalized to lowercase with underscores internally; display name
 
 - Gateway runs on port 4001, reverse-proxied by Nginx at `memory.borgonovo.org`
 - Chat UI runs on port 8501, proxied at `/chat`
-- MCP SSE transport requires `allowed_hosts` whitelist in `config/settings.yaml` (DNS rebinding protection)
+- MCP Streamable HTTP transport (`stateless_http=True`) at `/mcp/` — requires `allowed_hosts` whitelist in `config/settings.yaml` (DNS rebinding protection)
+- Register in Claude Code: `claude mcp add --transport http mnemosyne https://memory.borgonovo.org/mcp/`
 - Tests use isolated databases at `data/test_kuzu` and `data/test_chroma`
