@@ -5,6 +5,7 @@ import uvicorn
 import logging
 import uuid
 import re
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -104,7 +105,12 @@ def read_markdown(name: str):
             return f.read()
     return None
 
-app = FastAPI(title="Mnemosyne File-First API", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    async with mcp_instance.session_manager.run():
+        yield
+
+app = FastAPI(title="Mnemosyne File-First API", version="2.0.0", lifespan=lifespan)
 
 # 🌍 CORS Configuration
 app.add_middleware(

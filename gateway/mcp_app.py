@@ -15,7 +15,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         allowed_origins=["https://claude.ai", "https://memory.borgonovo.org", "http://localhost:*", "http://127.0.0.1:*"]
     )
     
-    mcp = FastMCP("Mnemosyne-Memory", transport_security=security, streamable_http_path="/", stateless_http=True)
+    mcp = FastMCP("Mnemosyne-Memory", transport_security=security, streamable_http_path="/")
 
     # Helper functions
     def find_file_recursive(name: str):
