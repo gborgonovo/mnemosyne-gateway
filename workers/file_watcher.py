@@ -84,11 +84,14 @@ class WikiSyncHandler(FileSystemEventHandler):
                     file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
                     if (file_mtime - enriched_at).total_seconds() < 3600:
                         continue  # enrichment write triggered this — skip
-                _, relationships = self.llm.extract_entities(body_now, context_nodes=context_nodes, current_node=raw_name)
+                all_nodes = {n['name'] for n in self.kuzu_mgr.get_all_nodes()}
+                all_nodes.update(context_nodes)  # include wikilinks not yet in graph
+                _, relationships = self.llm.extract_entities(body_now, context_nodes=sorted(all_nodes), current_node=raw_name)
                 llm_relations = []
                 for rel in relationships:
                     src = normalize_node_name(str(rel.get('source', '')))
-                    if src == norm_name:
+                    tgt = normalize_node_name(str(rel.get('target', '')))
+                    if src == norm_name and tgt in all_nodes and tgt != norm_name:
                         llm_relations.append({
                             'target': rel.get('target', ''),
                             'type': str(rel.get('type', 'RELATED_TO')).upper(),

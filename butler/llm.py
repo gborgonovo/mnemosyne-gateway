@@ -130,7 +130,7 @@ class OpenAILLM(LLMProvider):
         context_nodes = context_nodes or []
         context_info = ""
         if context_nodes:
-            context_info = f"\nKnown nodes already in the graph: {', '.join(context_nodes)}. Prefer these exact names when they match concepts in the text."
+            context_info = f"\nExisting nodes in the graph: {', '.join(context_nodes)}. Targets MUST come exclusively from this list. Do not invent targets not present in this list."
 
         if current_node:
             prompt = f"""You are analyzing a knowledge node named "{current_node}".{context_info}
@@ -141,10 +141,10 @@ Return a JSON object with:
 1. "entities": empty list [] (we only need relations here)
 2. "relationships": list of objects, each with:
    - "source": must always be exactly "{current_node}"
-   - "target": the related concept name
+   - "target": must be a name from the existing nodes list above
    - "type": one of BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
 
-Extract only relationships where "{current_node}" is the subject. Be concrete: prefer specific targets over vague ones. Include 3-8 relationships if the text supports them.
+Extract only relationships where "{current_node}" is the subject. Include 3-8 relationships if the text supports them.
 
 Text: {text}"""
         else:
@@ -272,7 +272,7 @@ class OllamaLLM(LLMProvider):
         context_nodes = context_nodes or []
         context_info = ""
         if context_nodes:
-            context_info = f"\nKnown nodes already in the graph: {', '.join(context_nodes)}. Prefer these exact names when they match concepts in the text."
+            context_info = f"\nExisting nodes in the graph: {', '.join(context_nodes)}. Targets MUST come exclusively from this list. Do not invent targets not present in this list."
 
         if current_node:
             prompt = f"""You are analyzing a knowledge node named "{current_node}".{context_info}
@@ -283,7 +283,7 @@ Return a JSON object with:
 1. "entities": empty list []
 2. "relationships": list of objects, each with:
    - "source": must always be exactly "{current_node}"
-   - "target": the related concept name
+   - "target": must be a name from the existing nodes list above
    - "type": one of BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
 
 Extract only relationships where "{current_node}" is the subject. Include 3-8 relationships if the text supports them. Return ONLY the JSON object.

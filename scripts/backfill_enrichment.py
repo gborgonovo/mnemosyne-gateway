@@ -89,6 +89,13 @@ def main():
         logger.info(f"LLM provider: {llm.get_info()}")
 
     eligible, enriched, skipped, errors = [], 0, 0, 0
+    all_node_names = set()
+
+    for root, _, files in os.walk(KNOWLEDGE_DIR):
+        for fname in sorted(files):
+            if not fname.endswith('.md') or fname.startswith('_'):
+                continue
+            all_node_names.add(normalize_node_name(os.path.splitext(fname)[0]))
 
     for root, _, files in os.walk(KNOWLEDGE_DIR):
         for fname in sorted(files):
@@ -114,14 +121,13 @@ def main():
     for filepath, fname, frontmatter, body in eligible:
         raw_name = os.path.splitext(fname)[0]
         norm_name = normalize_node_name(raw_name)
-        wikilinks = [normalize_node_name(m.split('|')[0].strip())
-                     for m in re.findall(r'\[\[(.*?)\]\]', body) if m.strip()]
         try:
-            _, relationships = llm.extract_entities(body, context_nodes=list(set(wikilinks)), current_node=raw_name)
+            _, relationships = llm.extract_entities(body, context_nodes=sorted(all_node_names), current_node=raw_name)
             llm_relations = []
             for rel in relationships:
                 src = normalize_node_name(str(rel.get('source', '')))
-                if src == norm_name:
+                tgt = normalize_node_name(str(rel.get('target', '')))
+                if src == norm_name and tgt in all_node_names and tgt != norm_name:
                     llm_relations.append({
                         'target': rel.get('target', ''),
                         'type': str(rel.get('type', 'RELATED_TO')).upper(),
