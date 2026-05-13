@@ -84,11 +84,10 @@ try:
     
     logger.info("✅ Hybrid File-First Backend Initialized (with internal watcher)")
 
-    # Mount MCP SSE app
     from workers.gardener import Gardener
     gd = Gardener(am, config=config, vector_store=vector_store)
     mcp_instance = create_mcp_server(kuzu_mgr, vector_store, am, gd, config, KNOWLEDGE_DIR)
-    mcp_app = mcp_instance.sse_app()
+    mcp_app = mcp_instance.streamable_http_app()
     
 except Exception as e:
     logger.error(f"❌ Error initializing backend: {e}")
