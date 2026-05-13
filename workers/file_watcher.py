@@ -73,7 +73,18 @@ class WikiSyncHandler(FileSystemEventHandler):
             filepath, raw_name, body, context_nodes = item
             try:
                 norm_name = normalize_node_name(raw_name)
-                _, relationships = self.llm.extract_entities(body, context_nodes=context_nodes)
+                # Re-read current state: file may have been enriched already or deleted
+                fm, body_now, _, _ = self._parse_markdown(filepath)
+                if fm is None:
+                    continue
+                enriched_at = fm.get('enriched_at')
+                if enriched_at is not None:
+                    if not isinstance(enriched_at, datetime.datetime):
+                        enriched_at = datetime.datetime.fromisoformat(str(enriched_at))
+                    file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
+                    if (file_mtime - enriched_at).total_seconds() < 3600:
+                        continue  # enrichment write triggered this — skip
+                _, relationships = self.llm.extract_entities(body_now, context_nodes=context_nodes)
                 relations = []
                 for rel in relationships:
                     src = normalize_node_name(str(rel.get('source', '')))
@@ -82,10 +93,12 @@ class WikiSyncHandler(FileSystemEventHandler):
                             'target': rel.get('target', ''),
                             'type': str(rel.get('type', 'RELATED_TO')).upper()
                         })
+                # Re-read frontmatter once more (LLM call takes time; file may have changed)
                 fm, body_now, _, _ = self._parse_markdown(filepath)
-                if fm is None or 'relations' in fm:
-                    continue  # file deleted or already written by another source
+                if fm is None:
+                    continue
                 fm['relations'] = relations
+                fm['enriched_at'] = datetime.datetime.now()
                 self._write_frontmatter(filepath, fm, body_now)
                 logger.info(f"Enrichment: '{norm_name}' → {len(relations)} relations")
             except Exception as e:
@@ -227,13 +240,21 @@ class WikiSyncHandler(FileSystemEventHandler):
         logger.info(f"Sync {'(startup) ' if is_startup_sync else ''}complete for '{norm_name}'. "
                     f"Links: {len(set(normalized_wikilinks))}, type={node_type}, scope={scope}")
 
-        # Enqueue for LLM enrichment if not yet analysed
+        # Enqueue for LLM enrichment if never enriched, or content changed since last enrichment
         if (not is_startup_sync
                 and self.llm is not None
-                and 'relations' not in frontmatter
                 and len(body) > 150
                 and node_type not in ('Observation',)):
-            self._enrich_queue.put((filepath, raw_name, body, list(set(normalized_wikilinks))))
+            enriched_at = frontmatter.get('enriched_at')
+            if enriched_at is not None:
+                if not isinstance(enriched_at, datetime.datetime):
+                    enriched_at = datetime.datetime.fromisoformat(str(enriched_at))
+                file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
+                needs_enrichment = (file_mtime - enriched_at).total_seconds() > 3600
+            else:
+                needs_enrichment = True
+            if needs_enrichment:
+                self._enrich_queue.put((filepath, raw_name, body, list(set(normalized_wikilinks))))
 
 
 def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):
