@@ -21,7 +21,7 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None, current_node: str = None) -> tuple[list[dict], list[dict]]:
         """Extracts entities and relationships from text. Returns tuple of (entities, relationships)."""
         pass
 
@@ -56,9 +56,8 @@ class MockLLM(LLMProvider):
     def generate_response(self, user_text: str, proactive_context: str = "", impact_context: str = "", semantic_context: str = "") -> str:
         return f"Signore, ho ricevuto il suo messaggio: '{user_text}'. {proactive_context} {impact_context} {semantic_context}".strip()
 
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None, current_node: str = None) -> tuple[list[dict], list[dict]]:
         logger.info(f"MOCK LLM EXTRACTION\nText: {text[:50]}...")
-        # Simple heuristic for testing: treat capitalized words as entities
         words = text.split()
         entities = []
         for w in words:
@@ -127,43 +126,46 @@ class OpenAILLM(LLMProvider):
             logger.error(f"LLM Response generation error: {e}")
             return "I'm sorry, I'm having some difficulty processing your request."
 
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None, current_node: str = None) -> tuple[list[dict], list[dict]]:
         context_nodes = context_nodes or []
         context_info = ""
         if context_nodes:
-            context_info = f"\nCurrently active nodes in the graph: {', '.join(context_nodes)}. If any extracted entity is a synonym or closely relates to these, prioritize using the existing node name."
+            context_info = f"\nKnown nodes already in the graph: {', '.join(context_nodes)}. Prefer these exact names when they match concepts in the text."
 
-        prompt = f"""
-        Extract key entities and topics from the following text.{context_info}
-        Structure your response as a JSON object with two keys:
-        1. "entities": a list of objects, each with 'name' (the label), 'type' (Topic, Project, Goal, or Task), and a brief 'description' (a short summary of what this entity is based on the text).
-        2. "relationships": a list of objects, each representing an explicit link between two extracted entities. Each must have 'source', 'target', and 'type' (a screaming snake case verb EXCLUSIVELY from this list: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
-        
-        - Topic: Any concept, person, tool, place, resource or abstract theme.
-        - Project: A large structured container for tasks and topics (e.g., 'Progetto Mnemosyne').
-        - Goal: Long-term objectives.
-        - Task: Specific actions or commitments. Tasks should also extract 'status' (todo/done) and 'deadline' if mentioned.
-        
-        CRITICAL INSTRUCTIONS:
-        1. You must ALWAYS provide a 'description' for every extracted object to avoid empty nodes.
-        2. If the user is ASKING about something, extract the SUBJECT of their question as a Topic.
-        3. Ignore conversational fillers or common verbs. Focus on nouns and proper names.
-        4. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If a new Task is created, strongly try to link it to the relevant Project or Topic using RELATED_TO or PART_OF.
-        
-        Text: {text}
-        """
+        if current_node:
+            prompt = f"""You are analyzing a knowledge node named "{current_node}".{context_info}
+
+The text below is the content of this node. Extract its direct relationships to other concepts.
+
+Return a JSON object with:
+1. "entities": empty list [] (we only need relations here)
+2. "relationships": list of objects, each with:
+   - "source": must always be exactly "{current_node}"
+   - "target": the related concept name
+   - "type": one of BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
+
+Extract only relationships where "{current_node}" is the subject. Be concrete: prefer specific targets over vague ones. Include 3-8 relationships if the text supports them.
+
+Text: {text}"""
+        else:
+            prompt = f"""Extract key entities and topics from the following text.{context_info}
+Return a JSON object with:
+1. "entities": list of objects with 'name', 'type' (Topic, Project, Goal, Task), and 'description'.
+2. "relationships": list of objects with 'source', 'target', and 'type' (BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
+
+Text: {text}"""
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "system", "content": "You are a specialized entity extractor. Return only JSON."},
+                messages=[{"role": "system", "content": "You are a specialized knowledge graph extractor. Return only JSON."},
                           {"role": "user", "content": prompt}],
                 response_format={"type": "json_object"}
             )
             content = response.choices[0].message.content
             logger.debug(f"LLM Response: {content}")
             data = json.loads(content)
-            
-            # Be flexible with response format
+
             if isinstance(data, list): return data, []
             entities = data.get("entities", [])
             relationships = data.get("relationships", [])
@@ -266,49 +268,53 @@ class OllamaLLM(LLMProvider):
             logger.error(f"Ollama chat error: {e}")
             return "I'm sorry, I'm having some difficulty processing your local request."
 
-    def extract_entities(self, text: str, context_nodes: list[str] = None) -> tuple[list[dict], list[dict]]:
+    def extract_entities(self, text: str, context_nodes: list[str] = None, current_node: str = None) -> tuple[list[dict], list[dict]]:
         context_nodes = context_nodes or []
         context_info = ""
         if context_nodes:
-            context_info = f"\nCurrently active nodes in the graph: {', '.join(context_nodes)}. If any extracted entity is a synonym or closely relates to these, prioritize using the existing node name."
+            context_info = f"\nKnown nodes already in the graph: {', '.join(context_nodes)}. Prefer these exact names when they match concepts in the text."
 
-        prompt = f"""
-        Extract key entities and topics from the following text.{context_info}
-        Structure your response as a JSON object with two keys:
-        1. "entities": a list of objects, each with 'name' (the label), 'type' (Topic, Project, Goal, or Task), and a brief 'description' (a short summary of what this entity is based on the text).
-        2. "relationships": a list of objects, each representing an explicit link between two extracted entities. Each must have 'source', 'target', and 'type' (a screaming snake case verb EXCLUSIVELY from this list: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
-        
-        - Topic: Any concept, person, tool, place, resource or abstract theme.
-        - Project: A large structured container for tasks and topics (e.g., 'Progetto Mnemosyne').
-        - Goal: Long-term objectives.
-        - Task: Specific actions or commitments. Tasks should also extract 'status' (todo/done) and 'deadline' if mentioned.
-        
-        CRITICAL INSTRUCTIONS:
-        1. You must ALWAYS provide a 'description' for every extracted object to avoid empty nodes.
-        2. If the user is ASKING about something, extract the SUBJECT of their question as a Topic.
-        3. Ignore conversational fillers or common verbs. Focus on nouns and proper names.
-        4. Return ONLY the JSON object. No preamble or postscript.
-        5. Extract clear, direct relationships. If A is a project of B, the relationship is A -> PART_OF -> B. If a new Task is created, strongly try to link it to the relevant Project or Topic using RELATED_TO or PART_OF.
-        
-        Text: {text}
-        """
-        data = {
+        if current_node:
+            prompt = f"""You are analyzing a knowledge node named "{current_node}".{context_info}
+
+The text below is the content of this node. Extract its direct relationships to other concepts.
+
+Return a JSON object with:
+1. "entities": empty list []
+2. "relationships": list of objects, each with:
+   - "source": must always be exactly "{current_node}"
+   - "target": the related concept name
+   - "type": one of BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
+
+Extract only relationships where "{current_node}" is the subject. Include 3-8 relationships if the text supports them. Return ONLY the JSON object.
+
+Text: {text}"""
+        else:
+            prompt = f"""Extract key entities and topics from the following text.{context_info}
+Return a JSON object with:
+1. "entities": list of objects with 'name', 'type' (Topic, Project, Goal, Task), and 'description'.
+2. "relationships": list of objects with 'source', 'target', and 'type' (BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A).
+Return ONLY the JSON object.
+
+Text: {text}"""
+
+        payload = {
             "model": self.model,
             "prompt": prompt,
             "format": "json",
             "stream": False
         }
         try:
-            res = self._call_ollama("generate", data)
+            res = self._call_ollama("generate", payload)
             content = res.get("response", "{}")
             logger.debug(f"Ollama Extraction Response: {content}")
             if not content or content.strip() == "":
                 logger.warning("Ollama returned empty extraction response")
                 return [], []
-            data = json.loads(content)
-            
-            entities = data.get("entities", [])
-            relationships = data.get("relationships", [])
+            parsed = json.loads(content)
+
+            entities = parsed.get("entities", [])
+            relationships = parsed.get("relationships", [])
             return entities, relationships
         except json.JSONDecodeError as e:
             logger.error(f"Ollama Extraction JSON Error: {e}. Content: {content[:100]}")

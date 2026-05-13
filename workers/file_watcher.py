@@ -84,7 +84,7 @@ class WikiSyncHandler(FileSystemEventHandler):
                     file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
                     if (file_mtime - enriched_at).total_seconds() < 3600:
                         continue  # enrichment write triggered this — skip
-                _, relationships = self.llm.extract_entities(body_now, context_nodes=context_nodes)
+                _, relationships = self.llm.extract_entities(body_now, context_nodes=context_nodes, current_node=raw_name)
                 llm_relations = []
                 for rel in relationships:
                     src = normalize_node_name(str(rel.get('source', '')))

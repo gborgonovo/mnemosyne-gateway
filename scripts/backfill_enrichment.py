@@ -117,7 +117,7 @@ def main():
         wikilinks = [normalize_node_name(m.split('|')[0].strip())
                      for m in re.findall(r'\[\[(.*?)\]\]', body) if m.strip()]
         try:
-            _, relationships = llm.extract_entities(body, context_nodes=list(set(wikilinks)))
+            _, relationships = llm.extract_entities(body, context_nodes=list(set(wikilinks)), current_node=raw_name)
             llm_relations = []
             for rel in relationships:
                 src = normalize_node_name(str(rel.get('source', '')))
