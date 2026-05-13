@@ -85,6 +85,8 @@ relations:
     type: PART_OF       # PART_OF | BELONGS_TO | REQUIRES | MANAGES | IS_A | RELATED_TO | LINKED_TO
   - target: "Another Node"
     type: MANAGES
+    # source: llm      # written by enrichment — safe to overwrite; omit or set "user" to protect
+enriched_at: YYYY-MM-DD HH:MM:SS   # set by enrichment worker; do not edit manually
 ---
 Content with [[WikiLinks]] creating LINKED_TO graph edges.
 ```

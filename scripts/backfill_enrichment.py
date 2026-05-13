@@ -118,18 +118,22 @@ def main():
                      for m in re.findall(r'\[\[(.*?)\]\]', body) if m.strip()]
         try:
             _, relationships = llm.extract_entities(body, context_nodes=list(set(wikilinks)))
-            relations = []
+            llm_relations = []
             for rel in relationships:
                 src = normalize_node_name(str(rel.get('source', '')))
                 if src == norm_name:
-                    relations.append({
+                    llm_relations.append({
                         'target': rel.get('target', ''),
-                        'type': str(rel.get('type', 'RELATED_TO')).upper()
+                        'type': str(rel.get('type', 'RELATED_TO')).upper(),
+                        'source': 'llm',
                     })
-            frontmatter['relations'] = relations
+            # Preserve user-authored relations (no source or source != llm)
+            existing = frontmatter.get('relations') or []
+            user_relations = [r for r in existing if r.get('source') != 'llm']
+            frontmatter['relations'] = user_relations + llm_relations
             frontmatter['enriched_at'] = datetime.datetime.now()
             write_frontmatter(filepath, frontmatter, body)
-            logger.info(f"✓ {os.path.relpath(filepath, BASE_DIR)} → {len(relations)} relations")
+            logger.info(f"✓ {os.path.relpath(filepath, BASE_DIR)} → {len(llm_relations)} llm + {len(user_relations)} user relations")
             enriched += 1
         except Exception as e:
             logger.error(f"✗ {fname}: {e}")

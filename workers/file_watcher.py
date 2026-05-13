@@ -85,22 +85,26 @@ class WikiSyncHandler(FileSystemEventHandler):
                     if (file_mtime - enriched_at).total_seconds() < 3600:
                         continue  # enrichment write triggered this — skip
                 _, relationships = self.llm.extract_entities(body_now, context_nodes=context_nodes)
-                relations = []
+                llm_relations = []
                 for rel in relationships:
                     src = normalize_node_name(str(rel.get('source', '')))
                     if src == norm_name:
-                        relations.append({
+                        llm_relations.append({
                             'target': rel.get('target', ''),
-                            'type': str(rel.get('type', 'RELATED_TO')).upper()
+                            'type': str(rel.get('type', 'RELATED_TO')).upper(),
+                            'source': 'llm',
                         })
                 # Re-read frontmatter once more (LLM call takes time; file may have changed)
                 fm, body_now, _, _ = self._parse_markdown(filepath)
                 if fm is None:
                     continue
-                fm['relations'] = relations
+                # Preserve user-authored relations (no source or source != llm)
+                existing = fm.get('relations') or []
+                user_relations = [r for r in existing if r.get('source') != 'llm']
+                fm['relations'] = user_relations + llm_relations
                 fm['enriched_at'] = datetime.datetime.now()
                 self._write_frontmatter(filepath, fm, body_now)
-                logger.info(f"Enrichment: '{norm_name}' → {len(relations)} relations")
+                logger.info(f"Enrichment: '{norm_name}' → {len(llm_relations)} llm + {len(user_relations)} user relations")
             except Exception as e:
                 logger.error(f"Enrichment error for '{raw_name}': {e}")
             finally:
