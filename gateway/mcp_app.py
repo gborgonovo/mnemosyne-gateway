@@ -401,6 +401,44 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
              return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    def update_node(name: str, content: str = "", updates: str = "") -> str:
+        """Update the body and/or frontmatter of an existing node (works for any type: Node, Goal, Task, Observation).
+
+        name: name of the existing node to update
+        content: new markdown body — replaces the existing body entirely (omit to leave unchanged)
+        updates: JSON object of frontmatter fields to merge into the existing frontmatter
+                 e.g. '{"status": "done", "deadline": "2026-06-01", "relations": [{"target": "X", "type": "PART_OF"}]}'
+                 omit to leave frontmatter unchanged
+        """
+        path = find_file_recursive(name)
+        if not path or not os.path.exists(path):
+            return json.dumps({"status": "error", "message": f"Node '{name}' not found."})
+        if not content and not updates:
+            return json.dumps({"status": "error", "message": "Provide at least one of 'content' or 'updates'."})
+        properties_dict = {}
+        if updates:
+            try:
+                properties_dict = json.loads(updates)
+            except json.JSONDecodeError:
+                return json.dumps({"error": "The 'updates' argument must be valid JSON."})
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                raw = f.read()
+            yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', raw, re.DOTALL)
+            if yaml_match:
+                frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
+                existing_body = yaml_match.group(2)
+            else:
+                frontmatter = {}
+                existing_body = raw
+            for k, v in properties_dict.items():
+                frontmatter[k] = v
+            write_markdown(name, frontmatter, content if content else existing_body)
+            return json.dumps({"status": "success", "message": f"Node '{name}' updated."})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
     def create_goal(name: str, description: str = "", deadline: str = "",
                     scopes: str = "Private,Public", folder: str = "", relations: str = "") -> str:
         """Creates a new high-level strategic Goal as a Markdown file.
