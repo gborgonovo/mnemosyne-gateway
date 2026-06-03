@@ -12,10 +12,11 @@ export PYTHONPATH=.
 
 echo "🧠 Starting Mnemosyne (Hybrid File-First) in background..."
 
-# Check if the DB has been initialized
-if [ ! -d "data/kuzu_db" ] || [ -z "$(ls -A data/kuzu_db)" ]; then
-    echo "⚠️  WARNING: The Kùzu database appears empty."
-    echo "Run 'python3 workers/file_watcher.py --once' to index the files in 'knowledge/'."
+# Check if the DB has been initialized. The gateway cold-boots and indexes
+# all files in knowledge/ on startup (see http_server.py), so an empty DB here
+# is only informational — it does not require a manual --once sync.
+if [ ! -d "data/kuzu_main" ] || [ -z "$(ls -A data/kuzu_main 2>/dev/null)" ]; then
+    echo "ℹ️  Kùzu database not yet initialized — the gateway will index knowledge/ on startup."
 fi
 
 # Start the Gateway (HTTP and MCP)
