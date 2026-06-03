@@ -19,11 +19,34 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     # Helper functions
     def find_file_recursive(name: str):
-        """Locate a markdown file by name (case-insensitive) anywhere within the knowledge directory."""
-        safe_name = re.sub(r'[^\w\s-]', '', name).strip().lower()
+        """Locate a markdown file within the knowledge directory.
+
+        Accepts either a bare node name (case-insensitive basename match,
+        searched recursively) or a relative path including subfolders,
+        e.g. 'Sistema/Alfred/System Prompt Alfred 3.0'. A trailing '.md'
+        extension is optional in both forms.
+        """
+        if not name:
+            return None
+
+        cleaned = name.strip().replace("\\", "/")
+        if cleaned.lower().endswith(".md"):
+            cleaned = cleaned[:-3]
+
+        base = os.path.abspath(knowledge_dir)
+
+        # 1) Relative path including subfolders → resolve directly under knowledge_dir.
+        if "/" in cleaned:
+            candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
+            # Guard against path traversal outside the knowledge directory.
+            if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
+                return candidate
+
+        # 2) Fall back to a recursive case-insensitive basename match.
+        target = os.path.basename(cleaned).lower()
         for root, dirs, files in os.walk(knowledge_dir):
             for f in files:
-                if f.lower() == f"{safe_name}.md":
+                if f.lower() == f"{target}.md":
                     return os.path.join(root, f)
         return None
 
@@ -358,10 +381,15 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     @mcp.tool()
     def inspect_file_raw(name: str) -> str:
-        """Read the direct markdown file from the file system."""
+        """Read the raw markdown file from the file system.
+
+        Accepts either a bare node name or a relative path including
+        subfolders, e.g. 'Sistema/Alfred/System Prompt Alfred 3.0'.
+        The '.md' extension is optional.
+        """
         content = read_markdown(name)
         if not content:
-            return json.dumps({"error": f"File '{name}.md' not found"}, indent=2)
+            return json.dumps({"error": f"File '{name}' not found"}, indent=2)
         return content
 
     @mcp.tool()
