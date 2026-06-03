@@ -7,6 +7,9 @@ import os
 import yaml
 from datetime import datetime
 
+from core.utils import strip_leading_frontmatter
+
+
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     # Security Configuration for Remote Access
     security = TransportSecuritySettings(
@@ -58,6 +61,9 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         return None
 
     def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
+        # Guard: never let a frontmatter block end up embedded in the body
+        # (e.g. when a caller passes raw file content as the new body).
+        body = strip_leading_frontmatter(body)
         # Try to find existing file to update it in place
         path = find_file_recursive(name)
         is_new = path is None
