@@ -141,13 +141,19 @@ class KuzuManager:
         query = "MATCH (n:Node {name: $name}) SET n.activation = $level"
         self.conn.execute(query, parameters={"name": name, "level": level})
 
-    def update_interaction(self, name: str, boost: float, update_timestamp: bool = True):
-        """Apply activation boost. If update_timestamp, record this as a direct interaction."""
+    def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0):
+        """Apply activation boost. If update_timestamp, record this as a direct interaction.
+
+        floor: lift the resulting activation to at least this value (used for the
+        recency floor on file edits); never lowers an already-hotter node.
+        """
         norm_name = normalize_node_name(name)
         node = self.get_node(norm_name)
         if not node:
             return
         new_activation = min((node.get("activation_level") or 0.0) + boost, 1.0)
+        if floor:
+            new_activation = max(new_activation, floor)
         now = time.time()
         if update_timestamp:
             query = """

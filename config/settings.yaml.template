@@ -23,9 +23,14 @@ attention:
     Task: 0.00045       # half-life ~64 days (~2 months)
     Observation: 0.004  # half-life ~7 days
 
-  # Activation boost per interaction type
+  # Recency floor: creating or editing a file lifts the node to at least this
+  # heat (never lowers a hotter node, never inflates past it). Keeps what you
+  # are actively working on visible in the briefing for ~6-7 days, then it
+  # decays unless reinforced. Stays below 1.0 so engagement boosts have headroom.
+  recency_activation: 0.75
+
+  # Additive activation boost per interaction type
   boost_weights:
-    file_edit: 0.6      # File modified on disk
     mcp_query: 0.2      # Node retrieved via MCP or API
     proximity: 0.05     # Indirect boost to semantic neighbors of an interacted node
 

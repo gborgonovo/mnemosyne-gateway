@@ -20,12 +20,13 @@ class AttentionModel:
             "Observation": 0.004,
         })
         self.boost_weights = config.get("boost_weights", {
-            "file_edit": 0.6,
             "mcp_query": 0.2,
             "proximity": 0.05,
         })
         self.dampening = config.get("propagation_dampening", {"forward": 1.0, "backward": 0.5})
         self.peak_threshold = config.get("peak_threshold", 0.7)
+        # Recency floor applied on file create/edit (see settings.yaml).
+        self.recency_activation = config.get("recency_activation", 0.75)
 
         dormant_cfg = config.get("dormant", {})
         self.dormant_resurface_boost = dormant_cfg.get("resurface_boost", 0.05)
@@ -51,10 +52,16 @@ class AttentionModel:
         Record a direct interaction with a node and propagate proximity boost to neighbors.
         interaction_type: 'file_edit' | 'mcp_query' | 'proximity'
         """
-        boost = self.boost_weights.get(interaction_type, self.boost_weights["mcp_query"])
         update_ts = interaction_type != "proximity"
 
-        self.kuzu_mgr.update_interaction(node_name, boost, update_timestamp=update_ts)
+        if interaction_type == "file_edit":
+            # Recency: a freshly created/edited file becomes warm (floor), but is
+            # never lowered if already hotter and never inflated to 1.0.
+            self.kuzu_mgr.update_interaction(node_name, 0.0, update_timestamp=update_ts,
+                                             floor=self.recency_activation)
+        else:
+            boost = self.boost_weights.get(interaction_type, self.boost_weights["mcp_query"])
+            self.kuzu_mgr.update_interaction(node_name, boost, update_timestamp=update_ts)
         logger.debug(f"Interaction '{interaction_type}' on '{node_name}' (boost={boost:.2f})")
 
         node = self.kuzu_mgr.get_node(node_name)
