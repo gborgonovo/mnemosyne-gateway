@@ -25,7 +25,7 @@ curl http://localhost:4001/status
 ### Individual components
 ```bash
 python3 gateway/http_server.py           # Gateway (HTTP :4001 + MCP Streamable HTTP) — includes file watcher + LLM enrichment
-python3 workers/file_watcher.py --once   # One-time cold-boot sync (outside gateway)
+python3 workers/file_watcher.py --once   # One-time cold-boot sync — only when gateway is STOPPED (gateway holds the KuzuDB lock; running this while gateway is up will fail)
 python3 workers/gardener.py              # Temporal decay worker
 python3 workers/briefing_worker.py       # Proactive insights
 ```
