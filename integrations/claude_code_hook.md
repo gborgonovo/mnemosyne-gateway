@@ -130,5 +130,5 @@ Tutti i nodi di memoria di Claude Code finiscono in `knowledge/Sistema/Claude_Co
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `MNEMOSYNE_URL` | `http://localhost:4001` | URL base della gateway |
+| `MNEMOSYNE_URL` | `https://your-mnemosyne-host` | URL base della gateway |
 | `MNEMOSYNE_API_KEY` | *(vuoto)* | API key per autenticazione |
