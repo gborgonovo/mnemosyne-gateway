@@ -33,6 +33,15 @@ class WikiSyncHandler(FileSystemEventHandler):
             t = threading.Thread(target=self._run_enrichment_worker, daemon=True)
             t.start()
 
+    def dispatch(self, event):
+        """Guard the observer thread: a failure on one file must not tear down the
+        whole watcher (which would silently stop indexing every later change)."""
+        try:
+            super().dispatch(event)
+        except Exception as e:
+            src = getattr(event, 'src_path', '?')
+            logger.error(f"Watcher dispatch error for '{src}': {e}", exc_info=True)
+
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith('.md'):
             logger.info(f"File modified: {event.src_path}")

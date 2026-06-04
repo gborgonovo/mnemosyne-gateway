@@ -58,7 +58,9 @@ class AttentionModel:
 
         if interaction_type == "file_edit":
             # Recency: a freshly created/edited file becomes warm (floor), but is
-            # never lowered if already hotter and never inflated to 1.0.
+            # never lowered if already hotter and never inflated to 1.0. The boost
+            # itself is 0 — the recency floor does the lifting.
+            boost = 0.0
             self.kuzu_mgr.update_interaction(node_name, 0.0, update_timestamp=update_ts,
                                              floor=self.recency_activation)
         else:

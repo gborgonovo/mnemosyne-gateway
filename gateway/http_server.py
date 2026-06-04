@@ -256,7 +256,9 @@ def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[s
 
 @app.delete("/nodes/{name}")
 def delete_node_api(name: str, scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    path = get_file_path(name)
+    # Resolve recursively so nodes created inside a project subfolder are found too
+    # (get_file_path only looks in the knowledge/ root).
+    path = _find_node_file(name) or get_file_path(name)
     if os.path.exists(path):
         os.remove(path)
         return {"status": "success", "message": f"Node '{name}' deleted"}

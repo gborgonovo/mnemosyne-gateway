@@ -109,7 +109,7 @@ class KuzuManager:
         query = """
         MATCH (n:Node {name: $name})
         RETURN n.name, n.display_name, n.activation, n.node_type, n.scope,
-               n.last_interaction, n.interaction_count
+               n.last_interaction, n.interaction_count, n.project
         """
         res = self.conn.execute(query, parameters={"name": norm_name})
         if res.has_next():
@@ -122,6 +122,7 @@ class KuzuManager:
                 "scope": row[4],
                 "last_interaction": row[5],
                 "interaction_count": row[6],
+                "project": row[7],
             }
         return None
 
