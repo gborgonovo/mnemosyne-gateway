@@ -202,6 +202,11 @@ class WikiSyncHandler(FileSystemEventHandler):
         scope = frontmatter.get('scope', 'Public')
         if isinstance(scope, list):
             scope = scope[0]
+        # Project namespace: inherited from the folder's _defaults.yaml (or set explicitly).
+        project = frontmatter.get('project', '')
+        if isinstance(project, list):
+            project = project[0] if project else ''
+        project = str(project) if project else ''
 
         # Sync ChromaDB (semantic layer)
         # During cold boot, skip re-embedding files whose mtime hasn't changed.
@@ -221,8 +226,8 @@ class WikiSyncHandler(FileSystemEventHandler):
 
         # Ensure node exists in KuzuDB with correct metadata
         title = frontmatter.get('title', raw_name.replace('_', ' ')).replace('_', ' ')
-        self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope, display_name=title)
-        self.kuzu_mgr.update_node_metadata(norm_name, node_type=node_type, scope=scope)
+        self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope, display_name=title, project=project)
+        self.kuzu_mgr.update_node_metadata(norm_name, node_type=node_type, scope=scope, project=project)
 
         # Rebuild edges from wikilinks
         for target_norm in set(normalized_wikilinks):

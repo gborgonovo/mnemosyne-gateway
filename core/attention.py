@@ -18,6 +18,7 @@ class AttentionModel:
             "Goal":        0.00026,
             "Task":        0.00045,
             "Observation": 0.004,
+            "Journal":     0.0007,
         })
         self.boost_weights = config.get("boost_weights", {
             "mcp_query": 0.2,
@@ -33,6 +34,7 @@ class AttentionModel:
         self.dormant_ceiling = dormant_cfg.get("ceiling", 0.25)
         self.dormant_days_node = dormant_cfg.get("days_node", 27)
         self.dormant_days_goal_task = dormant_cfg.get("days_goal_task", 30)
+        self.dormant_days_journal = dormant_cfg.get("days_journal", 45)
         self.dormant_min_interactions = dormant_cfg.get("min_interactions", 5)
 
     # ─── Decay ────────────────────────────────────────────────────────────────
@@ -104,6 +106,7 @@ class AttentionModel:
             min_interactions=self.dormant_min_interactions,
             days_node=self.dormant_days_node,
             days_goal_task=self.dormant_days_goal_task,
+            days_journal=self.dormant_days_journal,
         )
         for node in dormant_nodes:
             current = node["activation"]

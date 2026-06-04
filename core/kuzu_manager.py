@@ -35,6 +35,7 @@ class KuzuManager:
                     activation DOUBLE,
                     node_type STRING,
                     scope STRING,
+                    project STRING,
                     last_interaction DOUBLE,
                     last_decay_applied DOUBLE,
                     interaction_count INT64,
@@ -57,6 +58,7 @@ class KuzuManager:
         migrations = [
             ("node_type",          "STRING", f"'Node'"),
             ("scope",              "STRING", f"'Public'"),
+            ("project",            "STRING", f"''"),
             ("last_interaction",   "DOUBLE", str(now)),
             ("last_decay_applied", "DOUBLE", str(now)),
             ("interaction_count",  "INT64",  "0"),
@@ -78,7 +80,7 @@ class KuzuManager:
 
     def add_node(self, name: str, initial_activation: float = 0.5,
                  node_type: str = "Node", scope: str = "Public",
-                 display_name: str = None):
+                 display_name: str = None, project: str = ""):
         norm_name = normalize_node_name(name)
         display = display_name or name
         now = time.time()
@@ -89,6 +91,7 @@ class KuzuManager:
             a.activation = $act,
             a.node_type = $node_type,
             a.scope = $scope,
+            a.project = $project,
             a.last_interaction = $now,
             a.last_decay_applied = $now,
             a.interaction_count = $zero
@@ -98,7 +101,7 @@ class KuzuManager:
         self.conn.execute(query, parameters={
             "name": norm_name, "display": display,
             "act": initial_activation, "node_type": node_type,
-            "scope": scope, "now": now, "zero": 0,
+            "scope": scope, "project": project, "now": now, "zero": 0,
         })
 
     def get_node(self, name: str) -> dict:
@@ -122,7 +125,7 @@ class KuzuManager:
             }
         return None
 
-    def update_node_metadata(self, name: str, node_type: str = None, scope: str = None):
+    def update_node_metadata(self, name: str, node_type: str = None, scope: str = None, project: str = None):
         norm_name = normalize_node_name(name)
         updates, params = [], {"name": norm_name}
         if node_type:
@@ -131,6 +134,9 @@ class KuzuManager:
         if scope:
             updates.append("n.scope = $scope")
             params["scope"] = scope
+        if project:
+            updates.append("n.project = $project")
+            params["project"] = project
         if updates:
             self.conn.execute(
                 f"MATCH (n:Node {{name: $name}}) SET {', '.join(updates)}",
@@ -216,18 +222,20 @@ class KuzuManager:
 
     # ─── Queries ──────────────────────────────────────────────────────────────
 
-    def get_active_nodes(self, threshold: float = 0.5, scopes: list = None):
+    def get_active_nodes(self, threshold: float = 0.5, scopes: list = None, project: str = None):
         query = """
         MATCH (n:Node)
         WHERE n.activation > $threshold
-        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope
+        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.project
         """
         res = self.conn.execute(query, parameters={"threshold": threshold})
         active = []
         while res.has_next():
             row = res.get_next()
-            name, display_name, activation, node_type, scope = row[0], row[1], row[2], row[3], row[4]
+            name, display_name, activation, node_type, scope, node_project = row[0], row[1], row[2], row[3], row[4], row[5]
             if scopes and "*" not in scopes and scope not in scopes:
+                continue
+            if project and (node_project or "") != project:
                 continue
             active.append({
                 "name": name,
@@ -235,6 +243,7 @@ class KuzuManager:
                 "activation_level": activation,
                 "node_type": node_type,
                 "scope": scope,
+                "project": node_project,
             })
         return active
 
@@ -247,20 +256,22 @@ class KuzuManager:
         return nodes
 
     def get_dormant_nodes(self, scopes: list = None, min_interactions: int = 5,
-                          days_node: int = 27, days_goal_task: int = 30) -> list:
+                          days_node: int = 27, days_goal_task: int = 30,
+                          days_journal: int = 45, project: str = None) -> list:
         """
         Returns nodes that were historically active but have gone quiet.
         - Node type: activation-based (< 0.2) after days_node of inactivity
         - Goal/Task: time-based (> days_goal_task since last interaction)
+        - Journal: time-based (> days_journal since last interaction)
         """
         activation_threshold = 0.2
 
         query = """
         MATCH (n:Node)
         WHERE NOT n.name STARTS WITH 'Obs_'
-        AND n.node_type IN ['Goal', 'Task', 'Node']
+        AND n.node_type IN ['Goal', 'Task', 'Node', 'Journal']
         AND COALESCE(n.interaction_count, 0) >= $min_interactions
-        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.last_interaction, n.interaction_count
+        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.last_interaction, n.interaction_count, n.project
         """
         res = self.conn.execute(query, parameters={"min_interactions": min_interactions})
 
@@ -268,8 +279,8 @@ class KuzuManager:
         dormant = []
         while res.has_next():
             row = res.get_next()
-            name, display_name, activation, node_type, scope, last_interaction, count = (
-                row[0], row[1], row[2], row[3], row[4], row[5] or 0, row[6] or 0
+            name, display_name, activation, node_type, scope, last_interaction, count, node_project = (
+                row[0], row[1], row[2], row[3], row[4], row[5] or 0, row[6] or 0, row[7]
             )
             time_inactive = now - last_interaction
             days_inactive = time_inactive / 86400
@@ -279,10 +290,14 @@ class KuzuManager:
                 is_dormant = True
             elif node_type in ("Goal", "Task") and days_inactive > days_goal_task:
                 is_dormant = True
+            elif node_type == "Journal" and days_inactive > days_journal:
+                is_dormant = True
 
             if not is_dormant:
                 continue
             if scopes and "*" not in scopes and scope not in scopes:
+                continue
+            if project and (node_project or "") != project:
                 continue
 
             dormant.append({
@@ -291,6 +306,7 @@ class KuzuManager:
                 "activation": activation,
                 "node_type": node_type,
                 "scope": scope,
+                "project": node_project,
                 "days_inactive": int(days_inactive),
                 "interaction_count": count,
             })

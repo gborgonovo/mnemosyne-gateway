@@ -98,6 +98,20 @@ def get_file_path(name: str):
     safe_name = re.sub(r'[^\w\s-]', '', name).strip()
     return os.path.join(KNOWLEDGE_DIR, f"{safe_name}.md")
 
+def _resolve_write_path(name: str, folder: str = "") -> str:
+    """Resolve the markdown path for a NEW node, optionally inside a subfolder.
+
+    Shared by /nodes, /goals and /tasks. If `folder` is set it must already exist
+    under KNOWLEDGE_DIR (400 otherwise); without it the node lands in the root.
+    """
+    safe_name = re.sub(r'[^\w\s-]', '', name).strip()
+    if folder:
+        target_dir = os.path.join(KNOWLEDGE_DIR, folder)
+        if not os.path.isdir(target_dir):
+            raise HTTPException(status_code=400, detail=f"Folder '{folder}' does not exist.")
+        return os.path.join(target_dir, f"{safe_name}.md")
+    return os.path.join(KNOWLEDGE_DIR, f"{safe_name}.md")
+
 def read_markdown(name: str):
     path = get_file_path(name)
     if os.path.exists(path):
@@ -130,13 +144,15 @@ class Goal(BaseModel):
     description: str = ""
     deadline: str = ""
     scopes: str = "Private,Public"
+    folder: str = ""
 
 class Task(BaseModel):
     name: str
-    goal_name: str
+    goal_name: Optional[str] = None
     description: str = ""
     deadline: str = ""
     scopes: str = "Private,Public"
+    folder: str = ""
 
 class NodeUpsert(BaseModel):
     name: str
@@ -146,8 +162,8 @@ class NodeUpsert(BaseModel):
     folder: str = ""
     relations: str = ""
 
-def write_markdown(name: str, frontmatter: dict, body: str):
-    path = get_file_path(name)
+def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
+    path = _resolve_write_path(name, folder)
     with open(path, 'w', encoding='utf-8') as f:
         f.write("---\n")
         yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
@@ -256,13 +272,11 @@ def get_graph_stats():
         }
     }
 
-@app.get("/briefing")
-def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
-    scope_filter = actual_scopes if "*" not in actual_scopes else None
+def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] = None) -> dict:
+    """Build a briefing (hot topics + dormant nodes), optionally scoped to a project."""
     threshold = config.get("attention", {}).get("activation_threshold", 0.5)
 
-    active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter)
+    active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter, project=project)
     hot_topics = [n for n in active_nodes if not n['name'].startswith("obs_")]
 
     dormant_cfg = config.get("attention", {}).get("dormant", {})
@@ -271,6 +285,8 @@ def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = 
         min_interactions=dormant_cfg.get("min_interactions", 5),
         days_node=dormant_cfg.get("days_node", 27),
         days_goal_task=dormant_cfg.get("days_goal_task", 30),
+        days_journal=dormant_cfg.get("days_journal", 45),
+        project=project,
     )
 
     return {
@@ -281,6 +297,12 @@ def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = 
         ],
         "timestamp": datetime.now().isoformat(),
     }
+
+@app.get("/briefing")
+def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    return _compute_briefing(scope_filter)
 
 @app.get("/briefing/longitudinal")
 def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
@@ -293,11 +315,13 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         min_interactions=dormant_cfg.get("min_interactions", 5),
         days_node=dormant_cfg.get("days_node", 27),
         days_goal_task=dormant_cfg.get("days_goal_task", 30),
+        days_journal=dormant_cfg.get("days_journal", 45),
     )
 
-    goals  = [n for n in dormant_nodes if n['node_type'] == 'Goal']
-    tasks  = [n for n in dormant_nodes if n['node_type'] == 'Task']
-    topics = [n for n in dormant_nodes if n['node_type'] == 'Node']
+    goals    = [n for n in dormant_nodes if n['node_type'] == 'Goal']
+    tasks    = [n for n in dormant_nodes if n['node_type'] == 'Task']
+    topics   = [n for n in dormant_nodes if n['node_type'] == 'Node']
+    journals = [n for n in dormant_nodes if n['node_type'] == 'Journal']
 
     forgotten_hubs = kuzu_mgr.get_dormant_by_connectivity(
         min_edges=dormant_cfg.get("hub_min_edges", 2),
@@ -314,13 +338,20 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         "dormant_goals":    fmt(goals),
         "dormant_tasks":    fmt(tasks),
         "dormant_topics":   fmt(topics),
+        "dormant_journals": fmt(journals),
         "forgotten_hubs":   [{"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive'], "edge_count": n['edge_count']} for n in forgotten_hubs],
         "summary": (
             f"{len(dormant_nodes)} elementi dormienti: "
-            f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic. "
+            f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic, {len(journals)} journal. "
             f"{len(forgotten_hubs)} hub dimenticati."
         ),
     }
+
+@app.get("/briefing/{project}")
+def get_project_briefing(project: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    return _compute_briefing(scope_filter, project=project)
 @app.post("/observations")
 def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
@@ -338,7 +369,7 @@ def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_
     }
     if goal.deadline: frontmatter["deadline"] = goal.deadline
     body = f"# {goal.name}\n\n{goal.description}"
-    write_markdown(goal.name, frontmatter, body)
+    write_markdown(goal.name, frontmatter, body, folder=goal.folder)
     return {"status": "success", "name": goal.name}
 
 @app.post("/tasks")
@@ -350,8 +381,11 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
          "scope": scope_list[0]
     }
     if task.deadline: frontmatter["deadline"] = task.deadline
-    body = f"# {task.name}\n\n**Linked Goal:** [[{task.goal_name}]]\n\n{task.description}"
-    write_markdown(task.name, frontmatter, body)
+    body = f"# {task.name}\n\n"
+    if task.goal_name:
+        body += f"**Linked Goal:** [[{task.goal_name}]]\n\n"
+    body += task.description
+    write_markdown(task.name, frontmatter, body, folder=task.folder)
     return {"status": "success", "name": task.name}
 
 @app.post("/nodes")
@@ -374,16 +408,10 @@ def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verif
     if not existing_path:
         frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
 
-    if node.folder and not existing_path:
-        target_dir = os.path.join(KNOWLEDGE_DIR, node.folder)
-        if not os.path.isdir(target_dir):
-            raise HTTPException(status_code=400, detail=f"Folder '{node.folder}' does not exist.")
-        safe_name = re.sub(r'[^\w\s-]', '', node.name).strip()
-        path = os.path.join(target_dir, f"{safe_name}.md")
-    elif existing_path:
+    if existing_path:
         path = existing_path
     else:
-        path = get_file_path(node.name)
+        path = _resolve_write_path(node.name, node.folder)
 
     with open(path, 'w', encoding='utf-8') as f:
         f.write("---\n")

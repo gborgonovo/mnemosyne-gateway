@@ -22,6 +22,7 @@ attention:
     Goal: 0.00026       # half-life ~112 days (~4 months)
     Task: 0.00045       # half-life ~64 days (~2 months)
     Observation: 0.004  # half-life ~7 days
+    Journal: 0.0007     # half-life ~40 days (diary entries: persistent but not evergreen)
 
   # Recency floor: creating or editing a file lifts the node to at least this
   # heat (never lowers a hotter node, never inflates past it). Keeps what you
@@ -40,6 +41,7 @@ attention:
     ceiling: 0.25           # Max activation a dormant node can reach via resurfacing
     days_node: 27           # Days of inactivity before a Node is considered dormant
     days_goal_task: 30      # Days of inactivity before a Goal/Task is considered dormant
+    days_journal: 45        # Days of inactivity before a Journal entry is considered dormant
     min_interactions: 5     # Min past interactions required to be eligible for dormant detection
 
 initiative:
