@@ -27,8 +27,11 @@ Every node in the graph has an **activation heat** (0.0–1.0). Heat rises when 
 |---|---|
 | Observation | ~7 days |
 | Topic (Node) | ~11 days |
+| Journal | ~40 days |
 | Task | ~2 months |
 | Goal | ~4 months |
+
+`Journal` is for diary-style entries: more durable than an Observation, but not evergreen. The decay only cools its briefing relevance — the file stays readable forever.
 
 When an AI agent queries your knowledge, it retrieves not just semantically similar content, but the concepts that are *hot right now* — the ones you've been working on recently.
 
@@ -115,7 +118,11 @@ Available MCP tools:
 | Projects | `list_projects`, `create_project`, `update_project` |
 | Maintenance | `trigger_gardening_cycle`, `inspect_file_raw`, `debug_filesystem` |
 
-Create tools accept a `folder` parameter (places the file in a `knowledge/<folder>/` subdirectory) and a `relations` parameter (`"Target:PART_OF,Other:MANAGES"`) that writes typed relationships to the frontmatter and persists them as graph edges.
+Create tools accept a `folder` parameter (places the file in a `knowledge/<folder>/` subdirectory) and a `relations` parameter (`"Target:PART_OF,Other:MANAGES"`) that writes typed relationships to the frontmatter and persists them as graph edges. `create_task`'s `goal_name` is optional — a task can stand on its own without being linked to a goal.
+
+### Project namespace
+
+A subfolder of `knowledge/` is treated as a **project**. Drop a `_defaults.yaml` in it (e.g. `project: Ganaghello`, `scope: Private`) and every note in that folder inherits the `project` field, which becomes a queryable property in the graph. `GET /briefing/{project}` then returns a briefing (hot + dormant nodes) scoped to that project alone.
 
 ---
 
