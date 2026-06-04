@@ -138,6 +138,14 @@ class Task(BaseModel):
     deadline: str = ""
     scopes: str = "Private,Public"
 
+class NodeUpsert(BaseModel):
+    name: str
+    content: str
+    node_type: str = "Node"
+    scope: str = "Private"
+    folder: str = ""
+    relations: str = ""
+
 def write_markdown(name: str, frontmatter: dict, body: str):
     path = get_file_path(name)
     with open(path, 'w', encoding='utf-8') as f:
@@ -145,6 +153,37 @@ def write_markdown(name: str, frontmatter: dict, body: str):
         yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
         f.write("---\n\n")
         f.write(body)
+
+def _find_node_file(name: str) -> Optional[str]:
+    """Search for a node's markdown file recursively under KNOWLEDGE_DIR."""
+    cleaned = name.strip()
+    if cleaned.lower().endswith(".md"):
+        cleaned = cleaned[:-3]
+    base = os.path.abspath(KNOWLEDGE_DIR)
+    if "/" in cleaned:
+        candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
+        if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
+            return candidate
+    target = os.path.basename(cleaned).lower()
+    for root, dirs, files in os.walk(KNOWLEDGE_DIR):
+        for f in files:
+            if f.lower() == f"{target}.md":
+                return os.path.join(root, f)
+    return None
+
+def _parse_relations_str(relations_str: str) -> list:
+    """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter."""
+    result = []
+    for item in relations_str.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" in item:
+            target, rel_type = item.rsplit(":", 1)
+            result.append({"target": target.strip(), "type": rel_type.strip().upper()})
+        else:
+            result.append({"target": item, "type": "RELATED_TO"})
+    return result
 
 @app.get("/")
 @app.get("/status")
@@ -314,6 +353,45 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
     body = f"# {task.name}\n\n**Linked Goal:** [[{task.goal_name}]]\n\n{task.description}"
     write_markdown(task.name, frontmatter, body)
     return {"status": "success", "name": task.name}
+
+@app.post("/nodes")
+def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    existing_path = _find_node_file(node.name)
+    action = "updated" if existing_path else "created"
+
+    frontmatter: Dict[str, Any] = {}
+    if existing_path:
+        with open(existing_path, 'r', encoding='utf-8') as f:
+            raw = f.read()
+        m = re.match(r'^---\n(.*?)\n---\n', raw, re.DOTALL)
+        if m:
+            frontmatter = yaml.safe_load(m.group(1)) or {}
+
+    frontmatter['type'] = node.node_type
+    frontmatter['scope'] = node.scope
+    if node.relations:
+        frontmatter['relations'] = _parse_relations_str(node.relations)
+    if not existing_path:
+        frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
+
+    if node.folder and not existing_path:
+        target_dir = os.path.join(KNOWLEDGE_DIR, node.folder)
+        if not os.path.isdir(target_dir):
+            raise HTTPException(status_code=400, detail=f"Folder '{node.folder}' does not exist.")
+        safe_name = re.sub(r'[^\w\s-]', '', node.name).strip()
+        path = os.path.join(target_dir, f"{safe_name}.md")
+    elif existing_path:
+        path = existing_path
+    else:
+        path = get_file_path(node.name)
+
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write("---\n")
+        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
+        f.write("---\n\n")
+        f.write(node.content)
+
+    return {"status": "success", "action": action, "name": node.name}
 
 # Mount MCP
 app.mount("/mcp", mcp_app)
