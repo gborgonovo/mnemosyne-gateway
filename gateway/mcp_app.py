@@ -79,6 +79,15 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
         if is_new and 'created_at' not in frontmatter:
             frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
+        elif not is_new:
+            # Upsert: preserve provenance fields the caller didn't supply so a
+            # re-write doesn't wipe created_at or the enrichment timestamp.
+            with open(path, 'r', encoding='utf-8') as f:
+                _m = re.match(r'^---\n(.*?)\n---\n', f.read(), re.DOTALL)
+            existing_fm = (yaml.safe_load(_m.group(1)) if _m else None) or {}
+            for _k in ('created_at', 'enriched_at'):
+                if _k in existing_fm and _k not in frontmatter:
+                    frontmatter[_k] = existing_fm[_k]
 
         with open(path, 'w', encoding='utf-8') as f:
             f.write("---\n")
@@ -86,8 +95,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             f.write("---\n\n")
             f.write(body)
 
-    def _parse_relations(relations_str: str) -> list:
-        """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter."""
+    def _parse_relations(relations_str: str, source: str = None) -> list:
+        """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
+
+        If `source` is given (e.g. "user"), it is tagged on each relation so the
+        LLM enrichment worker treats them as authoritative and never overwrites them.
+        """
         result = []
         for item in relations_str.split(","):
             item = item.strip()
@@ -95,9 +108,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 continue
             if ":" in item:
                 target, rel_type = item.rsplit(":", 1)
-                result.append({"target": target.strip(), "type": rel_type.strip().upper()})
+                rel = {"target": target.strip(), "type": rel_type.strip().upper()}
             else:
-                result.append({"target": item, "type": "RELATED_TO"})
+                rel = {"target": item, "type": "RELATED_TO"}
+            if source:
+                rel["source"] = source
+            result.append(rel)
         return result
 
     def _normalize_folder_name(name: str) -> str:
@@ -310,7 +326,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         """
         frontmatter = {"type": node_type, "scope": scope}
         if relations:
-            frontmatter["relations"] = _parse_relations(relations)
+            frontmatter["relations"] = _parse_relations(relations, source="user")
         wikilinks = ""
         if links:
             targets = [l.strip() for l in links.split(",") if l.strip()]
@@ -484,7 +500,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Goal", "status": "active", "scope": scope_list[0]}
         if deadline: frontmatter["deadline"] = deadline
-        if relations: frontmatter["relations"] = _parse_relations(relations)
+        if relations: frontmatter["relations"] = _parse_relations(relations, source="user")
         body = f"# {name}\n\n{description}"
         try:
             write_markdown(name, frontmatter, body, folder=folder)
@@ -504,8 +520,14 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
         frontmatter = {"type": "Task", "status": "todo", "scope": scope_list[0]}
         if deadline: frontmatter["deadline"] = deadline
-        if relations: frontmatter["relations"] = _parse_relations(relations)
-        body = f"# {name}\n\n**Linked Goal:** [[{goal_name}]]\n\n{description}"
+        # goal_name becomes a typed CONTRIBUTES_TO edge rather than an implicit
+        # LINKED_TO wikilink in the body (R2).
+        rels = _parse_relations(relations, source="user") if relations else []
+        if goal_name:
+            rels.append({"target": goal_name, "type": "CONTRIBUTES_TO", "source": "user"})
+        if rels:
+            frontmatter["relations"] = rels
+        body = f"# {name}\n\n{description}"
         try:
             write_markdown(name, frontmatter, body, folder=folder)
             return json.dumps({"status": "success", "message": f"Task '{name}' created and linked to '{goal_name}'."})

@@ -23,7 +23,7 @@ from core.attention import AttentionModel
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler
 from watchdog.observers import Observer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from gateway.mcp_app import create_mcp_server
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -140,27 +140,62 @@ class Observation(BaseModel):
     scope: str = "Public"
 
 class Goal(BaseModel):
-    name: str
+    name: str = Field(..., description="Stable identifier chosen by the client; reused for upserts.")
     description: str = ""
-    deadline: str = ""
-    scopes: str = "Private,Public"
-    folder: str = ""
+    deadline: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. Empty/omitted means no deadline.")
+    scope: Optional[str] = Field(None, description="Preferred: a single scope (e.g. 'Private'). Takes precedence over 'scopes'.")
+    scopes: str = Field("Private,Public", description="Legacy/compat: comma-separated; only the first scope is used.")
+    folder: str = Field("", description="Existing project subfolder under knowledge/.")
+    relations: str = Field("", description="Typed edges as 'Target:TYPE,Other:TYPE' (default type RELATED_TO).")
 
 class Task(BaseModel):
-    name: str
-    goal_name: Optional[str] = None
+    name: str = Field(..., description="Stable identifier chosen by the client; reused for upserts.")
+    goal_name: Optional[str] = Field(None, description="If set, recorded as a CONTRIBUTES_TO relation to that goal.")
     description: str = ""
-    deadline: str = ""
-    scopes: str = "Private,Public"
-    folder: str = ""
+    deadline: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. Empty/omitted means no deadline.")
+    scope: Optional[str] = Field(None, description="Preferred: a single scope (e.g. 'Private'). Takes precedence over 'scopes'.")
+    scopes: str = Field("Private,Public", description="Legacy/compat: comma-separated; only the first scope is used.")
+    folder: str = Field("", description="Existing project subfolder under knowledge/.")
+    relations: str = Field("", description="Typed edges as 'Target:TYPE,Other:TYPE' (default type RELATED_TO).")
 
 class NodeUpsert(BaseModel):
-    name: str
+    name: str = Field(..., description="Stable identifier chosen by the client; reused for upserts.")
     content: str
-    node_type: str = "Node"
+    node_type: str = Field("Node", description="e.g. Node, Reference, Goal, Task, Journal (Journal decays over ~40 days).")
     scope: str = "Private"
-    folder: str = ""
-    relations: str = ""
+    folder: str = Field("", description="Existing project subfolder under knowledge/.")
+    relations: str = Field("", description="Typed edges as 'Target:TYPE,Other:TYPE' (default type RELATED_TO).")
+
+class NodeWriteResponse(BaseModel):
+    """Canonical response of POST /goals, /tasks, /nodes (R4)."""
+    status: str = "success"
+    action: str = Field(..., description="'created' or 'updated'.")
+    name: str = Field(..., description="Canonical slug actually stored; the client should save and reuse this for upserts.")
+    type: str
+    scope: str
+
+class DormantItem(BaseModel):
+    name: str
+    type: str
+    days_inactive: int
+
+class BriefingResponse(BaseModel):
+    """Response of GET /briefing and GET /briefing/{project} (C2)."""
+    hot_topics: List[str] = Field(..., description="Display names of nodes above the activation threshold.")
+    dormant: List[DormantItem] = Field(..., description="Cooled-down nodes, with type and days of inactivity.")
+    timestamp: str
+
+def _resolve_scope(scope: Optional[str], scopes: str) -> str:
+    """Unify the scope vs scopes inconsistency (R6). Prefer the explicit singular
+    `scope`; otherwise fall back to the first of the legacy comma-separated
+    `scopes`; default Private (never silently Public)."""
+    if scope:
+        return scope.strip()
+    if scopes:
+        first = [s.strip() for s in scopes.split(",") if s.strip()]
+        if first:
+            return first[0]
+    return "Private"
 
 def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
     path = _resolve_write_path(name, folder)
@@ -187,8 +222,12 @@ def _find_node_file(name: str) -> Optional[str]:
                 return os.path.join(root, f)
     return None
 
-def _parse_relations_str(relations_str: str) -> list:
-    """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter."""
+def _parse_relations_str(relations_str: str, source: Optional[str] = None) -> list:
+    """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
+
+    If `source` is given (e.g. "user"), it is tagged on each relation so the LLM
+    enrichment worker treats them as authoritative and never overwrites them.
+    """
     result = []
     for item in relations_str.split(","):
         item = item.strip()
@@ -196,10 +235,49 @@ def _parse_relations_str(relations_str: str) -> list:
             continue
         if ":" in item:
             target, rel_type = item.rsplit(":", 1)
-            result.append({"target": target.strip(), "type": rel_type.strip().upper()})
+            rel = {"target": target.strip(), "type": rel_type.strip().upper()}
         else:
-            result.append({"target": item, "type": "RELATED_TO"})
+            rel = {"target": item, "type": "RELATED_TO"}
+        if source:
+            rel["source"] = source
+        result.append(rel)
     return result
+
+def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
+                      folder: str = "") -> tuple:
+    """Find-or-create a node markdown file, merging frontmatter (upsert by name).
+
+    Locates an existing file anywhere under KNOWLEDGE_DIR (so a second write with
+    the same name updates in place instead of duplicating), preserves fields like
+    created_at/enriched_at, then applies frontmatter_updates on top. Keys absent
+    from frontmatter_updates (e.g. relations when the caller passes none) are left
+    untouched. Returns (canonical_name, action) where canonical_name is the slug
+    actually written — the value the client should store and reuse for upserts.
+    """
+    existing_path = _find_node_file(name)
+    action = "updated" if existing_path else "created"
+
+    frontmatter: Dict[str, Any] = {}
+    if existing_path:
+        with open(existing_path, 'r', encoding='utf-8') as f:
+            raw = f.read()
+        m = re.match(r'^---\n(.*?)\n---\n', raw, re.DOTALL)
+        if m:
+            frontmatter = yaml.safe_load(m.group(1)) or {}
+
+    frontmatter.update(frontmatter_updates)
+    if not existing_path:
+        frontmatter.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
+
+    path = existing_path or _resolve_write_path(name, folder)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write("---\n")
+        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
+        f.write("---\n\n")
+        f.write(body)
+
+    canonical = os.path.splitext(os.path.basename(path))[0]
+    return canonical, action
 
 @app.get("/")
 @app.get("/status")
@@ -256,6 +334,10 @@ def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[s
 
 @app.delete("/nodes/{name}")
 def delete_node_api(name: str, scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Delete a node of ANY type (Node/Goal/Task/Journal/...) by name, in any
+    project subfolder (C4). Deletes the markdown file; the watcher then removes
+    it from the graph and vectors. The `scopes` query param is accepted for
+    compatibility but not used to gate the deletion."""
     # Resolve recursively so nodes created inside a project subfolder are found too
     # (get_file_path only looks in the knowledge/ root).
     path = _find_node_file(name) or get_file_path(name)
@@ -300,7 +382,7 @@ def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] 
         "timestamp": datetime.now().isoformat(),
     }
 
-@app.get("/briefing")
+@app.get("/briefing", response_model=BriefingResponse)
 def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
@@ -349,8 +431,9 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         ),
     }
 
-@app.get("/briefing/{project}")
+@app.get("/briefing/{project}", response_model=BriefingResponse)
 def get_project_briefing(project: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Briefing filtered to a single project/folder: hot_topics + dormant nodes of that project."""
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
     return _compute_briefing(scope_filter, project=project)
@@ -361,67 +444,52 @@ def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depen
     write_markdown(obs_id, frontmatter, obs.content)
     return {"status": "success", "id": obs_id}
 
-@app.post("/goals")
+@app.post("/goals", response_model=NodeWriteResponse)
 def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    scope_list = [s.strip() for s in goal.scopes.split(",")] if goal.scopes else ["Private"]
-    frontmatter = {
+    scope = _resolve_scope(goal.scope, goal.scopes)
+    frontmatter: Dict[str, Any] = {
          "type": "Goal",
          "status": "active",
-         "scope": scope_list[0]
+         "scope": scope,
     }
     if goal.deadline: frontmatter["deadline"] = goal.deadline
+    if goal.relations:
+        frontmatter["relations"] = _parse_relations_str(goal.relations, source="user")
     body = f"# {goal.name}\n\n{goal.description}"
-    write_markdown(goal.name, frontmatter, body, folder=goal.folder)
-    return {"status": "success", "name": goal.name}
+    canonical, action = _upsert_node_file(goal.name, body, frontmatter, folder=goal.folder)
+    return {"status": "success", "action": action, "name": canonical, "type": "Goal", "scope": scope}
 
-@app.post("/tasks")
+@app.post("/tasks", response_model=NodeWriteResponse)
 def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    scope_list = [s.strip() for s in task.scopes.split(",")] if task.scopes else ["Private"]
-    frontmatter = {
+    scope = _resolve_scope(task.scope, task.scopes)
+    frontmatter: Dict[str, Any] = {
          "type": "Task",
          "status": "todo",
-         "scope": scope_list[0]
+         "scope": scope,
     }
     if task.deadline: frontmatter["deadline"] = task.deadline
-    body = f"# {task.name}\n\n"
+    # Typed relations from the client; goal_name becomes a CONTRIBUTES_TO edge
+    # rather than an implicit LINKED_TO wikilink in the body (R2).
+    relations = _parse_relations_str(task.relations, source="user") if task.relations else []
     if task.goal_name:
-        body += f"**Linked Goal:** [[{task.goal_name}]]\n\n"
-    body += task.description
-    write_markdown(task.name, frontmatter, body, folder=task.folder)
-    return {"status": "success", "name": task.name}
+        relations.append({"target": task.goal_name, "type": "CONTRIBUTES_TO", "source": "user"})
+    if relations:
+        frontmatter["relations"] = relations
+    body = f"# {task.name}\n\n{task.description}"
+    canonical, action = _upsert_node_file(task.name, body, frontmatter, folder=task.folder)
+    return {"status": "success", "action": action, "name": canonical, "type": "Task", "scope": scope}
 
-@app.post("/nodes")
+@app.post("/nodes", response_model=NodeWriteResponse)
 def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    existing_path = _find_node_file(node.name)
-    action = "updated" if existing_path else "created"
-
-    frontmatter: Dict[str, Any] = {}
-    if existing_path:
-        with open(existing_path, 'r', encoding='utf-8') as f:
-            raw = f.read()
-        m = re.match(r'^---\n(.*?)\n---\n', raw, re.DOTALL)
-        if m:
-            frontmatter = yaml.safe_load(m.group(1)) or {}
-
-    frontmatter['type'] = node.node_type
-    frontmatter['scope'] = node.scope
+    frontmatter: Dict[str, Any] = {
+        "type": node.node_type,
+        "scope": node.scope,
+    }
     if node.relations:
-        frontmatter['relations'] = _parse_relations_str(node.relations)
-    if not existing_path:
-        frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
-
-    if existing_path:
-        path = existing_path
-    else:
-        path = _resolve_write_path(node.name, node.folder)
-
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write("---\n")
-        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-        f.write("---\n\n")
-        f.write(node.content)
-
-    return {"status": "success", "action": action, "name": node.name}
+        frontmatter["relations"] = _parse_relations_str(node.relations, source="user")
+    canonical, action = _upsert_node_file(node.name, node.content, frontmatter, folder=node.folder)
+    return {"status": "success", "action": action, "name": canonical,
+            "type": node.node_type, "scope": node.scope}
 
 # Mount MCP
 app.mount("/mcp", mcp_app)

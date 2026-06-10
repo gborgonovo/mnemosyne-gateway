@@ -19,6 +19,11 @@ from core.utils import normalize_node_name, strip_leading_frontmatter
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - FileWatcher - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Edge types NOT derived from markdown files: computed by other workers (the
+# Gardener's semantic similarity pass) and therefore exempt from the file-sync
+# edge reconciliation, which would otherwise wipe them on every save.
+EPHEMERAL_EDGE_TYPES = {"SEMANTICALLY_RELATED"}
+
 class WikiSyncHandler(FileSystemEventHandler):
     def __init__(self, kuzu_mgr: KuzuManager, vector_store: VectorStore,
                  knowledge_dir: str, am=None, llm=None):
@@ -238,18 +243,41 @@ class WikiSyncHandler(FileSystemEventHandler):
         self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope, display_name=title, project=project)
         self.kuzu_mgr.update_node_metadata(norm_name, node_type=node_type, scope=scope, project=project)
 
-        # Rebuild edges from wikilinks
-        for target_norm in set(normalized_wikilinks):
-            self.kuzu_mgr.add_edge(raw_name, target_norm, "LINKED_TO", weight=0.8)
+        # Collect every edge target so stubs for not-yet-existing targets inherit
+        # the source node's scope/project instead of defaulting to Public (C1):
+        # a Private node must not spawn a Public stub. When the target later gets
+        # its own file, the real sync overwrites these via update_node_metadata.
+        def _ensure_stub(target_name: str):
+            if not self.kuzu_mgr.get_node(target_name):
+                self.kuzu_mgr.add_node(target_name, node_type="Node", scope=scope, project=project)
 
-        # Rebuild typed edges from frontmatter relations:
+        # Build the desired set of file-derived outgoing edges (target, type),
+        # then add them. Wikilinks → LINKED_TO; frontmatter relations → typed.
+        desired = {}  # (norm_target, type) -> weight
+        for target_norm in set(normalized_wikilinks):
+            desired[(normalize_node_name(target_norm), "LINKED_TO")] = 0.8
         relations = frontmatter.get('relations', [])
         if isinstance(relations, list):
             for rel in relations:
                 target = str(rel.get('target', '')).strip()
                 rel_type = str(rel.get('type', 'RELATED_TO')).upper()
                 if target:
-                    self.kuzu_mgr.add_edge(raw_name, target, rel_type, weight=1.0)
+                    desired[(normalize_node_name(target), rel_type)] = 1.0
+
+        # Reconcile: drop file-derived edges that are no longer declared, so a
+        # removed wikilink/relation actually disappears from the graph. Edges
+        # not managed by files (SEMANTICALLY_RELATED, computed by the Gardener)
+        # are preserved.
+        for edge in self.kuzu_mgr.get_outgoing_edges(raw_name):
+            etype = edge['type']
+            if etype in EPHEMERAL_EDGE_TYPES:
+                continue
+            if (edge['target'], etype) not in desired:
+                self.kuzu_mgr.delete_edge(raw_name, edge['target'], etype)
+
+        for (target_norm, rel_type), weight in desired.items():
+            _ensure_stub(target_norm)
+            self.kuzu_mgr.add_edge(raw_name, target_norm, rel_type, weight=weight)
 
         # Apply file_edit boost only for real changes, not cold boot
         if not is_startup_sync:

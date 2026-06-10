@@ -205,6 +205,38 @@ class KuzuManager:
             "weight": weight,
         })
 
+    def get_outgoing_edges(self, name: str) -> list:
+        """Return this node's outgoing RELATES edges as [{target, type}, ...].
+
+        Directed (source → target), unlike get_neighbors. Used by the file
+        watcher to reconcile file-derived edges against the current frontmatter.
+        """
+        norm_name = normalize_node_name(name)
+        query = """
+        MATCH (n:Node {name: $name})-[r:RELATES]->(m:Node)
+        RETURN m.name, r.type
+        """
+        res = self.conn.execute(query, parameters={"name": norm_name})
+        edges = []
+        while res.has_next():
+            row = res.get_next()
+            edges.append({"target": row[0], "type": row[1]})
+        return edges
+
+    def delete_edge(self, source_name: str, target_name: str, relation_type: str):
+        """Remove a single directed RELATES edge of a specific type."""
+        self.conn.execute(
+            """
+            MATCH (a:Node {name: $source})-[r:RELATES {type: $rel_type}]->(b:Node {name: $target})
+            DELETE r
+            """,
+            parameters={
+                "source": normalize_node_name(source_name),
+                "target": normalize_node_name(target_name),
+                "rel_type": relation_type,
+            },
+        )
+
     def get_neighbors(self, name: str, scopes: list = None):
         norm_name = normalize_node_name(name)
         query = """

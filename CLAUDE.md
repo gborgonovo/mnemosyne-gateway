@@ -94,7 +94,7 @@ Node names are normalized to lowercase with underscores internally; display name
 
 **Folder defaults**: placing a `_defaults.yaml` file in any `knowledge/` subdirectory applies its keys as frontmatter defaults to all `.md` files in that folder (e.g. `project: Ganaghello`, `scope: Private`). File-level frontmatter takes precedence.
 
-**Typed relations**: the `relations:` list is the persistent source of truth for typed graph edges. On every file sync, the File Watcher creates the corresponding KuzuDB edges (`PART_OF`, `MANAGES`, etc.). This means typed relations survive a full database rebuild — unlike `SEMANTICALLY_RELATED` edges, which are ephemeral state computed by the Gardener.
+**Typed relations**: the `relations:` list is the persistent source of truth for typed graph edges. On every file sync, the File Watcher **reconciles** the node's outgoing edges against the frontmatter: it creates the corresponding KuzuDB edges (`PART_OF`, `MANAGES`, etc.) and removes any file-derived edge (typed relation or `[[wikilink]]`/`LINKED_TO`) that is no longer declared. Edges not derived from files — `SEMANTICALLY_RELATED`, computed by the Gardener (see `EPHEMERAL_EDGE_TYPES` in `file_watcher.py`) — are preserved. This means typed relations survive a full database rebuild, and dropping a relation actually removes its edge.
 
 ### Configuration
 - `config/settings.yaml` — all runtime settings: decay rate, LLM mode, gateway host/port, retrieval limits
@@ -116,7 +116,11 @@ Node names are normalized to lowercase with underscores internally; display name
 **Diagnostics**: `inspect_file_raw`, `debug_filesystem`
 
 ### API endpoints (REST)
-`GET /status`, `GET /search?q=`, `GET /nodes/{name}`, `GET /graph/stats`, `GET /briefing`, `POST /observations`, `POST /goals`, `POST /tasks`, `DELETE /nodes/{name}`
+`GET /status`, `GET /search?q=`, `GET /nodes/{name}`, `GET /graph/stats`, `GET /briefing`, `GET /briefing/{project}`, `POST /observations`, `POST /goals`, `POST /tasks`, `POST /nodes`, `DELETE /nodes/{name}`
+
+`POST /goals`, `/tasks`, `/nodes` are **upsert by name** (a second POST with the same name updates in place, never duplicates, preserving `created_at`/`enriched_at`) and return the **canonical slug** plus `type`/`scope` (declared `NodeWriteResponse` in the OpenAPI): `{"status":"success","action":"created|updated","name":...,"type":...,"scope":...}`. All three accept `relations` (`"Target:TYPE,Other:TYPE"`) written to frontmatter tagged `source: user` so enrichment never overwrites them. On `/tasks`, `goal_name` is recorded as a `CONTRIBUTES_TO` relation (not an implicit `[[wikilink]]`/`LINKED_TO`). A relation/wikilink target with no file yet becomes a **stub inheriting the source node's scope/project** (a Private node never spawns a Public stub).
+
+Scope on `/goals`,`/tasks`: prefer the singular `scope` field (e.g. `"Private"`); the legacy plural `scopes` is still accepted but only its first entry is used, and the default is `Private` (never silently Public). `GET /briefing` and `GET /briefing/{project}` return a `BriefingResponse` (`hot_topics` + `dormant`), the latter filtered to one project. `DELETE /nodes/{name}` removes a node of any type in any subfolder; its `scopes` param is accepted but not used to gate deletion.
 
 ## Production
 
