@@ -27,7 +27,7 @@ curl http://localhost:4001/status
 python3 gateway/http_server.py           # Gateway (HTTP :4001 + MCP Streamable HTTP) — includes file watcher + LLM enrichment
 python3 workers/file_watcher.py --once   # One-time cold-boot sync — only when gateway is STOPPED (gateway holds the KuzuDB lock; running this while gateway is up will fail)
 python3 workers/gardener.py              # Temporal decay worker
-python3 workers/briefing_worker.py       # Proactive insights
+python3 workers/plugin_runner.py --plugin morning_briefing   # Alfred daily email (run by production cron at 7:00)
 ```
 
 ### Chat UI (separate venv)
@@ -126,7 +126,9 @@ Node names are normalized to lowercase with underscores internally; display name
 **Diagnostics**: `inspect_file_raw`, `debug_filesystem`
 
 ### API endpoints (REST)
-`GET /status`, `GET /search?q=`, `GET /nodes/{name}`, `GET /graph/stats`, `GET /briefing`, `GET /briefing/{project}`, `POST /observations`, `POST /goals`, `POST /tasks`, `POST /nodes`, `DELETE /nodes/{name}`
+`GET /status`, `GET /search?q=`, `GET /nodes/{name}`, `GET /graph/stats`, `GET /briefing`, `GET /briefing/longitudinal`, `GET /briefing/initiatives`, `GET /briefing/{project}`, `POST /observations`, `POST /goals`, `POST /tasks`, `POST /nodes`, `DELETE /nodes/{name}`
+
+`GET /briefing/initiatives` exposes the Butler's proactive suggestions (hot nodes with cold linked neighbors, `InitiativeEngine` running in-process). It replaced the standalone `briefing_worker.py`, which violated the single-writer rule and died at startup. The Alfred morning plugin (`plugins/morning_briefing.yaml`) consumes it along with `/briefing` and `/briefing/longitudinal`.
 
 `POST /goals`, `/tasks`, `/nodes` are **upsert by name** (a second POST with the same name updates in place, never duplicates, preserving `created_at`/`enriched_at`) and return the **canonical slug** plus `type`/`scope` (declared `NodeWriteResponse` in the OpenAPI): `{"status":"success","action":"created|updated","name":...,"type":...,"scope":...}`. All three accept `relations` (`"Target:TYPE,Other:TYPE"`) written to frontmatter tagged `source: user` so enrichment never overwrites them. On `/tasks`, `goal_name` is recorded as a `CONTRIBUTES_TO` relation (not an implicit `[[wikilink]]`/`LINKED_TO`). A relation/wikilink target with no file yet becomes a **stub inheriting the source node's scope/project** (a Private node never spawns a Public stub).
 

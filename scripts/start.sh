@@ -30,11 +30,9 @@ echo "✅ Gateway started (PID: $GATEWAY_PID). Log: logs/gateway.log"
 
 # LLM enrichment runs in-process inside the Gateway (see workers/file_watcher.py)
 
-# Start intelligence workers (optional but recommended)
-nohup .venv/bin/python3 workers/briefing_worker.py > logs/briefing_worker.log 2>&1 &
-BRIEFING_PID=$!
-echo $BRIEFING_PID > logs/briefing_worker.pid
-echo "✅ Briefing Worker started (PID: $BRIEFING_PID). Log: logs/briefing_worker.log"
+# Proactive initiatives are served in-process by the gateway at
+# GET /briefing/initiatives and delivered daily by the Alfred cron
+# (workers/plugin_runner.py --plugin morning_briefing). No extra worker needed.
 
 # Extract port from settings
 PYTHON_CMD="python3"
