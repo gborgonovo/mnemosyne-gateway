@@ -1,5 +1,32 @@
+import os
 import re
 import yaml
+
+
+def resolve_safe_folder(knowledge_dir: str, folder: str) -> str:
+    """Resolve and validate a client-supplied subfolder under knowledge_dir.
+
+    Returns the absolute target directory. Nested subfolders separated by '/'
+    are allowed (e.g. 'Sistema/Claude_Code', used by the memory-sync hook), but
+    absolute paths and any '..' traversal component are rejected, and the result
+    is guaranteed to stay inside knowledge_dir. An empty folder resolves to the
+    knowledge root. Raises ValueError on a rejected or non-existent folder.
+    """
+    base = os.path.abspath(knowledge_dir)
+    if not folder:
+        return base
+    cleaned = folder.strip().replace("\\", "/")
+    if cleaned.startswith("/") or os.path.isabs(cleaned):
+        raise ValueError(f"Invalid folder '{folder}': absolute paths are not allowed.")
+    parts = [p for p in cleaned.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise ValueError(f"Invalid folder '{folder}': parent-directory references are not allowed.")
+    target = os.path.abspath(os.path.join(base, *parts))
+    if target != base and not target.startswith(base + os.sep):
+        raise ValueError(f"Invalid folder '{folder}': path escapes the knowledge directory.")
+    if not os.path.isdir(target):
+        raise ValueError(f"Folder '{folder}' does not exist.")
+    return target
 
 
 def strip_leading_frontmatter(body: str) -> str:

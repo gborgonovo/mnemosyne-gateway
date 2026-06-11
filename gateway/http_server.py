@@ -20,6 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel
+from core.utils import resolve_safe_folder
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler
 from watchdog.observers import Observer
@@ -44,6 +45,16 @@ api_keys = {}
 if os.path.exists(API_KEYS_FILE):
     with open(API_KEYS_FILE, 'r') as f:
         api_keys = yaml.safe_load(f) or {}
+
+# Fail-closed auth: in production (auth_required: true) refuse to start with an
+# open API rather than silently serving everything if api_keys.yaml went missing.
+GATEWAY_CFG = config.get('gateway', {})
+if GATEWAY_CFG.get('auth_required', False) and not api_keys:
+    logger.error(
+        "auth_required is true but no API keys are configured "
+        "(config/api_keys.yaml missing or empty). Refusing to start with open access."
+    )
+    sys.exit(1)
 
 def verify_api_key(x_api_key: Optional[str] = Header(None)) -> Dict[str, List[str]]:
     if not api_keys: return {"scopes": ["*"], "namespaces": ["*:rw", ":r"]}
@@ -105,12 +116,13 @@ def _resolve_write_path(name: str, folder: str = "") -> str:
     under KNOWLEDGE_DIR (400 otherwise); without it the node lands in the root.
     """
     safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-    if folder:
-        target_dir = os.path.join(KNOWLEDGE_DIR, folder)
-        if not os.path.isdir(target_dir):
-            raise HTTPException(status_code=400, detail=f"Folder '{folder}' does not exist.")
-        return os.path.join(target_dir, f"{safe_name}.md")
-    return os.path.join(KNOWLEDGE_DIR, f"{safe_name}.md")
+    try:
+        # Validates traversal and existence; nested subfolders (e.g.
+        # 'Sistema/Claude_Code') are allowed, '..' and absolute paths are not.
+        target_dir = resolve_safe_folder(KNOWLEDGE_DIR, folder)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return os.path.join(target_dir, f"{safe_name}.md")
 
 def read_markdown(name: str):
     path = get_file_path(name)
@@ -127,10 +139,14 @@ async def lifespan(app):
 app = FastAPI(title="Mnemosyne File-First API", version="2.0.0", lifespan=lifespan)
 
 # 🌍 CORS Configuration
+# Origins come from settings.yaml. The wildcard "*" with credentials is invalid
+# per the CORS spec (browsers reject it), so credentials are enabled only when
+# the origin list is explicit.
+CORS_ORIGINS = GATEWAY_CFG.get('cors_origins', ["*"])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials="*" not in CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
