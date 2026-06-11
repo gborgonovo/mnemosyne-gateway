@@ -38,10 +38,12 @@ streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 
 ### Tests
 ```bash
-python3 -m unittest tests/test_api_upsert.py       # API evolution: relations, upsert, scope inheritance
-python3 -m unittest tests/test_security_folder.py  # A1 path traversal + A2 fail-closed auth/CORS
-python3 -m unittest tests/test_base_hybrid.py      # hybrid file-first backend
-python3 test_kuzu.py                               # KuzuDB smoke test
+python3 -m unittest tests/test_api_upsert.py        # API evolution: relations, upsert, scope inheritance
+python3 -m unittest tests/test_security_folder.py   # A1 path traversal + A2 fail-closed auth/CORS
+python3 -m unittest tests/test_robustness.py        # B3 content-hash sync + B2 collision detection
+python3 -m unittest tests/test_kuzu_concurrency.py  # B5 KuzuManager reentrant lock under load
+python3 -m unittest tests/test_base_hybrid.py       # hybrid file-first backend
+python3 test_kuzu.py                                # KuzuDB smoke test
 ```
 Tests use isolated databases (temp dirs / `data/test_*`) and never touch production knowledge.
 
@@ -61,6 +63,9 @@ Tests use isolated databases (temp dirs / `data/test_*`) and never touch product
 - **Embedded DBs**: KuzuDB replaced Neo4j to eliminate external service dependencies. KuzuDB allows only one writer at a time — the file watcher runs inside the gateway process to avoid lock conflicts.
 - **Activation model**: Each node has a heat value [0.0, 1.0] representing recency/relevance. Decay is applied continuously; adding observations raises activation and propagates to neighbors.
 - **In-process workers**: both the file watcher and the LLM enrichment thread run inside the gateway process. The old standalone PluginBase/HTTP worker architecture (`llm_worker.py`, `plugin_base.py`, `plugin_runner.py`) and the pre-Kuzu Neo4j layer (`graph_manager.py`, `perception.py`, `knowledge_queue.py`, `feedback.py`, `learning_worker.py`, the legacy `mcp_server.py`) have been removed; they live in git history if ever needed.
+- **Content-hash sync**: re-embedding and re-enrichment are gated on a sha256 of the node *body*, not on mtime. `_body_hash` (in ChromaDB metadata) decides re-embed; `enriched_hash` (in frontmatter) decides re-enrichment. A system-triggered frontmatter rewrite leaves the body identical, so it is recognised as a no-op: no re-embed, no activation boost, no enrichment loop. Body unchanged means a cheap metadata-only Chroma update.
+- **Thread safety**: `KuzuManager` serializes every DB operation behind a reentrant lock, since one `kuzu.Connection` is shared by the FastAPI threadpool, the watcher and enrichment threads, and the gardener.
+- **Name collisions**: node identity is the normalized file basename, so two files with the same name in different folders share one node (`a/x.md` and `b/x.md` → `x`). The watcher detects this, logs a warning, surfaces it under `name_collisions` in `/status`, and refuses to delete a node on file removal while another file still maps to it. A structural fix (path-based IDs) is deferred.
 
 ### Components
 
@@ -90,6 +95,7 @@ relations:
     type: MANAGES
     # source: llm      # written by enrichment — safe to overwrite; omit or set "user" to protect
 enriched_at: YYYY-MM-DD HH:MM:SS   # set by enrichment worker; do not edit manually
+enriched_hash: <sha256>            # body hash at last enrichment; guards against re-enriching unchanged content (do not edit)
 ---
 Content with [[WikiLinks]] creating LINKED_TO graph edges.
 ```

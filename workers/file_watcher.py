@@ -3,6 +3,7 @@ import sys
 import time
 import yaml
 import re
+import hashlib
 import logging
 import datetime
 import queue
@@ -24,6 +25,15 @@ logger = logging.getLogger(__name__)
 # edge reconciliation, which would otherwise wipe them on every save.
 EPHEMERAL_EDGE_TYPES = {"SEMANTICALLY_RELATED"}
 
+
+def _hash_body(body: str) -> str:
+    """Content hash of a node body. Drives re-embed/enrichment decisions instead
+    of fragile mtime heuristics: the body is what changes by hand, the
+    frontmatter is what the system rewrites, so hashing only the body lets a
+    system-triggered frontmatter rewrite be recognised as a no-op."""
+    return hashlib.sha256((body or "").encode("utf-8")).hexdigest()
+
+
 class WikiSyncHandler(FileSystemEventHandler):
     def __init__(self, kuzu_mgr: KuzuManager, vector_store: VectorStore,
                  knowledge_dir: str, am=None, llm=None):
@@ -34,6 +44,11 @@ class WikiSyncHandler(FileSystemEventHandler):
         self.am = am
         self.llm = llm
         self._enrich_queue = queue.Queue()
+        # B2: basename collisions across folders. Two files whose names normalize
+        # to the same node ID share one row in Kuzu/Chroma and overwrite each
+        # other. We can't prevent it without changing the ID scheme (B2 opt.1),
+        # but we detect and surface it. Maps norm_name -> {paths: [...]}.
+        self.collisions = {}
         if llm is not None:
             t = threading.Thread(target=self._run_enrichment_worker, daemon=True)
             t.start()
@@ -62,9 +77,34 @@ class WikiSyncHandler(FileSystemEventHandler):
             logger.info(f"File deleted: {event.src_path}")
             name = os.path.splitext(os.path.basename(event.src_path))[0]
             norm_name = normalize_node_name(name)
+            # B2: if another file elsewhere maps to the same node ID, keep the
+            # node and re-sync it from the survivor instead of deleting (the
+            # deleted file's content may currently occupy the shared row).
+            survivor = self._find_file_for_name(norm_name, exclude_path=event.src_path)
+            if survivor:
+                logger.warning(f"File '{event.src_path}' deleted but node '{norm_name}' kept: "
+                               f"'{survivor}' still maps to the same ID. Re-syncing from survivor.")
+                self._sync_file(survivor, is_startup_sync=True)
+                return
             self.kuzu_mgr.delete_node(norm_name)
             self.vector_store.delete_node(norm_name)
+            self.collisions.pop(norm_name, None)
             logger.info(f"Node '{norm_name}' removed from DBs.")
+
+    def _find_file_for_name(self, norm_name: str, exclude_path: str = None):
+        """Return a .md file under knowledge_dir whose basename normalizes to
+        norm_name, excluding exclude_path. Used to detect basename collisions."""
+        exclude_abs = os.path.abspath(exclude_path) if exclude_path else None
+        for root, dirs, files in os.walk(self.knowledge_dir):
+            for f in files:
+                if not f.endswith('.md'):
+                    continue
+                p = os.path.join(root, f)
+                if exclude_abs and os.path.abspath(p) == exclude_abs:
+                    continue
+                if normalize_node_name(os.path.splitext(f)[0]) == norm_name:
+                    return p
+        return None
 
     def on_moved(self, event):
         if not event.is_directory and event.dest_path.endswith('.md'):
@@ -91,13 +131,11 @@ class WikiSyncHandler(FileSystemEventHandler):
                 fm, body_now, _, _ = self._parse_markdown(filepath)
                 if fm is None:
                     continue
-                enriched_at = fm.get('enriched_at')
-                if enriched_at is not None:
-                    if not isinstance(enriched_at, datetime.datetime):
-                        enriched_at = datetime.datetime.fromisoformat(str(enriched_at))
-                    file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
-                    if (file_mtime - enriched_at).total_seconds() < 3600:
-                        continue  # enrichment write triggered this — skip
+                # Skip if this exact body was already enriched: our own
+                # frontmatter rewrite (relations + enriched_hash) triggers a
+                # re-sync, but the body is unchanged so there's nothing to redo.
+                if fm.get('enriched_hash') == _hash_body(body_now):
+                    continue
                 all_nodes = {n['name'] for n in self.kuzu_mgr.get_all_nodes()}
                 all_nodes.update(context_nodes)  # include wikilinks not yet in graph
                 _, relationships = self.llm.extract_entities(body_now, context_nodes=sorted(all_nodes), current_node=raw_name)
@@ -120,6 +158,7 @@ class WikiSyncHandler(FileSystemEventHandler):
                 user_relations = [r for r in existing if r.get('source') != 'llm']
                 fm['relations'] = user_relations + llm_relations
                 fm['enriched_at'] = datetime.datetime.now()
+                fm['enriched_hash'] = _hash_body(body_now)
                 self._write_frontmatter(filepath, fm, body_now)
                 logger.info(f"Enrichment: '{norm_name}' → {len(llm_relations)} llm + {len(user_relations)} user relations")
             except Exception as e:
@@ -222,21 +261,32 @@ class WikiSyncHandler(FileSystemEventHandler):
             project = project[0] if project else ''
         project = str(project) if project else ''
 
-        # Sync ChromaDB (semantic layer)
-        # During cold boot, skip re-embedding files whose mtime hasn't changed.
+        # Sync ChromaDB (semantic layer). Re-embed only when the body content
+        # hash changed (B3): a system-triggered frontmatter rewrite leaves the
+        # body identical, so it neither re-embeds nor re-boosts, killing the
+        # echo-loop. Body unchanged -> cheap metadata-only refresh.
         file_mtime = os.path.getmtime(filepath)
-        skip_embed = False
-        if is_startup_sync:
-            existing = self.vector_store.get_node(raw_name)
-            if existing:
-                stored_mtime = existing.get('metadata', {}).get('_mtime', 0)
-                skip_embed = abs(float(stored_mtime) - file_mtime) < 1.0
+        body_hash = _hash_body(body)
+        rel_path = os.path.relpath(filepath, self.knowledge_dir)
+        existing = self.vector_store.get_node(raw_name)
+        existing_meta = existing.get('metadata', {}) if existing else {}
+        body_changed = existing_meta.get('_body_hash') != body_hash
 
-        if not skip_embed:
-            frontmatter['_mtime'] = file_mtime
+        # B2: same node ID from a different source file = basename collision.
+        prev_path = existing_meta.get('_source_path')
+        if prev_path and prev_path != rel_path:
+            self.collisions[norm_name] = {"paths": sorted({prev_path, rel_path})}
+            logger.warning(f"⚠️ Node name collision: '{rel_path}' and '{prev_path}' both map to "
+                           f"node '{norm_name}'; they share one row and overwrite each other.")
+
+        frontmatter['_body_hash'] = body_hash
+        frontmatter['_mtime'] = file_mtime
+        frontmatter['_source_path'] = rel_path
+        if body_changed:
             self.vector_store.upsert_node(raw_name, body, frontmatter)
         else:
-            logger.debug(f"Skipping re-embed for '{norm_name}' (mtime unchanged)")
+            self.vector_store.update_metadata(raw_name, frontmatter)
+            logger.debug(f"Skipping re-embed for '{norm_name}' (body unchanged)")
 
         # Ensure node exists in KuzuDB with correct metadata
         title = frontmatter.get('title', raw_name.replace('_', ' ')).replace('_', ' ')
@@ -279,8 +329,10 @@ class WikiSyncHandler(FileSystemEventHandler):
             _ensure_stub(target_norm)
             self.kuzu_mgr.add_edge(raw_name, target_norm, rel_type, weight=weight)
 
-        # Apply file_edit boost only for real changes, not cold boot
-        if not is_startup_sync:
+        # Apply file_edit boost only for a real body change, not cold boot and
+        # not a system frontmatter rewrite (B3): editing only the frontmatter
+        # must not reheat the node.
+        if not is_startup_sync and body_changed:
             if self.am:
                 self.am.record_interaction(norm_name, "file_edit")
             else:
@@ -291,20 +343,15 @@ class WikiSyncHandler(FileSystemEventHandler):
         logger.info(f"Sync {'(startup) ' if is_startup_sync else ''}complete for '{norm_name}'. "
                     f"Links: {len(set(normalized_wikilinks))}, type={node_type}, scope={scope}")
 
-        # Enqueue for LLM enrichment if never enriched, or content changed since last enrichment
+        # Enqueue for LLM enrichment if the current body hasn't been enriched yet
+        # (B3): enriched_hash records the body hash at the last enrichment, so a
+        # frontmatter-only rewrite (same body) is skipped and a real edit 5
+        # minutes later is re-enriched. No time window involved.
         if (not is_startup_sync
                 and self.llm is not None
                 and len(body) > 150
                 and node_type not in ('Observation',)):
-            enriched_at = frontmatter.get('enriched_at')
-            if enriched_at is not None:
-                if not isinstance(enriched_at, datetime.datetime):
-                    enriched_at = datetime.datetime.fromisoformat(str(enriched_at))
-                file_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
-                needs_enrichment = (file_mtime - enriched_at).total_seconds() > 3600
-            else:
-                needs_enrichment = True
-            if needs_enrichment:
+            if frontmatter.get('enriched_hash') != body_hash:
                 self._enrich_queue.put((filepath, raw_name, body, list(set(normalized_wikilinks))))
 
 

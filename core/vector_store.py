@@ -81,22 +81,28 @@ class VectorStore:
 
         return None  # mock/default: ChromaDB uses all-MiniLM-L6-v2 locally
 
-    def upsert_node(self, name: str, body: str, metadata: dict):
-        """
-        Upserts a full markdown document and its metadata into the vector space.
-        Uses normalized 'name' as the canonical ID.
-        """
-        norm_name = normalize_node_name(name)
-        # Chroma metadata must be scalar types (str, int, float, bool)
+    @staticmethod
+    def _sanitize_metadata(name: str, metadata: dict) -> dict:
+        """Coerce metadata to Chroma-safe scalar types and stamp original_name."""
         safe_metadata = {}
         for k, v in metadata.items():
             if isinstance(v, (str, int, float, bool)):
                 safe_metadata[k] = v
             elif isinstance(v, list):
                 safe_metadata[k] = ",".join(str(i) for i in v)
-                
         # We store the original name in metadata while using normalized for PK
         safe_metadata['original_name'] = name
+        return safe_metadata
+
+    def upsert_node(self, name: str, body: str, metadata: dict):
+        """
+        Upserts a full markdown document and its metadata into the vector space.
+        Uses normalized 'name' as the canonical ID. This re-embeds the document,
+        so callers should only invoke it when the body actually changed (see the
+        body-hash guard in the file watcher); use update_metadata otherwise.
+        """
+        norm_name = normalize_node_name(name)
+        safe_metadata = self._sanitize_metadata(name, metadata)
 
         # Truncate to avoid exceeding embedding model context window
         embed_text = body[:4000] if body.strip() else "_EMPTY_"
@@ -106,6 +112,21 @@ class VectorStore:
             metadatas=[safe_metadata]
         )
         logger.debug(f"Upserted {norm_name} (orig: {name}) in ChromaDB")
+
+    def update_metadata(self, name: str, metadata: dict):
+        """Update an existing node's metadata WITHOUT re-embedding the document.
+
+        Used when only the frontmatter changed (scope, project, enriched_hash,
+        ...) but the body is unchanged: avoids a needless embedding call and the
+        re-embed echo-loop. No-op if the node isn't in the collection yet.
+        """
+        norm_name = normalize_node_name(name)
+        if not self.get_node(norm_name):
+            return
+        self.collection.update(
+            ids=[norm_name],
+            metadatas=[self._sanitize_metadata(name, metadata)],
+        )
 
     def semantic_search(self, query: str, scopes: list = None, limit: int = 5):
         """

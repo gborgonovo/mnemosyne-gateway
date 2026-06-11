@@ -1,0 +1,125 @@
+"""B3 (content-hash sync) and B2 opt.2 (basename collision detection).
+
+Drives the real WikiSyncHandler against isolated KuzuDB/ChromaDB (no llm, so no
+enrichment thread). Spies on VectorStore.upsert_node / update_metadata to prove
+that re-embedding happens only when the body actually changes.
+
+Run: python3 -m unittest tests/test_robustness.py
+"""
+import os
+import sys
+import shutil
+import tempfile
+import unittest
+from unittest import mock
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import yaml
+from core.kuzu_manager import KuzuManager
+from core.vector_store import VectorStore
+from workers.file_watcher import WikiSyncHandler
+
+
+class _Base(unittest.TestCase):
+    def setUp(self):
+        base = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        self.kdir = tempfile.mkdtemp()
+        self.dbroot = tempfile.mkdtemp()
+        with open(os.path.join(base, "config", "settings.yaml")) as f:
+            cfg = yaml.safe_load(f)
+        self.kuzu = KuzuManager(db_path=os.path.join(self.dbroot, "kuzu"))
+        self.vec = VectorStore(db_path=os.path.join(self.dbroot, "chroma"),
+                               embedding_config=cfg.get("llm", {}).get("embeddings"))
+        self.handler = WikiSyncHandler(self.kuzu, self.vec, self.kdir)  # no llm
+
+    def tearDown(self):
+        self.kuzu.close()
+        shutil.rmtree(self.kdir, ignore_errors=True)
+        shutil.rmtree(self.dbroot, ignore_errors=True)
+
+    def _write(self, slug, frontmatter, body, subdir=""):
+        d = os.path.join(self.kdir, subdir) if subdir else self.kdir
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, f"{slug}.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("---\n"); yaml.dump(frontmatter, f); f.write(f"---\n\n{body}")
+        return path
+
+
+class TestContentHashSync(_Base):
+    def test_no_reembed_when_body_unchanged(self):
+        path = self._write("note", {"type": "Node", "scope": "Private"}, "Hello world body")
+        with mock.patch.object(self.vec, "upsert_node", wraps=self.vec.upsert_node) as up, \
+             mock.patch.object(self.vec, "update_metadata", wraps=self.vec.update_metadata) as md:
+            self.handler._sync_file(path, is_startup_sync=False)   # first time -> embed
+            self.assertEqual(up.call_count, 1)
+            self.handler._sync_file(path, is_startup_sync=False)   # body identical -> no embed
+            self.assertEqual(up.call_count, 1, "unchanged body must not re-embed")
+            self.assertGreaterEqual(md.call_count, 1, "unchanged body should refresh metadata only")
+
+    def test_reembed_when_body_changes(self):
+        path = self._write("note", {"type": "Node", "scope": "Private"}, "first body")
+        with mock.patch.object(self.vec, "upsert_node", wraps=self.vec.upsert_node) as up:
+            self.handler._sync_file(path, is_startup_sync=False)
+            self._write("note", {"type": "Node", "scope": "Private"}, "a different body now")
+            self.handler._sync_file(path, is_startup_sync=False)
+            self.assertEqual(up.call_count, 2, "a real body change must re-embed")
+
+    def test_frontmatter_only_change_does_not_reboost(self):
+        path = self._write("note", {"type": "Node", "scope": "Private"}, "stable body text")
+        self.handler._sync_file(path, is_startup_sync=False)
+        act1 = self.kuzu.get_node("note")["activation_level"]
+        # Change only the frontmatter (scope), keep the body identical.
+        self._write("note", {"type": "Node", "scope": "Internal"}, "stable body text")
+        self.handler._sync_file(path, is_startup_sync=False)
+        act2 = self.kuzu.get_node("note")["activation_level"]
+        self.assertEqual(act2, act1, "frontmatter-only edit must not reheat the node")
+        # but the metadata change did propagate to the graph
+        self.assertEqual(self.kuzu.get_node("note")["scope"], "Internal")
+
+    def test_cold_boot_unchanged_does_not_reembed(self):
+        path = self._write("note", {"type": "Node", "scope": "Private"}, "evergreen content")
+        self.handler._sync_file(path, is_startup_sync=True)   # populate
+        with mock.patch.object(self.vec, "upsert_node", wraps=self.vec.upsert_node) as up:
+            self.handler._sync_file(path, is_startup_sync=True)  # second cold boot
+            self.assertEqual(up.call_count, 0, "cold boot on unchanged knowledge must not embed")
+
+
+class TestCollisionDetection(_Base):
+    def test_basename_collision_is_flagged(self):
+        a = self._write("x", {"type": "Node", "scope": "Private"}, "from folder a", subdir="A")
+        b = self._write("x", {"type": "Node", "scope": "Private"}, "from folder b", subdir="B")
+        self.handler._sync_file(a, is_startup_sync=True)
+        self.handler._sync_file(b, is_startup_sync=True)
+        self.assertIn("x", self.handler.collisions)
+        self.assertEqual(len(self.handler.collisions["x"]["paths"]), 2)
+
+    def test_delete_keeps_node_when_survivor_exists(self):
+        a = self._write("x", {"type": "Node", "scope": "Private"}, "from folder a", subdir="A")
+        b = self._write("x", {"type": "Node", "scope": "Private"}, "from folder b", subdir="B")
+        self.handler._sync_file(a, is_startup_sync=True)
+        self.handler._sync_file(b, is_startup_sync=True)
+        # Delete A/x.md; B/x.md still maps to node 'x'.
+        os.remove(a)
+
+        class _Evt:
+            is_directory = False
+            src_path = a
+        self.handler.on_deleted(_Evt())
+        self.assertIsNotNone(self.kuzu.get_node("x"), "node must survive: another file maps to it")
+
+    def test_delete_removes_node_when_no_survivor(self):
+        path = self._write("solo", {"type": "Node", "scope": "Private"}, "only one")
+        self.handler._sync_file(path, is_startup_sync=True)
+        os.remove(path)
+
+        class _Evt:
+            is_directory = False
+            src_path = path
+        self.handler.on_deleted(_Evt())
+        self.assertIsNone(self.kuzu.get_node("solo"), "node must be deleted when no other file maps to it")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

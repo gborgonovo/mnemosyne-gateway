@@ -1,10 +1,30 @@
 import kuzu
 import logging
 import os
+import threading
 import time
+from functools import wraps
 from core.utils import normalize_node_name
 
 logger = logging.getLogger(__name__)
+
+
+def _synchronized(method):
+    """Serialize a KuzuManager method behind the instance's reentrant lock.
+
+    A single kuzu.Connection is shared by the FastAPI threadpool, the watchdog
+    thread, the enrichment thread and the gardener; KuzuDB does not guarantee a
+    single Connection is thread-safe, and multi-statement methods (e.g.
+    delete_node) must run atomically. The lock is an RLock so methods that call
+    other locked methods (add_edge -> add_node, update_interaction -> get_node)
+    do not deadlock.
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
 
 class KuzuManager:
     """
@@ -13,6 +33,7 @@ class KuzuManager:
     node type, scope, interaction timestamps, and interaction count.
     """
     def __init__(self, db_path="./data/kuzu_main"):
+        self._lock = threading.RLock()
         self.db_path = os.path.abspath(db_path)
         parent_dir = os.path.dirname(self.db_path)
         os.makedirs(parent_dir, exist_ok=True)
@@ -78,6 +99,7 @@ class KuzuManager:
 
     # ─── Node CRUD ────────────────────────────────────────────────────────────
 
+    @_synchronized
     def add_node(self, name: str, initial_activation: float = 0.5,
                  node_type: str = "Node", scope: str = "Public",
                  display_name: str = None, project: str = ""):
@@ -104,6 +126,7 @@ class KuzuManager:
             "scope": scope, "project": project, "now": now, "zero": 0,
         })
 
+    @_synchronized
     def get_node(self, name: str) -> dict:
         norm_name = normalize_node_name(name)
         query = """
@@ -126,6 +149,7 @@ class KuzuManager:
             }
         return None
 
+    @_synchronized
     def update_node_metadata(self, name: str, node_type: str = None, scope: str = None, project: str = None):
         norm_name = normalize_node_name(name)
         updates, params = [], {"name": norm_name}
@@ -144,10 +168,12 @@ class KuzuManager:
                 parameters=params,
             )
 
+    @_synchronized
     def update_activation(self, name: str, level: float):
         query = "MATCH (n:Node {name: $name}) SET n.activation = $level"
         self.conn.execute(query, parameters={"name": name, "level": level})
 
+    @_synchronized
     def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0):
         """Apply activation boost. If update_timestamp, record this as a direct interaction.
 
@@ -176,6 +202,7 @@ class KuzuManager:
                 parameters={"name": norm_name, "act": new_activation},
             )
 
+    @_synchronized
     def delete_node(self, name: str):
         norm_name = normalize_node_name(name)
         try:
@@ -189,6 +216,7 @@ class KuzuManager:
 
     # ─── Edges ────────────────────────────────────────────────────────────────
 
+    @_synchronized
     def add_edge(self, source_name: str, target_name: str, relation_type: str, weight: float = 1.0):
         self.add_node(source_name)
         self.add_node(target_name)
@@ -205,6 +233,7 @@ class KuzuManager:
             "weight": weight,
         })
 
+    @_synchronized
     def get_outgoing_edges(self, name: str) -> list:
         """Return this node's outgoing RELATES edges as [{target, type}, ...].
 
@@ -223,6 +252,7 @@ class KuzuManager:
             edges.append({"target": row[0], "type": row[1]})
         return edges
 
+    @_synchronized
     def delete_edge(self, source_name: str, target_name: str, relation_type: str):
         """Remove a single directed RELATES edge of a specific type."""
         self.conn.execute(
@@ -237,6 +267,7 @@ class KuzuManager:
             },
         )
 
+    @_synchronized
     def get_neighbors(self, name: str, scopes: list = None):
         norm_name = normalize_node_name(name)
         query = """
@@ -255,6 +286,7 @@ class KuzuManager:
 
     # ─── Queries ──────────────────────────────────────────────────────────────
 
+    @_synchronized
     def get_active_nodes(self, threshold: float = 0.5, scopes: list = None, project: str = None):
         query = """
         MATCH (n:Node)
@@ -280,6 +312,7 @@ class KuzuManager:
             })
         return active
 
+    @_synchronized
     def get_all_nodes(self):
         res = self.conn.execute("MATCH (n:Node) RETURN n.name, n.activation")
         nodes = []
@@ -288,6 +321,7 @@ class KuzuManager:
             nodes.append({"name": row[0], "activation_level": row[1]})
         return nodes
 
+    @_synchronized
     def get_dormant_nodes(self, scopes: list = None, min_interactions: int = 5,
                           days_node: int = 27, days_goal_task: int = 30,
                           days_journal: int = 45, project: str = None) -> list:
@@ -345,6 +379,7 @@ class KuzuManager:
             })
         return dormant
 
+    @_synchronized
     def get_dormant_by_connectivity(self, min_edges: int = 2, activation_ceiling: float = 0.3,
                                      days_inactive: int = 14, scopes: list = None) -> list:
         """
@@ -387,6 +422,7 @@ class KuzuManager:
             })
         return results
 
+    @_synchronized
     def get_graph_export(self, limit: int = 5000):
         res_nodes = self.conn.execute(
             "MATCH (n:Node) RETURN n.name, n.activation LIMIT $limit",
@@ -410,6 +446,7 @@ class KuzuManager:
 
     # ─── Decay ────────────────────────────────────────────────────────────────
 
+    @_synchronized
     def apply_decay_per_node(self, decay_rates: dict):
         """
         Apply type-specific decay proportional to real time elapsed since last decay.
@@ -443,6 +480,7 @@ class KuzuManager:
                 parameters={"name": name, "act": new_activation, "now": now},
             )
 
+    @_synchronized
     def batch_decay(self, decay_factor: float = 0.95):
         """Legacy uniform decay. Prefer apply_decay_per_node for new code."""
         self.conn.execute(
