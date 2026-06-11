@@ -5,6 +5,8 @@ import uvicorn
 import logging
 import uuid
 import re
+import threading
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
 from datetime import datetime
@@ -114,6 +116,19 @@ try:
     gd = Gardener(am, config=config, vector_store=vector_store)
     mcp_instance = create_mcp_server(kuzu_mgr, vector_store, am, gd, config, KNOWLEDGE_DIR)
     mcp_app = mcp_instance.streamable_http_app()
+
+    # Gardener background thread: runs run_once() every interval_seconds (default 3600)
+    _gardener_interval = config.get("gardener", {}).get("interval_seconds", 3600)
+    def _gardener_loop():
+        time.sleep(_gardener_interval)  # first cycle after one interval, not on startup
+        while True:
+            try:
+                gd.run_once()
+            except Exception as _e:
+                logger.error(f"Gardener cycle error: {_e}")
+            time.sleep(_gardener_interval)
+    threading.Thread(target=_gardener_loop, daemon=True, name="gardener").start()
+    logger.info(f"Gardener thread started (interval: {_gardener_interval}s)")
     
 except Exception as e:
     logger.error(f"❌ Error initializing backend: {e}")

@@ -1,0 +1,29 @@
+[Unit]
+Description=Mnemosyne Knowledge Gateway
+Documentation=https://github.com/gborgonovo/mnemosyne-gateway
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/mnemosyne-gb
+
+# Load secrets (OPENAI_API_KEY, MNEMOSYNE_API_KEY, OLLAMA_URL, …)
+EnvironmentFile=-/srv/mnemosyne-gb/.env
+Environment=PYTHONPATH=/srv/mnemosyne-gb
+
+ExecStart=/srv/mnemosyne-gb/.venv/bin/python3 /srv/mnemosyne-gb/gateway/http_server.py
+
+# Restart automatically on failure; give the process 15 s to come up before the
+# first liveness check. KuzuDB cold-boot on large knowledge bases can take several
+# minutes — RestartSec keeps systemd from hammering the DB if the process exits early.
+Restart=on-failure
+RestartSec=30s
+
+# Forward stdout/stderr to journald (view with: journalctl -u mnemosyne -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mnemosyne
+
+[Install]
+WantedBy=multi-user.target
