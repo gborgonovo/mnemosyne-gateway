@@ -38,9 +38,12 @@ streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 
 ### Tests
 ```bash
-python3 -m unittest tests/test_hybrid_architecture.py
-python3 test_kuzu.py
+python3 -m unittest tests/test_api_upsert.py       # API evolution: relations, upsert, scope inheritance
+python3 -m unittest tests/test_security_folder.py  # A1 path traversal + A2 fail-closed auth/CORS
+python3 -m unittest tests/test_base_hybrid.py      # hybrid file-first backend
+python3 test_kuzu.py                               # KuzuDB smoke test
 ```
+Tests use isolated databases (temp dirs / `data/test_*`) and never touch production knowledge.
 
 ## Architecture
 
@@ -57,7 +60,7 @@ python3 test_kuzu.py
 - **File-first**: Databases are derived from markdown files, not the other way around. The source of truth is `/knowledge/`.
 - **Embedded DBs**: KuzuDB replaced Neo4j to eliminate external service dependencies. KuzuDB allows only one writer at a time — the file watcher runs inside the gateway process to avoid lock conflicts.
 - **Activation model**: Each node has a heat value [0.0, 1.0] representing recency/relevance. Decay is applied continuously; adding observations raises activation and propagates to neighbors.
-- **In-process workers**: both the file watcher and the LLM enrichment thread run inside the gateway process. The standalone `workers/llm_worker.py` (PluginBase/HTTP architecture) is superseded and no longer launched by `start.sh`.
+- **In-process workers**: both the file watcher and the LLM enrichment thread run inside the gateway process. The old standalone PluginBase/HTTP worker architecture (`llm_worker.py`, `plugin_base.py`, `plugin_runner.py`) and the pre-Kuzu Neo4j layer (`graph_manager.py`, `perception.py`, `knowledge_queue.py`, `feedback.py`, `learning_worker.py`, the legacy `mcp_server.py`) have been removed; they live in git history if ever needed.
 
 ### Components
 
