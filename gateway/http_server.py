@@ -298,11 +298,16 @@ def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
 @app.get("/")
 @app.get("/status")
 def health_check():
+    collisions = getattr(event_handler, "collisions", {})
     return {
-        "status": "ok", 
-        "service": "mnemosyne-gateway", 
+        "status": "ok",
+        "service": "mnemosyne-gateway",
         "architecture": "file-first",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        # B2: basename collisions detected since startup (same node ID from
+        # different files). Non-empty means data is silently overwriting itself.
+        "name_collisions": collisions,
+        "enrich_queue_depth": event_handler._enrich_queue.qsize(),
     }
 
 @app.get("/search")
