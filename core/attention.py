@@ -2,6 +2,30 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def thermal_rerank(candidates: list, kuzu_mgr, alpha: float = 0.0) -> list:
+    """Re-rank semantic search candidates using the thermal activation model.
+
+    score = (1 - cosine_distance) * (1 + alpha * activation_level)
+
+    With alpha=0 the ranking is identical to raw Chroma order (kill-switch).
+    Each returned dict gets a 'score' key added.
+    """
+    if not candidates:
+        return []
+    scored = []
+    for r in candidates:
+        semantic_sim = max(0.0, 1.0 - r["distance"])
+        if alpha > 0:
+            node = kuzu_mgr.get_node(r["name"])
+            activation = node.get("activation_level", 0.0) if node else 0.0
+        else:
+            activation = 0.0
+        score = semantic_sim * (1.0 + alpha * activation)
+        scored.append({**r, "score": round(score, 4)})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored
+
 class AttentionModel:
     """
     Activation physics for Mnemosyne.

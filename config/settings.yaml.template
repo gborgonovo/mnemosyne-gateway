@@ -144,3 +144,13 @@ retrieval:
   
   # Numero di voci da mostrare nella cronologia delle attività recenti
   history_limit: 10
+
+  # Thermal re-rank: weight given to activation_level when re-ordering
+  # semantic search candidates.
+  # score = (1 - cosine_distance) * (1 + rerank_alpha * activation_level)
+  # Set to 0 to disable (pure semantic ranking, kill-switch).
+  rerank_alpha: 0.3
+
+  # How many candidates to fetch from ChromaDB before thermal re-ranking.
+  # Higher values widen the re-rank window at a small latency cost.
+  chroma_prefetch: 10

@@ -8,6 +8,7 @@ import yaml
 from datetime import datetime
 
 from core.utils import strip_leading_frontmatter, resolve_safe_folder
+from core.attention import thermal_rerank
 
 
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
@@ -256,25 +257,22 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     @mcp.tool()
     def query_knowledge(query: str, limit: int = 3) -> str:
         """Semantic search of the Mnemosyne knowledge base."""
-        results = vector_store.semantic_search(query, limit=limit * 2)
-        if not results:
+        retrieval_cfg = config.get('retrieval', {})
+        alpha = float(retrieval_cfg.get('rerank_alpha', 0.0))
+        prefetch = max(limit * 2, int(retrieval_cfg.get('chroma_prefetch', 10)))
+
+        candidates = vector_store.semantic_search(query, limit=prefetch)
+        if not candidates:
             return f"No concepts matching '{query}' found in memory."
-            
-        ranked_results = []
-        for r in results:
-            name = r['name']
-            node_state = kuzu_mgr.get_node(name)
-            heat = node_state['activation_level'] if node_state else 0.1
-            combined_score = (1.0 / (r['distance'] + 0.001)) * (heat + 0.5)
-            ranked_results.append((combined_score, name))
-            
-        ranked_results.sort(key=lambda x: x[0], reverse=True)
+
+        reranked = thermal_rerank(candidates, kuzu_mgr, alpha=alpha)
 
         output = ""
-        for score, name in ranked_results[:limit]:
+        for r in reranked[:limit]:
+            name = r['name']
             content = read_markdown(name)
             if content:
-                output += f"### FILE: {name}.md (Relevance Score: {score:.2f})\n```markdown\n{content}\n```\n\n"
+                output += f"### FILE: {name}.md (score: {r['score']:.3f})\n```markdown\n{content}\n```\n\n"
                 am.record_interaction(name, interaction_type="mcp_query")
         return output
 
