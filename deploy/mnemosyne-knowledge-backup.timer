@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily git snapshot of Mnemosyne knowledge base
+Requires=mnemosyne-knowledge-backup.service
+
+[Timer]
+# Every day at 02:00 local time
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
