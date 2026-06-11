@@ -15,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
-from core.utils import normalize_node_name, strip_leading_frontmatter
+from core.utils import normalize_node_name, node_id_from_path, _normalize_segment, strip_leading_frontmatter
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - FileWatcher - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -44,11 +44,9 @@ class WikiSyncHandler(FileSystemEventHandler):
         self.am = am
         self.llm = llm
         self._enrich_queue = queue.Queue()
-        # B2: basename collisions across folders. Two files whose names normalize
-        # to the same node ID share one row in Kuzu/Chroma and overwrite each
-        # other. We can't prevent it without changing the ID scheme (B2 opt.1),
-        # but we detect and surface it. Maps norm_name -> {paths: [...]}.
-        self.collisions = {}
+        # Maps normalized basename -> [path_based_node_id, ...].
+        # Built during startup; maintained incrementally on create/delete/move.
+        self._basename_index: dict = {}
         if llm is not None:
             t = threading.Thread(target=self._run_enrichment_worker, daemon=True)
             t.start()
@@ -62,6 +60,8 @@ class WikiSyncHandler(FileSystemEventHandler):
             src = getattr(event, 'src_path', '?')
             logger.error(f"Watcher dispatch error for '{src}': {e}", exc_info=True)
 
+    # ─── Watchdog event handlers ───────────────────────────────────────────────
+
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith('.md'):
             logger.info(f"File modified: {event.src_path}")
@@ -70,53 +70,108 @@ class WikiSyncHandler(FileSystemEventHandler):
     def on_created(self, event):
         if not event.is_directory and event.src_path.endswith('.md'):
             logger.info(f"File created: {event.src_path}")
+            node_id, display_name = node_id_from_path(event.src_path, self.knowledge_dir)
+            basename_key = _normalize_segment(display_name)
+            self._basename_index.setdefault(basename_key, [])
+            if node_id not in self._basename_index[basename_key]:
+                self._basename_index[basename_key].append(node_id)
             self._sync_file(event.src_path, is_startup_sync=False)
 
     def on_deleted(self, event):
         if not event.is_directory and event.src_path.endswith('.md'):
             logger.info(f"File deleted: {event.src_path}")
-            name = os.path.splitext(os.path.basename(event.src_path))[0]
-            norm_name = normalize_node_name(name)
-            # B2: if another file elsewhere maps to the same node ID, keep the
-            # node and re-sync it from the survivor instead of deleting (the
-            # deleted file's content may currently occupy the shared row).
-            survivor = self._find_file_for_name(norm_name, exclude_path=event.src_path)
-            if survivor:
-                logger.warning(f"File '{event.src_path}' deleted but node '{norm_name}' kept: "
-                               f"'{survivor}' still maps to the same ID. Re-syncing from survivor.")
-                self._sync_file(survivor, is_startup_sync=True)
-                return
-            self.kuzu_mgr.delete_node(norm_name)
-            self.vector_store.delete_node(norm_name)
-            self.collisions.pop(norm_name, None)
-            logger.info(f"Node '{norm_name}' removed from DBs.")
-
-    def _find_file_for_name(self, norm_name: str, exclude_path: str = None):
-        """Return a .md file under knowledge_dir whose basename normalizes to
-        norm_name, excluding exclude_path. Used to detect basename collisions."""
-        exclude_abs = os.path.abspath(exclude_path) if exclude_path else None
-        for root, dirs, files in os.walk(self.knowledge_dir):
-            for f in files:
-                if not f.endswith('.md'):
-                    continue
-                p = os.path.join(root, f)
-                if exclude_abs and os.path.abspath(p) == exclude_abs:
-                    continue
-                if normalize_node_name(os.path.splitext(f)[0]) == norm_name:
-                    return p
-        return None
+            node_id, display_name = node_id_from_path(event.src_path, self.knowledge_dir)
+            basename_key = _normalize_segment(display_name)
+            ids = self._basename_index.get(basename_key, [])
+            if node_id in ids:
+                ids.remove(node_id)
+                if not ids:
+                    self._basename_index.pop(basename_key, None)
+            self.kuzu_mgr.delete_node(node_id)
+            self.vector_store.delete_node(node_id)
+            logger.info(f"Node '{node_id}' removed from DBs.")
 
     def on_moved(self, event):
         if not event.is_directory and event.dest_path.endswith('.md'):
             logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
-            src_name = os.path.splitext(os.path.basename(event.src_path))[0]
-            dst_name = os.path.splitext(os.path.basename(event.dest_path))[0]
-            if src_name != dst_name:
-                # Different filename: remove old node, new one will be created by sync
-                self.kuzu_mgr.delete_node(normalize_node_name(src_name))
-                self.vector_store.delete_node(src_name)
-            # Sync destination — picks up new folder defaults (project, scope)
+            src_id, src_display = node_id_from_path(event.src_path, self.knowledge_dir)
+            dst_id, dst_display = node_id_from_path(event.dest_path, self.knowledge_dir)
+            if src_id != dst_id:
+                # Remove old node from DB and index
+                self.kuzu_mgr.delete_node(src_id)
+                self.vector_store.delete_node(src_id)
+                src_key = _normalize_segment(src_display)
+                ids = self._basename_index.get(src_key, [])
+                if src_id in ids:
+                    ids.remove(src_id)
+                    if not ids:
+                        self._basename_index.pop(src_key, None)
+                # Register new path in index
+                dst_key = _normalize_segment(dst_display)
+                self._basename_index.setdefault(dst_key, [])
+                if dst_id not in self._basename_index[dst_key]:
+                    self._basename_index[dst_key].append(dst_id)
             self._sync_file(event.dest_path, is_startup_sync=False)
+
+    # ─── Basename index ────────────────────────────────────────────────────────
+
+    def _build_basename_index(self):
+        """Scan knowledge_dir and populate _basename_index.
+
+        Must be called before the cold boot sync pass so that wikilink
+        resolution has complete visibility over all nodes. Maps each
+        normalized basename to the list of path-based node IDs that share it.
+        """
+        self._basename_index = {}
+        for root, dirs, files in os.walk(self.knowledge_dir):
+            for f in files:
+                if not f.endswith('.md'):
+                    continue
+                fp = os.path.join(root, f)
+                node_id, display_name = node_id_from_path(fp, self.knowledge_dir)
+                basename_key = _normalize_segment(display_name)
+                self._basename_index.setdefault(basename_key, [])
+                if node_id not in self._basename_index[basename_key]:
+                    self._basename_index[basename_key].append(node_id)
+        logger.info(f"Basename index built: {len(self._basename_index)} unique basenames, "
+                    f"{sum(len(v) for v in self._basename_index.values())} total entries.")
+
+    def _resolve_wikilink(self, basename: str, source_filepath: str) -> list:
+        """Resolve a wikilink target (display basename) to path-based node ID(s).
+
+        Returns a list (usually length 1) of node IDs to create edges toward.
+
+        Resolution rules:
+        1. Single match in index: use it.
+        2. Multiple matches: prefer the one sharing the same first path segment
+           (project folder) as source_filepath.
+        3. Still tied: return all candidates (create edges to all).
+        4. No match at all: return [basename] as a stub ID so the edge is
+           created with a placeholder; when the target file arrives, the watcher
+           syncs it under the correct path-based ID.
+        """
+        norm_base = _normalize_segment(basename)
+        candidates = list(self._basename_index.get(norm_base, []))
+
+        if not candidates:
+            return [norm_base]  # stub: will be filled when the file is created
+        if len(candidates) == 1:
+            return candidates
+
+        # Prefer same top-level folder (project) as source
+        src_rel = os.path.relpath(os.path.abspath(source_filepath),
+                                  os.path.abspath(self.knowledge_dir))
+        src_parts = src_rel.replace("\\", "/").split("/")
+        src_project = _normalize_segment(src_parts[0]) if src_parts else ""
+
+        preferred = [c for c in candidates if c.startswith(src_project + "__") or c == src_project]
+        if len(preferred) == 1:
+            return preferred
+
+        logger.debug(f"Wikilink [[{basename}]] ambiguous: {candidates}. Creating edges to all.")
+        return candidates
+
+    # ─── Enrichment worker ─────────────────────────────────────────────────────
 
     def _run_enrichment_worker(self):
         """Background thread: calls LLM to extract relations and writes them to frontmatter."""
@@ -124,47 +179,48 @@ class WikiSyncHandler(FileSystemEventHandler):
             item = self._enrich_queue.get()
             if item is None:
                 break
-            filepath, raw_name, body, context_nodes = item
+            filepath, node_id, display_name, body, context_nodes = item
             try:
-                norm_name = normalize_node_name(raw_name)
                 # Re-read current state: file may have been enriched already or deleted
                 fm, body_now, _, _ = self._parse_markdown(filepath)
                 if fm is None:
                     continue
-                # Skip if this exact body was already enriched: our own
-                # frontmatter rewrite (relations + enriched_hash) triggers a
-                # re-sync, but the body is unchanged so there's nothing to redo.
                 if fm.get('enriched_hash') == _hash_body(body_now):
                     continue
                 all_nodes = {n['name'] for n in self.kuzu_mgr.get_all_nodes()}
-                all_nodes.update(context_nodes)  # include wikilinks not yet in graph
-                _, relationships = self.llm.extract_entities(body_now, context_nodes=sorted(all_nodes), current_node=raw_name)
+                all_nodes.update(context_nodes)
+                _, relationships = self.llm.extract_entities(body_now, context_nodes=sorted(all_nodes), current_node=display_name)
                 llm_relations = []
                 for rel in relationships:
                     src = normalize_node_name(str(rel.get('source', '')))
-                    tgt = normalize_node_name(str(rel.get('target', '')))
-                    if src == norm_name and tgt in all_nodes and tgt != norm_name:
+                    tgt_raw = str(rel.get('target', ''))
+                    tgt_norm = normalize_node_name(tgt_raw)
+                    # Resolve tgt to path-based ID if possible
+                    resolved = self._resolve_wikilink(tgt_norm, filepath)
+                    tgt_id = resolved[0] if resolved else tgt_norm
+                    if (src == node_id or src == _normalize_segment(display_name)) \
+                            and tgt_id in all_nodes and tgt_id != node_id:
                         llm_relations.append({
-                            'target': rel.get('target', ''),
+                            'target': tgt_raw,
                             'type': str(rel.get('type', 'RELATED_TO')).upper(),
                             'source': 'llm',
                         })
-                # Re-read frontmatter once more (LLM call takes time; file may have changed)
                 fm, body_now, _, _ = self._parse_markdown(filepath)
                 if fm is None:
                     continue
-                # Preserve user-authored relations (no source or source != llm)
                 existing = fm.get('relations') or []
                 user_relations = [r for r in existing if r.get('source') != 'llm']
                 fm['relations'] = user_relations + llm_relations
                 fm['enriched_at'] = datetime.datetime.now()
                 fm['enriched_hash'] = _hash_body(body_now)
                 self._write_frontmatter(filepath, fm, body_now)
-                logger.info(f"Enrichment: '{norm_name}' → {len(llm_relations)} llm + {len(user_relations)} user relations")
+                logger.info(f"Enrichment: '{node_id}' -> {len(llm_relations)} llm + {len(user_relations)} user relations")
             except Exception as e:
-                logger.error(f"Enrichment error for '{raw_name}': {e}")
+                logger.error(f"Enrichment error for '{node_id}': {e}")
             finally:
                 self._enrich_queue.task_done()
+
+    # ─── Markdown helpers ──────────────────────────────────────────────────────
 
     def _load_folder_defaults(self, filepath: str) -> dict:
         """Read _defaults.yaml from the file's parent folder, if present."""
@@ -178,7 +234,7 @@ class WikiSyncHandler(FileSystemEventHandler):
         return {}
 
     def _parse_markdown(self, filepath: str):
-        """Extracts frontmatter, body, and wikilinks. Returns has_frontmatter flag."""
+        """Extract frontmatter, body, and raw wikilink basenames. Returns has_frontmatter flag."""
         frontmatter, body, wikilinks = {}, "", []
         has_frontmatter = False
         try:
@@ -196,10 +252,12 @@ class WikiSyncHandler(FileSystemEventHandler):
             else:
                 body = content.strip()
 
+            # Collect wikilink display basenames (not normalized yet; resolution
+            # happens in _sync_file using _resolve_wikilink).
             for wl in re.findall(r'\[\[(.*?)\]\]', body):
                 target = wl.split('|')[0].strip()
                 if target:
-                    wikilinks.append(normalize_node_name(target))
+                    wikilinks.append(target)
 
             return frontmatter, body, wikilinks, has_frontmatter
         except Exception as e:
@@ -208,7 +266,6 @@ class WikiSyncHandler(FileSystemEventHandler):
 
     def _write_frontmatter(self, filepath: str, frontmatter: dict, body: str):
         """Write frontmatter + body back to file."""
-        # Guard against ever embedding a frontmatter block inside the body.
         body = strip_leading_frontmatter(body)
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write("---\n")
@@ -216,15 +273,16 @@ class WikiSyncHandler(FileSystemEventHandler):
             f.write("---\n\n")
             f.write(body)
 
-    def _sync_file(self, filepath: str, is_startup_sync: bool = False):
-        raw_name = os.path.splitext(os.path.basename(filepath))[0]
-        norm_name = normalize_node_name(raw_name)
+    # ─── Core sync ────────────────────────────────────────────────────────────
 
-        frontmatter, body, normalized_wikilinks, has_frontmatter = self._parse_markdown(filepath)
+    def _sync_file(self, filepath: str, is_startup_sync: bool = False):
+        node_id, display_name = node_id_from_path(filepath, self.knowledge_dir)
+
+        frontmatter, body, raw_wikilinks, has_frontmatter = self._parse_markdown(filepath)
         if frontmatter is None:
             return
 
-        # Apply folder defaults (_defaults.yaml) for keys not set in the file
+        # Apply folder defaults then system defaults
         needs_rewrite = False
         folder_defaults = self._load_folder_defaults(filepath)
         for key, value in folder_defaults.items():
@@ -232,9 +290,8 @@ class WikiSyncHandler(FileSystemEventHandler):
                 frontmatter[key] = value
                 needs_rewrite = True
 
-        # Apply system defaults for any still-missing required fields
         if 'title' not in frontmatter:
-            frontmatter['title'] = raw_name.replace('_', ' ')
+            frontmatter['title'] = display_name.replace('_', ' ')
             needs_rewrite = True
         if 'type' not in frontmatter:
             frontmatter['type'] = "Reference"
@@ -249,110 +306,93 @@ class WikiSyncHandler(FileSystemEventHandler):
 
         if not has_frontmatter or needs_rewrite:
             self._write_frontmatter(filepath, frontmatter, body)
-            logger.info(f"Frontmatter written for '{norm_name}'")
+            logger.info(f"Frontmatter written for '{node_id}'")
 
         node_type = frontmatter.get('type', 'Node')
         scope = frontmatter.get('scope', 'Public')
         if isinstance(scope, list):
             scope = scope[0]
-        # Project namespace: inherited from the folder's _defaults.yaml (or set explicitly).
         project = frontmatter.get('project', '')
         if isinstance(project, list):
             project = project[0] if project else ''
         project = str(project) if project else ''
 
-        # Sync ChromaDB (semantic layer). Re-embed only when the body content
-        # hash changed (B3): a system-triggered frontmatter rewrite leaves the
-        # body identical, so it neither re-embeds nor re-boosts, killing the
-        # echo-loop. Body unchanged -> cheap metadata-only refresh.
+        # ChromaDB sync (B3: re-embed only on body change)
         file_mtime = os.path.getmtime(filepath)
         body_hash = _hash_body(body)
         rel_path = os.path.relpath(filepath, self.knowledge_dir)
-        existing = self.vector_store.get_node(raw_name)
+        existing = self.vector_store.get_node(node_id)
         existing_meta = existing.get('metadata', {}) if existing else {}
         body_changed = existing_meta.get('_body_hash') != body_hash
-
-        # B2: same node ID from a different source file = basename collision.
-        prev_path = existing_meta.get('_source_path')
-        if prev_path and prev_path != rel_path:
-            self.collisions[norm_name] = {"paths": sorted({prev_path, rel_path})}
-            logger.warning(f"⚠️ Node name collision: '{rel_path}' and '{prev_path}' both map to "
-                           f"node '{norm_name}'; they share one row and overwrite each other.")
 
         frontmatter['_body_hash'] = body_hash
         frontmatter['_mtime'] = file_mtime
         frontmatter['_source_path'] = rel_path
         if body_changed:
-            self.vector_store.upsert_node(raw_name, body, frontmatter)
+            self.vector_store.upsert_node(node_id, body, frontmatter, display_name=display_name)
         else:
-            self.vector_store.update_metadata(raw_name, frontmatter)
-            logger.debug(f"Skipping re-embed for '{norm_name}' (body unchanged)")
+            self.vector_store.update_metadata(node_id, frontmatter, display_name=display_name)
+            logger.debug(f"Skipping re-embed for '{node_id}' (body unchanged)")
 
-        # Ensure node exists in KuzuDB with correct metadata
-        title = frontmatter.get('title', raw_name.replace('_', ' ')).replace('_', ' ')
-        self.kuzu_mgr.add_node(raw_name, initial_activation=0.5, node_type=node_type, scope=scope, display_name=title, project=project)
-        self.kuzu_mgr.update_node_metadata(norm_name, node_type=node_type, scope=scope, project=project)
+        # KuzuDB: ensure node exists with current metadata
+        title = frontmatter.get('title', display_name.replace('_', ' ')).replace('_', ' ')
+        self.kuzu_mgr.add_node(node_id, initial_activation=0.5, node_type=node_type,
+                               scope=scope, display_name=title, project=project)
+        self.kuzu_mgr.update_node_metadata(node_id, node_type=node_type, scope=scope, project=project)
 
-        # Collect every edge target so stubs for not-yet-existing targets inherit
-        # the source node's scope/project instead of defaulting to Public (C1):
-        # a Private node must not spawn a Public stub. When the target later gets
-        # its own file, the real sync overwrites these via update_node_metadata.
-        def _ensure_stub(target_name: str):
-            if not self.kuzu_mgr.get_node(target_name):
-                self.kuzu_mgr.add_node(target_name, node_type="Node", scope=scope, project=project)
+        def _ensure_stub(target_id: str):
+            if not self.kuzu_mgr.get_node(target_id):
+                self.kuzu_mgr.add_node(target_id, node_type="Node", scope=scope, project=project)
 
-        # Build the desired set of file-derived outgoing edges (target, type),
-        # then add them. Wikilinks → LINKED_TO; frontmatter relations → typed.
-        desired = {}  # (norm_target, type) -> weight
-        for target_norm in set(normalized_wikilinks):
-            desired[(normalize_node_name(target_norm), "LINKED_TO")] = 0.8
+        # Resolve wikilinks and frontmatter relations to path-based IDs, then
+        # build the desired set of outgoing edges.
+        desired = {}  # (target_node_id, edge_type) -> weight
+        for wl_display in raw_wikilinks:
+            for tid in self._resolve_wikilink(wl_display, filepath):
+                desired[(tid, "LINKED_TO")] = 0.8
+
         relations = frontmatter.get('relations', [])
         if isinstance(relations, list):
             for rel in relations:
                 target = str(rel.get('target', '')).strip()
                 rel_type = str(rel.get('type', 'RELATED_TO')).upper()
                 if target:
-                    desired[(normalize_node_name(target), rel_type)] = 1.0
+                    for tid in self._resolve_wikilink(target, filepath):
+                        desired[(tid, rel_type)] = 1.0
 
-        # Reconcile: drop file-derived edges that are no longer declared, so a
-        # removed wikilink/relation actually disappears from the graph. Edges
-        # not managed by files (SEMANTICALLY_RELATED, computed by the Gardener)
-        # are preserved.
-        for edge in self.kuzu_mgr.get_outgoing_edges(raw_name):
+        # Reconcile: remove stale file-derived edges; keep ephemeral ones.
+        for edge in self.kuzu_mgr.get_outgoing_edges(node_id):
             etype = edge['type']
             if etype in EPHEMERAL_EDGE_TYPES:
                 continue
             if (edge['target'], etype) not in desired:
-                self.kuzu_mgr.delete_edge(raw_name, edge['target'], etype)
+                self.kuzu_mgr.delete_edge(node_id, edge['target'], etype)
 
-        for (target_norm, rel_type), weight in desired.items():
-            _ensure_stub(target_norm)
-            self.kuzu_mgr.add_edge(raw_name, target_norm, rel_type, weight=weight)
+        for (target_id, rel_type), weight in desired.items():
+            _ensure_stub(target_id)
+            self.kuzu_mgr.add_edge(node_id, target_id, rel_type, weight=weight)
 
-        # Apply file_edit boost only for a real body change, not cold boot and
-        # not a system frontmatter rewrite (B3): editing only the frontmatter
-        # must not reheat the node.
+        # Activation boost for real body edits only (not cold boot, not system rewrites)
         if not is_startup_sync and body_changed:
             if self.am:
-                self.am.record_interaction(norm_name, "file_edit")
+                self.am.record_interaction(node_id, "file_edit")
             else:
-                node_data = self.kuzu_mgr.get_node(norm_name)
+                node_data = self.kuzu_mgr.get_node(node_id)
                 current = (node_data.get('activation_level') or 0.0) if node_data else 0.0
-                self.kuzu_mgr.update_activation(norm_name, min(current + 0.6, 1.0))
+                self.kuzu_mgr.update_activation(node_id, min(current + 0.6, 1.0))
 
-        logger.info(f"Sync {'(startup) ' if is_startup_sync else ''}complete for '{norm_name}'. "
-                    f"Links: {len(set(normalized_wikilinks))}, type={node_type}, scope={scope}")
+        logger.info(f"Sync {'(startup) ' if is_startup_sync else ''}complete for '{node_id}'. "
+                    f"Links: {len(raw_wikilinks)}, type={node_type}, scope={scope}")
 
-        # Enqueue for LLM enrichment if the current body hasn't been enriched yet
-        # (B3): enriched_hash records the body hash at the last enrichment, so a
-        # frontmatter-only rewrite (same body) is skipped and a real edit 5
-        # minutes later is re-enriched. No time window involved.
+        # Enqueue for LLM enrichment if body is new/changed
         if (not is_startup_sync
                 and self.llm is not None
                 and len(body) > 150
                 and node_type not in ('Observation',)):
             if frontmatter.get('enriched_hash') != body_hash:
-                self._enrich_queue.put((filepath, raw_name, body, list(set(normalized_wikilinks))))
+                self._enrich_queue.put((filepath, node_id, display_name,
+                                        body, list({w for wl in raw_wikilinks
+                                                     for w in self._resolve_wikilink(wl, filepath)})))
 
 
 def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):
@@ -372,6 +412,11 @@ def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):
 
     event_handler = WikiSyncHandler(kuzu_mgr, vector_store, knowledge_path)
 
+    # Pass 1: build basename index so wikilink resolution is complete for all files
+    logger.info(f"Building basename index for {knowledge_path}...")
+    event_handler._build_basename_index()
+
+    # Pass 2: cold boot sync
     logger.info(f"Cold boot sync in {knowledge_path}...")
     count = 0
     for root, dirs, files in os.walk(knowledge_path):

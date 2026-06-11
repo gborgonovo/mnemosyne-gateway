@@ -20,7 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import resolve_safe_folder
+from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler
@@ -89,7 +89,8 @@ try:
     # File Watcher runs inside the Gateway to hold the exclusive KuzuDB writer lock
     logger.info(f"Starting internal FileWatcher on {KNOWLEDGE_DIR}...")
     event_handler = WikiSyncHandler(kuzu_mgr, vector_store, KNOWLEDGE_DIR, am=am, llm=llm)
-    # Cold boot: sync all existing files without triggering activation boosts
+    # Cold boot: pass 1 builds the basename index, pass 2 syncs all files
+    event_handler._build_basename_index()
     import os as _os
     for _root, _dirs, _files in _os.walk(KNOWLEDGE_DIR):
         for _fname in _files:
@@ -227,15 +228,40 @@ def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
         f.write(body)
 
 def _find_node_file(name: str) -> Optional[str]:
-    """Search for a node's markdown file recursively under KNOWLEDGE_DIR."""
+    """Search for a node's markdown file recursively under KNOWLEDGE_DIR.
+
+    Accepts:
+      - A path-based node ID (e.g. 'ganaghello__spazi__stalla__stalla'): walks
+        the tree and matches the first file whose computed node_id equals name.
+      - A relative subfolder path (e.g. 'Ganaghello/Spazi/Stalla'): resolves
+        directly under KNOWLEDGE_DIR.
+      - A bare basename (e.g. 'stalla'): case-insensitive recursive search.
+    """
     cleaned = name.strip()
     if cleaned.lower().endswith(".md"):
         cleaned = cleaned[:-3]
     base = os.path.abspath(KNOWLEDGE_DIR)
+
+    # Path-based ID: match by computing node_id for each file
+    if "__" in cleaned:
+        target_id = normalize_node_name(cleaned)
+        for root, dirs, files in os.walk(KNOWLEDGE_DIR):
+            for f in files:
+                if not f.endswith('.md'):
+                    continue
+                fp = os.path.join(root, f)
+                nid, _ = node_id_from_path(fp, KNOWLEDGE_DIR)
+                if nid == target_id:
+                    return fp
+        return None
+
+    # Relative subfolder path
     if "/" in cleaned:
         candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
         if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
             return candidate
+
+    # Bare basename: case-insensitive recursive search
     target = os.path.basename(cleaned).lower()
     for root, dirs, files in os.walk(KNOWLEDGE_DIR):
         for f in files:
@@ -297,21 +323,17 @@ def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
         f.write("---\n\n")
         f.write(body)
 
-    canonical = os.path.splitext(os.path.basename(path))[0]
+    canonical, _ = node_id_from_path(path, KNOWLEDGE_DIR)
     return canonical, action
 
 @app.get("/")
 @app.get("/status")
 def health_check():
-    collisions = getattr(event_handler, "collisions", {})
     return {
         "status": "ok",
         "service": "mnemosyne-gateway",
         "architecture": "file-first",
         "timestamp": datetime.now().isoformat(),
-        # B2: basename collisions detected since startup (same node ID from
-        # different files). Non-empty means data is silently overwriting itself.
-        "name_collisions": collisions,
         "enrich_queue_depth": event_handler._enrich_queue.qsize(),
     }
 
@@ -327,16 +349,18 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
 
     reranked = thermal_rerank(candidates, kuzu_mgr, alpha=RERANK_ALPHA)
     best = reranked[0]
-    name = best['name']
+    display_name = best['name']
+    node_id = best.get('node_id', best['name'])
 
-    # 2. Thermal stimulus and fetch neighbors from Kuzu
-    am.record_interaction(name, interaction_type="mcp_query")
-    neighbors_data = kuzu_mgr.get_neighbors(name, scopes=scope_filter)
+    # 2. Thermal stimulus and fetch neighbors from Kuzu (use path-based ID)
+    am.record_interaction(node_id, interaction_type="mcp_query")
+    neighbors_data = kuzu_mgr.get_neighbors(node_id, scopes=scope_filter)
 
     related = [{"name": n['node_name'], "rel": n['rel_type']} for n in neighbors_data[:15]]
 
     return {
-        "name": name,
+        "name": display_name,
+        "node_id": node_id,
         "type": best['metadata'].get('type', 'Node'),
         "score": best['score'],
         "properties": best['metadata'],
@@ -347,10 +371,17 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
 @app.get("/nodes/{name}")
 def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    # Try direct lookup (works for path-based IDs); fall back to basename resolution
     node_data = vector_store.get_node(name)
     if not node_data:
+        path = _find_node_file(name)
+        if path:
+            resolved_id, _ = node_id_from_path(path, KNOWLEDGE_DIR)
+            node_data = vector_store.get_node(resolved_id)
+            name = resolved_id
+    if not node_data:
         raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
-    scope_filter = actual_scopes if "*" not in actual_scopes else None
     neighbors = kuzu_mgr.get_neighbors(name, scopes=scope_filter)
     return {"data": node_data, "neighbors": neighbors}
 

@@ -335,7 +335,7 @@ class KuzuManager:
 
         query = """
         MATCH (n:Node)
-        WHERE NOT n.name STARTS WITH 'Obs_'
+        WHERE NOT n.name STARTS WITH 'obs_'
         AND n.node_type IN ['Goal', 'Task', 'Node', 'Journal']
         AND COALESCE(n.interaction_count, 0) >= $min_interactions
         RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.last_interaction, n.interaction_count, n.project
@@ -388,7 +388,8 @@ class KuzuManager:
         """
         query = """
         MATCH (n:Node)-[r:RELATES]-(m:Node)
-        WHERE NOT n.name STARTS WITH 'obs_'
+        WHERE NOT n.name CONTAINS '__obs_'
+        AND NOT n.name STARTS WITH 'obs_'
         AND n.activation < $ceiling
         RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.last_interaction,
                n.interaction_count, count(r) AS edge_count
@@ -479,6 +480,36 @@ class KuzuManager:
                 "MATCH (n:Node {name: $name}) SET n.activation = $act, n.last_decay_applied = $now",
                 parameters={"name": name, "act": new_activation, "now": now},
             )
+
+    @_synchronized
+    def find_by_basename(self, basename: str) -> list:
+        """Find all nodes whose path-based ID ends with __<basename> or equals <basename>.
+
+        Used by API endpoints that accept a bare display name and need to resolve
+        it to the actual path-based node ID(s). Returns a list of node dicts;
+        the caller decides how to handle multiple matches (ambiguity).
+        """
+        from core.utils import _normalize_segment
+        norm_base = _normalize_segment(basename)
+        suffix = "__" + norm_base
+        query = """
+        MATCH (n:Node)
+        WHERE n.name = $exact OR n.name ENDS WITH $suffix
+        RETURN n.name, n.display_name, n.activation, n.node_type, n.scope, n.project
+        """
+        res = self.conn.execute(query, parameters={"exact": norm_base, "suffix": suffix})
+        results = []
+        while res.has_next():
+            row = res.get_next()
+            results.append({
+                "name": row[0],
+                "display_name": row[1],
+                "activation_level": row[2],
+                "node_type": row[3],
+                "scope": row[4],
+                "project": row[5],
+            })
+        return results
 
     @_synchronized
     def batch_decay(self, decay_factor: float = 0.95):

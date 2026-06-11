@@ -17,7 +17,9 @@ def thermal_rerank(candidates: list, kuzu_mgr, alpha: float = 0.0) -> list:
     for r in candidates:
         semantic_sim = max(0.0, 1.0 - r["distance"])
         if alpha > 0:
-            node = kuzu_mgr.get_node(r["name"])
+            # Use path-based node_id for KuzuDB lookup (falls back to display name)
+            lookup_key = r.get("node_id", r["name"])
+            node = kuzu_mgr.get_node(lookup_key)
             activation = node.get("activation_level", 0.0) if node else 0.0
         else:
             activation = 0.0

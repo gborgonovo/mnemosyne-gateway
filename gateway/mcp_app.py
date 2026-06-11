@@ -7,7 +7,7 @@ import os
 import yaml
 from datetime import datetime
 
-from core.utils import strip_leading_frontmatter, resolve_safe_folder
+from core.utils import strip_leading_frontmatter, resolve_safe_folder, node_id_from_path, normalize_node_name
 from core.attention import thermal_rerank
 
 
@@ -25,10 +25,14 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     def find_file_recursive(name: str):
         """Locate a markdown file within the knowledge directory.
 
-        Accepts either a bare node name (case-insensitive basename match,
-        searched recursively) or a relative path including subfolders,
-        e.g. 'Sistema/Alfred/System Prompt Alfred 3.0'. A trailing '.md'
-        extension is optional in both forms.
+        Accepts:
+          - A path-based node ID (e.g. 'ganaghello__spazi__stalla__stalla'):
+            walks the tree and matches the first file whose computed node_id
+            equals the input.
+          - A relative subfolder path (e.g. 'Sistema/Alfred/SystemPrompt'):
+            resolved directly under knowledge_dir.
+          - A bare basename (case-insensitive recursive search).
+        The '.md' extension is optional in all forms.
         """
         if not name:
             return None
@@ -39,14 +43,26 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
         base = os.path.abspath(knowledge_dir)
 
-        # 1) Relative path including subfolders → resolve directly under knowledge_dir.
+        # 1) Path-based ID (contains __): match by computed node_id.
+        if "__" in cleaned:
+            target_id = normalize_node_name(cleaned)
+            for root, dirs, files in os.walk(knowledge_dir):
+                for f in files:
+                    if not f.endswith('.md'):
+                        continue
+                    fp = os.path.join(root, f)
+                    nid, _ = node_id_from_path(fp, knowledge_dir)
+                    if nid == target_id:
+                        return fp
+            return None
+
+        # 2) Relative subfolder path → resolve directly.
         if "/" in cleaned:
             candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
-            # Guard against path traversal outside the knowledge directory.
             if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
                 return candidate
 
-        # 2) Fall back to a recursive case-insensitive basename match.
+        # 3) Bare basename: case-insensitive recursive match.
         target = os.path.basename(cleaned).lower()
         for root, dirs, files in os.walk(knowledge_dir):
             for f in files:
@@ -269,11 +285,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
         output = ""
         for r in reranked[:limit]:
-            name = r['name']
-            content = read_markdown(name)
+            display = r['name']
+            node_id = r.get('node_id', r['name'])
+            content = read_markdown(node_id)
             if content:
-                output += f"### FILE: {name}.md (score: {r['score']:.3f})\n```markdown\n{content}\n```\n\n"
-                am.record_interaction(name, interaction_type="mcp_query")
+                output += f"### FILE: {display}.md (score: {r['score']:.3f})\n```markdown\n{content}\n```\n\n"
+                am.record_interaction(node_id, interaction_type="mcp_query")
         return output
 
     @mcp.tool()
@@ -340,13 +357,16 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
              return "The memory is currently resting. No active thoughts."
              
         active_nodes.sort(key=lambda x: x['activation_level'], reverse=True)
-        hot_topics = [n['name'] for n in active_nodes if not n['name'].startswith("obs_")][:10]
+        hot_nodes = [n for n in active_nodes
+                     if not n['name'].startswith("obs_") and "__obs_" not in n['name']][:10]
 
         briefing = "Current active internal thoughts (Hot Nodes):\n"
-        for title in hot_topics:
-            content = read_markdown(title)
+        for n in hot_nodes:
+            node_id = n['name']
+            display = n.get('display_name') or node_id
+            content = read_markdown(node_id)
             preview = content[:150].replace('\n', ' ') + "..." if content else "File not found"
-            briefing += f"- {title} (Context: {preview})\n"
+            briefing += f"- {display} (Context: {preview})\n"
 
         dormant_cfg = config.get("attention", {}).get("dormant", {})
         dormant_nodes = kuzu_mgr.get_dormant_nodes(
@@ -357,7 +377,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         if dormant_nodes:
             briefing += "\nDormienti (erano attivi, ora inattivi):\n"
             for n in dormant_nodes[:5]:
-                briefing += f"- {n['name']} ({n['node_type']}, inattivo da {n['days_inactive']}gg)\n"
+                display = n.get('display_name') or n['name']
+                briefing += f"- {display} ({n['node_type']}, inattivo da {n['days_inactive']}gg)\n"
         return briefing
 
     @mcp.tool()

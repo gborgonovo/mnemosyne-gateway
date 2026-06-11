@@ -57,24 +57,52 @@ def strip_leading_frontmatter(body: str) -> str:
     return body.lstrip("\n") if changed else body
 
 
+def _normalize_segment(name: str) -> str:
+    """Normalize a single path segment (no __ separators) to a DB-safe string."""
+    normalized = name.lower().strip()
+    normalized = re.sub(r'[\s\-]+', '_', normalized)
+    normalized = re.sub(r'[^\w]', '', normalized)
+    normalized = re.sub(r'_{2,}', '_', normalized)
+    return normalized.strip('_')
+
+
 def normalize_node_name(name: str) -> str:
-    """
-    Standardizes a node name for use as a primary key in databases.
-    Ensures case-insensitivity and uniform formatting.
+    """Standardize a node name or path-based node ID for use as a primary key.
+
+    Path-based IDs use '__' (double underscore) as a segment separator
+    (e.g. 'ganaghello__spazi__stalla'). The separator is preserved so that
+    IDs round-trip correctly through this function. Single-segment names
+    (no '__') are normalized as before: lowercase, spaces/dashes to underscores,
+    non-alphanumeric removed.
     """
     if not name:
         return "unnamed"
-    
-    # 1. To lowercase
-    normalized = name.lower().strip()
-    
-    # 2. Standardize separators (replace spaces and dashes with underscores)
-    normalized = re.sub(r'[\s\-]+', '_', normalized)
-    
-    # 3. Remove any non-alphanumeric characters (except underscores)
-    normalized = re.sub(r'[^\w]', '', normalized)
-    
-    # 4. Collapse multiple underscores
-    normalized = re.sub(r'_{2,}', '_', normalized)
-    
-    return normalized.strip('_')
+    name = name.strip()
+    if "__" in name:
+        parts = name.split("__")
+        normed = [_normalize_segment(p) for p in parts if p]
+        return "__".join(normed) if normed else "unnamed"
+    return _normalize_segment(name)
+
+
+def node_id_from_path(filepath: str, knowledge_dir: str) -> tuple:
+    """Derive the path-based node ID and display name from a markdown file path.
+
+    Returns (node_id, display_name) where:
+      node_id      = path segments joined with '__', each segment normalized
+                     e.g. 'ganaghello__spazi__stalla__stalla'
+      display_name = the filename without extension (original casing)
+                     e.g. 'Stalla'
+
+    Files at the knowledge root have no folder prefix; the node_id is just
+    the normalized filename: 'knowledge/alfred.md' -> ('alfred', 'alfred').
+    """
+    knowledge_abs = os.path.abspath(knowledge_dir)
+    file_abs = os.path.abspath(filepath)
+    rel = os.path.relpath(file_abs, knowledge_abs)       # e.g. 'Ganaghello/Spazi/Stalla/Stalla.md'
+    rel_no_ext = os.path.splitext(rel)[0]                # e.g. 'Ganaghello/Spazi/Stalla/Stalla'
+    parts = rel_no_ext.replace("\\", "/").split("/")     # e.g. ['Ganaghello', 'Spazi', 'Stalla', 'Stalla']
+    display_name = parts[-1]                             # e.g. 'Stalla'
+    normed_parts = [_normalize_segment(p) for p in parts if p and p != "."]
+    node_id = "__".join(normed_parts)                   # e.g. 'ganaghello__spazi__stalla__stalla'
+    return node_id, display_name
