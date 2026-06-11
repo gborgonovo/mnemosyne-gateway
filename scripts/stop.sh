@@ -36,20 +36,6 @@ fi
 # 3. FINAL CLEANUP: kill any remaining processes by name
 pkill -f "gateway/http_server.py" 2>/dev/null
 
-# Stop LLM Worker
-if [ -f logs/llm_worker.pid ]; then
-  PID=$(cat logs/llm_worker.pid)
-  kill $PID 2>/dev/null && echo "✅ LLM Worker stopped ($PID)"
-  rm logs/llm_worker.pid
-fi
-
-# Stop Briefing Worker
-if [ -f logs/briefing_worker.pid ]; then
-  PID=$(cat logs/briefing_worker.pid)
-  kill $PID 2>/dev/null && echo "✅ Briefing Worker stopped ($PID)"
-  rm logs/briefing_worker.pid
-fi
-
 # Stop File Watcher
 if [ -f logs/file_watcher.pid ]; then
   PID=$(cat logs/file_watcher.pid)
@@ -60,7 +46,5 @@ fi
 # Kill any zombie processes
 pkill -f "gateway/http_server.py" 2>/dev/null
 pkill -f "workers/file_watcher.py" 2>/dev/null
-pkill -f "workers/llm_worker.py" 2>/dev/null
-pkill -f "workers/briefing_worker.py" 2>/dev/null
 
 echo "💤 All processes have been stopped."

@@ -9,6 +9,7 @@ context:
   endpoints:
     - /briefing
     - /briefing/longitudinal
+    - /briefing/initiatives
 
 delivery:
   tool: smtp

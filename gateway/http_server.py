@@ -21,6 +21,7 @@ from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel
 from core.utils import resolve_safe_folder
+from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler
 from watchdog.observers import Observer
@@ -408,6 +409,25 @@ def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = 
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
     return _compute_briefing(scope_filter)
+
+@app.get("/briefing/initiatives")
+def get_initiatives(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Proactive Butler suggestions: hot nodes whose linked neighbors went cold.
+
+    Replaces the standalone briefing_worker (which opened a second KuzuDB
+    connection against the gateway's lock and died at startup): the engine runs
+    in-process on the gateway's own connection. Consumed by the Alfred morning
+    briefing plugin (plugins/morning_briefing.yaml) and available on demand.
+    """
+    actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+    engine = InitiativeEngine(kuzu_mgr, config=config)
+    items = engine.generate_initiatives(scopes=scope_filter)
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "count": len(items),
+        "initiatives": items,
+    }
 
 @app.get("/briefing/longitudinal")
 def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
