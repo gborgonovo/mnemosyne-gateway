@@ -629,4 +629,7 @@ app.mount("/mcp", MCPAuthMiddleware(mcp_app, api_keys=api_keys))
 if __name__ == "__main__":
     host = config.get('gateway', {}).get('host', "0.0.0.0")
     port = config.get('gateway', {}).get('port', 4001)
-    uvicorn.run(app, host=host, port=port)
+    # access_log disabled: the MCP API key travels in the ?k= query string, which
+    # uvicorn's access log would write to journald. Nginx logs requests instead,
+    # with a log_format that omits the query string (see deploy/nginx notes).
+    uvicorn.run(app, host=host, port=port, access_log=False)
