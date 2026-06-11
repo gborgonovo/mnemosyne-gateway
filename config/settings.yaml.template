@@ -113,6 +113,15 @@ gardener:
 gateway:
   host: "0.0.0.0"
   port: 4001
+  # Fail-closed auth: when true the gateway refuses to start if
+  # config/api_keys.yaml is missing or empty, instead of serving open access.
+  # Keep false for local dev; set true in production once every client has a key.
+  auth_required: false
+  # Allowed CORS origins. Use an explicit list in production (the chat UI is
+  # same-origin via /chat, so it needs no entry here). "*" is permitted only
+  # with credentials disabled; the gateway enforces that pairing automatically.
+  cors_origins:
+    - "*"
 
 retrieval:
   # Numero di concetti correlati da includere nel contesto della chat per ogni entità rilevata
