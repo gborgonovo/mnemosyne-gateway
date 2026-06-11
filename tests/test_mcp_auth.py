@@ -44,11 +44,12 @@ def _build_mcp(api_keys):
     return mcp, app
 
 
-async def _call_whoami(mcp, app, header_key=None):
+async def _call_whoami(mcp, app, header_key=None, query_key=None):
     """Drive the MCP stateless protocol and return (status, parsed_tool_json).
 
     Wraps the call in session_manager.run() exactly like the gateway lifespan,
-    since the streamable-HTTP task group is created there.
+    since the streamable-HTTP task group is created there. The key can be passed
+    via the X-API-Key header or the ?k= query param (Claude web's path).
     """
     transport = httpx.ASGITransport(app=app)
     headers = {
@@ -58,13 +59,15 @@ async def _call_whoami(mcp, app, header_key=None):
     if header_key is not None:
         headers["X-API-Key"] = header_key
 
+    url = "/" if query_key is None else f"/?k={query_key}"
+
     async with mcp.session_manager.run():
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
             body = {
                 "jsonrpc": "2.0", "id": 1, "method": "tools/call",
                 "params": {"name": "whoami", "arguments": {}},
             }
-            resp = await client.post("/", json=body, headers=headers)
+            resp = await client.post(url, json=body, headers=headers)
             if resp.status_code != 200:
                 return resp.status_code, None
 
@@ -128,6 +131,18 @@ class TestMCPAuthE2E(unittest.TestCase):
         # Can write both
         self.assertFalse(data["write_private_denied"])
         self.assertFalse(data["write_public_denied"])
+
+    def test_query_param_key(self):
+        # Claude web carries the key in the connector URL (?k=...), no header
+        status, data = anyio.run(
+            _call_whoami, self.mcp, self.app, None, "KPUB")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["scopes"], ["Public"])
+
+    def test_query_param_invalid_is_401(self):
+        status, _ = anyio.run(
+            _call_whoami, self.mcp, self.app, None, "NOPE")
+        self.assertEqual(status, 401)
 
 
 if __name__ == "__main__":

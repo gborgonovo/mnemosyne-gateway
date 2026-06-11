@@ -20,6 +20,7 @@ Authorization tiers (enforced inside the tools):
 import json
 from contextvars import ContextVar
 from typing import List, Optional
+from urllib.parse import parse_qs
 
 # Allowed scopes for the current request. "*" means unrestricted (dev mode with
 # no api_keys.yaml configured). Empty list should never be observed inside a tool
@@ -135,10 +136,26 @@ class MCPAuthMiddleware:
 
     @staticmethod
     def _extract_api_key(scope) -> Optional[str]:
+        """Extract the API key from the X-API-Key header, falling back to the
+        ?k= query parameter.
+
+        Claude Code can send a custom header; Claude web connectors cannot, so
+        the key is carried in the connector URL's query string instead. The
+        header takes precedence when both are present.
+        """
         # ASGI header names are lowercased per spec; match defensively anyway.
         for name, value in scope.get("headers", []):
             if name.lower() == b"x-api-key":
-                return value.decode("latin-1") or None
+                decoded = value.decode("latin-1")
+                if decoded:
+                    return decoded
+
+        query_string = scope.get("query_string", b"")
+        if query_string:
+            params = parse_qs(query_string.decode("latin-1"))
+            values = params.get("k")
+            if values and values[0]:
+                return values[0]
         return None
 
     @staticmethod
