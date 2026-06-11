@@ -619,8 +619,12 @@ def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verif
     return {"status": "success", "action": action, "name": canonical,
             "type": node.node_type, "scope": node.scope}
 
-# Mount MCP
-app.mount("/mcp", mcp_app)
+# Mount MCP behind the auth middleware. FastAPI's Depends(verify_api_key) does
+# NOT propagate to mounted sub-apps, so without this wrapper the entire MCP
+# surface would be unauthenticated. The middleware validates X-API-Key and
+# publishes the caller's scopes into a ContextVar the tools read.
+from core.mcp_auth import MCPAuthMiddleware
+app.mount("/mcp", MCPAuthMiddleware(mcp_app, api_keys=api_keys))
 
 if __name__ == "__main__":
     host = config.get('gateway', {}).get('host', "0.0.0.0")
