@@ -19,7 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
-from core.attention import AttentionModel
+from core.attention import AttentionModel, thermal_rerank
 from core.utils import resolve_safe_folder
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
@@ -49,6 +49,10 @@ if os.path.exists(API_KEYS_FILE):
 
 # Fail-closed auth: in production (auth_required: true) refuse to start with an
 # open API rather than silently serving everything if api_keys.yaml went missing.
+RETRIEVAL_CFG = config.get('retrieval', {})
+RERANK_ALPHA = float(RETRIEVAL_CFG.get('rerank_alpha', 0.0))
+CHROMA_PREFETCH = int(RETRIEVAL_CFG.get('chroma_prefetch', 10))
+
 GATEWAY_CFG = config.get('gateway', {})
 if GATEWAY_CFG.get('auth_required', False) and not api_keys:
     logger.error(
@@ -314,34 +318,30 @@ def health_check():
 @app.get("/search")
 def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
-    
-    # 1. Semantic Search in Chroma
-    results = vector_store.semantic_search(q, scopes=actual_scopes if '*' not in actual_scopes else None, limit=1)
-    
-    if not results:
+    scope_filter = actual_scopes if "*" not in actual_scopes else None
+
+    # 1. Fetch candidates from Chroma and apply thermal re-rank
+    candidates = vector_store.semantic_search(q, scopes=scope_filter, limit=CHROMA_PREFETCH)
+    if not candidates:
         raise HTTPException(status_code=404, detail=f"Concept '{q}' not found.")
-        
-    best_match = results[0]
-    name = best_match['name']
-    
+
+    reranked = thermal_rerank(candidates, kuzu_mgr, alpha=RERANK_ALPHA)
+    best = reranked[0]
+    name = best['name']
+
     # 2. Thermal stimulus and fetch neighbors from Kuzu
     am.record_interaction(name, interaction_type="mcp_query")
-    scope_filter = actual_scopes if "*" not in actual_scopes else None
     neighbors_data = kuzu_mgr.get_neighbors(name, scopes=scope_filter)
-    
-    related = []
-    for n in neighbors_data[:15]:
-        related.append({
-            "name": n['node_name'],
-            "rel": n['rel_type']
-        })
-        
+
+    related = [{"name": n['node_name'], "rel": n['rel_type']} for n in neighbors_data[:15]]
+
     return {
         "name": name,
-        "type": best_match['metadata'].get('type', 'Node'),
-        "properties": best_match['metadata'],
+        "type": best['metadata'].get('type', 'Node'),
+        "score": best['score'],
+        "properties": best['metadata'],
         "related": related,
-        "document": best_match['document']
+        "document": best['document'],
     }
 
 @app.get("/nodes/{name}")

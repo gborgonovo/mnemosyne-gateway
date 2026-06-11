@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-Mnemosyne retrieval eval runner — Phase 4a.
+Mnemosyne retrieval eval runner — Phase 4a/4b.
 
 Reads eval_set.json, runs each query, measures recall@1/3/5 for
 recall + temporal queries, precision_abstain for abstention, and
 edge_precision for typed-relation queries (HTTP-only).
 
 Usage:
-  # Offline (semantic + abstention only):
-  cd /path/to/mnemosyne-gateway
+  # Offline (semantic + abstention, no re-rank):
   python3 evals/run_eval.py
 
-  # Full (includes edge queries via gateway HTTP):
+  # Full (all categories via gateway HTTP, includes thermal re-rank):
   python3 evals/run_eval.py --api http://localhost:4001 --key mnm_sk_...
 
 Results saved to evals/results_YYYYMMDD_HHMMSS.json for diff across runs.
+HTTP mode measures recall@1 via /search (which applies B1 thermal re-rank).
+Offline mode measures recall@1/3/5 via direct ChromaDB (pure semantic, no re-rank).
 """
 import argparse
 import json
@@ -92,6 +93,42 @@ def run_edge(api_url: str, api_key: str, item: dict) -> dict:
         return {"skip": True, "reason": str(exc)}
 
 
+def run_recall_http(api_url: str, api_key: str, item: dict) -> dict:
+    """Run a recall/temporal query via HTTP /search (tests the full re-rank pipeline).
+
+    /search returns only the top-1 result after thermal re-ranking, so only
+    recall@1 is meaningful here; @3 and @5 are set equal to @1.
+    """
+    try:
+        import requests
+    except ImportError:
+        return {"skip": True, "reason": "requests not installed"}
+    expected = [_norm(e) for e in item["expected_top"]]
+    try:
+        resp = requests.get(
+            f"{api_url}/search",
+            params={"q": item["query"]},
+            headers={"X-API-Key": api_key},
+            timeout=10,
+        )
+        if resp.status_code == 404:
+            return {"hit@1": False, "hit@3": False, "hit@5": False,
+                    "top5": [], "min_distance": None, "via": "http"}
+        if resp.status_code != 200:
+            return {"skip": True, "reason": f"HTTP {resp.status_code}"}
+        data = resp.json()
+        name = _norm(data.get("name", ""))
+        score = data.get("score")
+        hit = any(name == e for e in expected)
+        return {
+            "hit@1": hit, "hit@3": hit, "hit@5": hit,
+            "top5": [(data.get("name"), score)],
+            "min_distance": None, "via": "http",
+        }
+    except Exception as exc:
+        return {"skip": True, "reason": str(exc)}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--api", metavar="URL", help="Gateway base URL for edge queries")
@@ -113,11 +150,15 @@ def main():
 
     vs = VectorStore()
     all_results = []
+    mode = "http" if (args.api and args.key) else "offline"
 
     for item in eval_set["queries"]:
         cat = item["category"]
         if cat in ("recall", "temporal"):
-            result = run_recall(vs, item)
+            if mode == "http":
+                result = run_recall_http(args.api, args.key, item)
+            else:
+                result = run_recall(vs, item)
         elif cat == "abstention":
             result = run_abstention(vs, item)
         elif cat == "edge":
@@ -161,7 +202,8 @@ def main():
 
     # Print report
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n=== Mnemosyne Retrieval Eval — {ts} ===\n")
+    mode_label = f"HTTP ({args.api})" if mode == "http" else "offline (direct ChromaDB, no re-rank)"
+    print(f"\n=== Mnemosyne Retrieval Eval — {ts} [{mode_label}] ===\n")
     for cat, m in metrics.items():
         if m.get("n", 0) > 0 or m.get("skipped", 0) > 0:
             print(f"  [{cat.upper():<12}]  {m}")
