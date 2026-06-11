@@ -75,6 +75,14 @@ def intersect_scopes(requested: str, allowed: List[str]) -> List[str]:
     if "*" in allowed: return requested_list
     return list(set(requested_list) & set(allowed))
 
+def _assert_write_scope(scope: str, api_auth: dict):
+    """Raise 403 if the API key is not allowed to write nodes of the given scope."""
+    allowed = api_auth["scopes"]
+    if "*" in allowed:
+        return
+    if scope not in allowed:
+        raise HTTPException(status_code=403, detail=f"Key not permitted to write scope '{scope}'")
+
 # Initialize Core
 try:
     kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"))
@@ -386,18 +394,29 @@ def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[s
     return {"data": node_data, "neighbors": neighbors}
 
 @app.delete("/nodes/{name}")
-def delete_node_api(name: str, scopes: Optional[str] = "Public", api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+def delete_node_api(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     """Delete a node of ANY type (Node/Goal/Task/Journal/...) by name, in any
-    project subfolder (C4). Deletes the markdown file; the watcher then removes
-    it from the graph and vectors. The `scopes` query param is accepted for
-    compatibility but not used to gate the deletion."""
-    # Resolve recursively so nodes created inside a project subfolder are found too
-    # (get_file_path only looks in the knowledge/ root).
+    project subfolder. Deletes the markdown file; the watcher then removes it
+    from the graph and vectors. The key must have write permission for the
+    node's actual scope (read from frontmatter before deletion)."""
     path = _find_node_file(name) or get_file_path(name)
-    if os.path.exists(path):
-        os.remove(path)
-        return {"status": "success", "message": f"Node '{name}' deleted"}
-    raise HTTPException(status_code=404, detail="File not found")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    node_scope = "Private"  # fail-safe: unknown scope treated as most restrictive
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            raw = f.read()
+        m = re.match(r'^---\n(.*?)\n---\n', raw, re.DOTALL)
+        if m:
+            fm = yaml.safe_load(m.group(1)) or {}
+            node_scope = fm.get("scope", "Private")
+    except Exception:
+        pass
+    _assert_write_scope(node_scope, api_auth)
+
+    os.remove(path)
+    return {"status": "success", "message": f"Node '{name}' deleted"}
 
 @app.get("/graph/stats")
 def get_graph_stats():
@@ -511,6 +530,7 @@ def get_project_briefing(project: str, scopes: Optional[str] = None, api_auth: D
     return _compute_briefing(scope_filter, project=project)
 @app.post("/observations")
 def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    _assert_write_scope(obs.scope, api_auth)
     obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
     frontmatter = {"type": "Observation", "scope": obs.scope}
     write_markdown(obs_id, frontmatter, obs.content)
@@ -519,6 +539,7 @@ def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depen
 @app.post("/goals", response_model=NodeWriteResponse)
 def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     scope = _resolve_scope(goal.scope, goal.scopes)
+    _assert_write_scope(scope, api_auth)
     frontmatter: Dict[str, Any] = {
          "type": "Goal",
          "status": "active",
@@ -534,6 +555,7 @@ def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_
 @app.post("/tasks", response_model=NodeWriteResponse)
 def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     scope = _resolve_scope(task.scope, task.scopes)
+    _assert_write_scope(scope, api_auth)
     frontmatter: Dict[str, Any] = {
          "type": "Task",
          "status": "todo",
@@ -553,6 +575,7 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
 
 @app.post("/nodes", response_model=NodeWriteResponse)
 def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    _assert_write_scope(node.scope, api_auth)
     frontmatter: Dict[str, Any] = {
         "type": node.node_type,
         "scope": node.scope,
