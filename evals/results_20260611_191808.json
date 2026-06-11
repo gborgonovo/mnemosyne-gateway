@@ -1,0 +1,624 @@
+{
+  "timestamp": "2026-06-11 19:18:08",
+  "metrics": {
+    "recall": {
+      "n": 13,
+      "skipped": 0,
+      "recall@1": 0.692,
+      "recall@3": 0.769,
+      "recall@5": 0.769
+    },
+    "temporal": {
+      "n": 4,
+      "skipped": 0,
+      "recall@1": 0.25,
+      "recall@3": 0.25,
+      "recall@5": 0.25
+    },
+    "abstention": {
+      "n": 5,
+      "precision_abstain": 0.4,
+      "avg_min_dist": 0.515
+    },
+    "edge": {
+      "n": 0,
+      "skipped": 3,
+      "edge_precision": 0
+    }
+  },
+  "queries": [
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Ganaghello",
+          0.417
+        ],
+        [
+          "Silos",
+          0.483
+        ],
+        [
+          "Tettoia_Ovest",
+          0.497
+        ],
+        [
+          "Casa_Bianca",
+          0.505
+        ],
+        [
+          "progetto_Borgonovo_in_Ganaghello",
+          0.515
+        ]
+      ],
+      "min_distance": 0.417,
+      "id": "R01",
+      "category": "recall",
+      "query": "luogo Val Tidone Borgonovo project location description"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Impianto_fotovoltaico",
+          0.45
+        ],
+        [
+          "gemini",
+          0.617
+        ],
+        [
+          "efficienza_energetica",
+          0.621
+        ],
+        [
+          "AI_Newsletter",
+          0.626
+        ],
+        [
+          "claude",
+          0.635
+        ]
+      ],
+      "min_distance": 0.45,
+      "id": "R02",
+      "category": "recall",
+      "query": "pannelli fotovoltaici energia rinnovabile impianto solare autonomia energetica"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Compleanno_Rossella",
+          0.505
+        ],
+        [
+          "Trasformare_la_stalla_in_un_ambiente_abitabile_in_cui_fare_festeeventi",
+          0.537
+        ],
+        [
+          "Trasformare_la_proprietà_in_BB_coworking_ed_eventi",
+          0.549
+        ],
+        [
+          "visione_progetto",
+          0.549
+        ],
+        [
+          "Casa_Bianca",
+          0.557
+        ]
+      ],
+      "min_distance": 0.505,
+      "id": "R03",
+      "category": "recall",
+      "query": "compleanno festa Rossella evento"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "alejandra_alvarez",
+          0.453
+        ],
+        [
+          "GiodaLab",
+          0.521
+        ],
+        [
+          "giuliana_laurita",
+          0.527
+        ],
+        [
+          "alejandra",
+          0.535
+        ],
+        [
+          "Giorgio_Borgonovo",
+          0.552
+        ]
+      ],
+      "min_distance": 0.453,
+      "id": "R04",
+      "category": "recall",
+      "query": "Alejandra Alvarez sales coaching business development GiodaLab"
+    },
+    {
+      "hit@1": false,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "ristrutturazioni",
+          0.473
+        ],
+        [
+          "Controllare_mensilmente_i_bandi_utili_per_il_progetto_di_Ganaghello",
+          0.504
+        ],
+        [
+          "bandi",
+          0.506
+        ],
+        [
+          "test",
+          0.545
+        ],
+        [
+          "sostenibilita",
+          0.561
+        ]
+      ],
+      "min_distance": 0.473,
+      "id": "R05",
+      "category": "recall",
+      "query": "bandi nazionali regionali finanziamento controllo mensile primo lunedì"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Integrazione_Mautic-Hubspot",
+          0.501
+        ],
+        [
+          "Rebuild_n8n_workflow",
+          0.575
+        ],
+        [
+          "hubspot",
+          0.581
+        ],
+        [
+          "mautic",
+          0.606
+        ],
+        [
+          "alejandra",
+          0.615
+        ]
+      ],
+      "min_distance": 0.501,
+      "id": "R06",
+      "category": "recall",
+      "query": "Mautic HubSpot integrazione CRM marketing workflow n8n Alejandra"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Wiki-style_Slides",
+          0.568
+        ],
+        [
+          "letizia",
+          0.676
+        ],
+        [
+          "n8n",
+          0.676
+        ],
+        [
+          "hubspot",
+          0.677
+        ],
+        [
+          "federico",
+          0.677
+        ]
+      ],
+      "min_distance": 0.568,
+      "id": "R07",
+      "category": "recall",
+      "query": "presentazione alternativa PowerPoint ipertesto wiki slides"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "GiodaLab",
+          0.404
+        ],
+        [
+          "alejandra",
+          0.428
+        ],
+        [
+          "giuliana",
+          0.431
+        ],
+        [
+          "davide",
+          0.44
+        ],
+        [
+          "giuliana_laurita",
+          0.443
+        ]
+      ],
+      "min_distance": 0.404,
+      "id": "R08",
+      "category": "recall",
+      "query": "GiodaLab profilo aziendale competenze team"
+    },
+    {
+      "hit@1": false,
+      "hit@3": false,
+      "hit@5": false,
+      "top5": [
+        [
+          "intelligenza_artificiale",
+          0.382
+        ],
+        [
+          "grok",
+          0.398
+        ],
+        [
+          "chatgpt",
+          0.412
+        ],
+        [
+          "notebooklm",
+          0.428
+        ],
+        [
+          "perplexity",
+          0.44
+        ]
+      ],
+      "min_distance": 0.382,
+      "id": "R09",
+      "category": "recall",
+      "query": "ricognizione settimanale intelligenza artificiale studenti aggiornamenti giovedì"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "alfred",
+          0.471
+        ],
+        [
+          "Rendere_Mnemosyne_pubblico",
+          0.55
+        ],
+        [
+          "Wiki-style_Slides",
+          0.552
+        ],
+        [
+          "Promuovere_Mnemosyne_alla_community_di_sviluppatori",
+          0.569
+        ],
+        [
+          "task_promuovere_mnemosyne",
+          0.569
+        ]
+      ],
+      "min_distance": 0.471,
+      "id": "R10",
+      "category": "recall",
+      "query": "Alfred Mnemosyne sistema memoria online borgonovo.org"
+    },
+    {
+      "hit@1": false,
+      "hit@3": false,
+      "hit@5": false,
+      "top5": [
+        [
+          "mautic",
+          0.512
+        ],
+        [
+          "n8n",
+          0.519
+        ],
+        [
+          "telegram",
+          0.527
+        ],
+        [
+          "hubspot",
+          0.531
+        ],
+        [
+          "olio_per_la_miscela",
+          0.531
+        ]
+      ],
+      "min_distance": 0.512,
+      "id": "R11",
+      "category": "recall",
+      "query": "rogito atto notarile compravendita acquisto immobile"
+    },
+    {
+      "hit@1": false,
+      "hit@3": false,
+      "hit@5": false,
+      "top5": [
+        [
+          "vialetto",
+          0.489
+        ],
+        [
+          "Pilastrini_del_porticato_in_calcestruzzo_a_ovest_dellaia_a_Ganaghello",
+          0.492
+        ],
+        [
+          "area_del_giardino",
+          0.495
+        ],
+        [
+          "area_giardino",
+          0.495
+        ],
+        [
+          "gabriele",
+          0.495
+        ]
+      ],
+      "min_distance": 0.489,
+      "id": "R12",
+      "category": "recall",
+      "query": "serramenti infissi finestre porte restauro esterno"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Trasformare_la_proprietà_in_BB_coworking_ed_eventi",
+          0.341
+        ],
+        [
+          "visione_progetto",
+          0.341
+        ],
+        [
+          "sala_polifunzionale",
+          0.398
+        ],
+        [
+          "interventi_di_livellamento_e_pulizia",
+          0.401
+        ],
+        [
+          "task_livellamento_pulizia",
+          0.401
+        ]
+      ],
+      "min_distance": 0.341,
+      "id": "R13",
+      "category": "recall",
+      "query": "trasformare stalla spazio abitabile feste eventi"
+    },
+    {
+      "hit@1": false,
+      "hit@3": false,
+      "hit@5": false,
+      "top5": [
+        [
+          "porticato_di_Ganaghello",
+          0.468
+        ],
+        [
+          "agevolazioni",
+          0.477
+        ],
+        [
+          "Comprare_lacqua_da_portare_a_Ganaghello",
+          0.478
+        ],
+        [
+          "palla",
+          0.482
+        ],
+        [
+          "task_palla",
+          0.482
+        ]
+      ],
+      "min_distance": 0.468,
+      "id": "T01",
+      "category": "temporal",
+      "query": "obiettivo scadenza Ganaghello 2026 completare entro"
+    },
+    {
+      "hit@1": false,
+      "hit@3": false,
+      "hit@5": false,
+      "top5": [
+        [
+          "Ganaghello",
+          0.58
+        ],
+        [
+          "Fare_sito_web",
+          0.592
+        ],
+        [
+          "Recuperare_e_mettere_da_parte_mattoni_e_tegole",
+          0.595
+        ],
+        [
+          "paesaggio",
+          0.596
+        ],
+        [
+          "strategia_strutturale_ganaghello",
+          0.599
+        ]
+      ],
+      "min_distance": 0.58,
+      "id": "T02",
+      "category": "temporal",
+      "query": "task archiviato completato Ganaghello archivio 2024"
+    },
+    {
+      "hit@1": true,
+      "hit@3": true,
+      "hit@5": true,
+      "top5": [
+        [
+          "Controllare_mensilmente_i_bandi_utili_per_il_progetto_di_Ganaghello",
+          0.582
+        ],
+        [
+          "ristrutturazioni",
+          0.593
+        ],
+        [
+          "Hub_Creativo_e_Sociale",
+          0.617
+        ],
+        [
+          "hub_creativo",
+          0.617
+        ],
+        [
+          "alfred",
+          0.646
+        ]
+      ],
+      "min_distance": 0.582,
+      "id": "T03",
+      "category": "temporal",
+      "query": "bandi finanziamento scadenza periodica controllo programmato"
+    },
+    {
+      "hit@1": false,
+      "hit@3": false,
+      "hit@5": false,
+      "top5": [
+        [
+          "attrezzature_agricole",
+          0.485
+        ],
+        [
+          "orientamento",
+          0.495
+        ],
+        [
+          "aia_02",
+          0.502
+        ],
+        [
+          "animali",
+          0.512
+        ],
+        [
+          "task_animali",
+          0.512
+        ]
+      ],
+      "min_distance": 0.485,
+      "id": "T04",
+      "category": "temporal",
+      "query": "impianto elettrico lavori in corso ristrutturazione in progress"
+    },
+    {
+      "skip": true,
+      "reason": "pass --api and --key to enable edge queries",
+      "id": "E01",
+      "category": "edge",
+      "query": "Alfred gestisce task ricorrenti studenti intelligenza artificiale"
+    },
+    {
+      "skip": true,
+      "reason": "pass --api and --key to enable edge queries",
+      "id": "E02",
+      "category": "edge",
+      "query": "ristrutturazioni progetto Ganaghello appartiene"
+    },
+    {
+      "skip": true,
+      "reason": "pass --api and --key to enable edge queries",
+      "id": "E03",
+      "category": "edge",
+      "query": "Wiki Slides progetto Giorgio presentazione"
+    },
+    {
+      "pass": false,
+      "top1": "community_sviluppatori",
+      "min_distance": 0.506,
+      "threshold": 0.55,
+      "id": "A01",
+      "category": "abstention",
+      "query": "ricetta pasta carbonara guanciale uova pecorino romano"
+    },
+    {
+      "pass": true,
+      "top1": "tecnologia_anthropic_claude",
+      "min_distance": 0.738,
+      "threshold": 0.65,
+      "id": "A02",
+      "category": "abstention",
+      "query": "prezzo Bitcoin Ethereum criptovalute exchange trading"
+    },
+    {
+      "pass": true,
+      "top1": "Germogliamento",
+      "min_distance": 0.514,
+      "threshold": 0.49,
+      "id": "A03",
+      "category": "abstention",
+      "query": "previsioni meteo pioggia temperatura domani"
+    },
+    {
+      "pass": false,
+      "top1": "ingegnere",
+      "min_distance": 0.401,
+      "threshold": 0.55,
+      "id": "A04",
+      "category": "abstention",
+      "query": "orario treni Milano Roma Frecciarossa prenotazione biglietti"
+    },
+    {
+      "pass": false,
+      "top1": "edificio",
+      "min_distance": 0.415,
+      "threshold": 0.5,
+      "id": "A05",
+      "category": "abstention",
+      "query": "calcio Serie A classifica risultati partite domenica"
+    }
+  ]
+}

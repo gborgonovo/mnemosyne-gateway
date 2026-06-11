@@ -1,0 +1,236 @@
+{
+  "version": "1.0",
+  "created": "2026-06-11",
+  "description": "Mnemosyne retrieval eval set — Phase 4a baseline. 25 queries on real knowledge.",
+  "notes": [
+    "expected_top: acceptable node names as returned by semantic_search (filename without ext). Comparison is normalized (lowercase + underscores).",
+    "expected_hit_k: minimum k at which we expect a hit. Queries with k=5 that still fail are documented baseline failures.",
+    "difficulty 'baseline_failure': node has placeholder body — currently failing, expected to improve after LLM enrichment or B4 chunking.",
+    "Category 'edge' requires --api and --key flags (tests KuzuDB graph via HTTP /search endpoint).",
+    "Category 'abstention' passes if top-1 cosine distance > abstention_threshold.",
+    "Collision note: giodalab / GiodaLab share the same normalized ID — the last sync wins. Detected by B2-opt2."
+  ],
+  "queries": [
+    {
+      "id": "R01",
+      "category": "recall",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "luogo Val Tidone Borgonovo project location description",
+      "expected_top": ["Ganaghello"],
+      "notes": "Main location node. 'Castel San Giovanni' avoided (separate node). 'BiG Project / Borgonovo' are in the embedded description."
+    },
+    {
+      "id": "R02",
+      "category": "recall",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "pannelli fotovoltaici energia rinnovabile impianto solare autonomia energetica",
+      "expected_top": ["Impianto_fotovoltaico"],
+      "notes": "Body focuses on sustainability and renewable energy"
+    },
+    {
+      "id": "R03",
+      "category": "recall",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "compleanno festa Rossella evento",
+      "expected_top": ["Compleanno_Rossella"],
+      "notes": "Specific name query; node has deadline 2026-05-30"
+    },
+    {
+      "id": "R04",
+      "category": "recall",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "Alejandra Alvarez sales coaching business development GiodaLab",
+      "expected_top": ["alejandra_alvarez", "alejandra"],
+      "notes": "Two nodes: Persone/alejandra.md and GiodaLab/professionisti/alejandra_alvarez.md — either is acceptable"
+    },
+    {
+      "id": "R05",
+      "category": "recall",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "bandi nazionali regionali finanziamento controllo mensile primo lunedì",
+      "expected_top": ["Controllare_mensilmente_i_bandi_utili_per_il_progetto_di_Ganaghello"],
+      "notes": "Long descriptive title maps well; monthly recurring task"
+    },
+    {
+      "id": "R06",
+      "category": "recall",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "Mautic HubSpot integrazione CRM marketing workflow n8n Alejandra",
+      "expected_top": ["Integrazione_Mautic-Hubspot"],
+      "notes": "Named integration node with specific tools listed"
+    },
+    {
+      "id": "R07",
+      "category": "recall",
+      "difficulty": "medium",
+      "expected_hit_k": 1,
+      "query": "presentazione alternativa PowerPoint ipertesto wiki slides",
+      "expected_top": ["Wiki-style_Slides"],
+      "notes": "Distinct concept; body mentions PPT and wiki"
+    },
+    {
+      "id": "R08",
+      "category": "recall",
+      "difficulty": "medium",
+      "expected_hit_k": 1,
+      "query": "GiodaLab profilo aziendale competenze team",
+      "expected_top": ["GiodaLab", "giodalab"],
+      "notes": "Collision: two nodes share normalized ID 'giodalab'. Last-sync wins. Both are acceptable."
+    },
+    {
+      "id": "R09",
+      "category": "recall",
+      "difficulty": "medium",
+      "expected_hit_k": 1,
+      "query": "ricognizione settimanale intelligenza artificiale studenti aggiornamenti giovedì",
+      "expected_top": ["Ricognizione_settimanale_IA_per_studenti_status_todo_deadline_ogni_giovedì"],
+      "notes": "Stub node created from alfred.md wikilink MANAGES relation; has observation body"
+    },
+    {
+      "id": "R10",
+      "category": "recall",
+      "difficulty": "medium",
+      "expected_hit_k": 3,
+      "query": "Alfred Mnemosyne sistema memoria online borgonovo.org",
+      "expected_top": ["alfred"],
+      "notes": "Body includes observation about Mnemosyne going back online; sparse but specific"
+    },
+    {
+      "id": "R11",
+      "category": "recall",
+      "difficulty": "baseline_failure",
+      "expected_hit_k": 5,
+      "query": "rogito atto notarile compravendita acquisto immobile",
+      "expected_top": ["Rogito"],
+      "notes": "BASELINE FAILURE: body is placeholder 'An item related to the memory graph'. Fails at all k. Improves after LLM enrichment."
+    },
+    {
+      "id": "R12",
+      "category": "recall",
+      "difficulty": "baseline_failure",
+      "expected_hit_k": 5,
+      "query": "serramenti infissi finestre porte restauro esterno",
+      "expected_top": ["Sistemazione_serramenti_esterni"],
+      "notes": "BASELINE FAILURE: placeholder body. Fails at all k."
+    },
+    {
+      "id": "R13",
+      "category": "recall",
+      "difficulty": "baseline_failure",
+      "expected_hit_k": 5,
+      "query": "trasformare stalla spazio abitabile feste eventi",
+      "expected_top": ["Trasformare_la_stalla_in_un_ambiente_abitabile_in_cui_fare_festeeventi", "Trasformare_la_proprietà_in_BB_coworking_ed_eventi"],
+      "notes": "BASELINE FAILURE: placeholder body. The general B&B goal node also accepted as a semantic match."
+    },
+    {
+      "id": "T01",
+      "category": "temporal",
+      "difficulty": "medium",
+      "expected_hit_k": 3,
+      "query": "obiettivo scadenza Ganaghello 2026 completare entro",
+      "expected_top": ["Compleanno_Rossella"],
+      "temporal_check": {"field": "deadline", "expected_value": "2026-05-30"},
+      "notes": "Only node with a 2026 deadline in Ganaghello project; semantic query should surface it"
+    },
+    {
+      "id": "T02",
+      "category": "temporal",
+      "difficulty": "baseline_failure",
+      "expected_hit_k": 5,
+      "query": "task archiviato completato Ganaghello archivio 2024",
+      "expected_top": ["Rogito", "Svuotare_storage_Casaforte"],
+      "temporal_check": {"field": "status", "expected_value": "archived"},
+      "notes": "BASELINE FAILURE: archived nodes have placeholder bodies; no semantic signal for 'archiviato'"
+    },
+    {
+      "id": "T03",
+      "category": "temporal",
+      "difficulty": "easy",
+      "expected_hit_k": 1,
+      "query": "bandi finanziamento scadenza periodica controllo programmato",
+      "expected_top": ["Controllare_mensilmente_i_bandi_utili_per_il_progetto_di_Ganaghello"],
+      "notes": "Same target as R05 but with temporal framing; validates temporal queries don't degrade recall"
+    },
+    {
+      "id": "T04",
+      "category": "temporal",
+      "difficulty": "baseline_failure",
+      "expected_hit_k": 5,
+      "query": "impianto elettrico lavori in corso ristrutturazione in progress",
+      "expected_top": ["Sistemazione_impianto_elettrico"],
+      "temporal_check": {"field": "status", "expected_value": "in_progress"},
+      "notes": "BASELINE FAILURE: placeholder body; status=in_progress not semantically retrievable"
+    },
+    {
+      "id": "E01",
+      "category": "edge",
+      "requires_api": true,
+      "query": "Alfred gestisce task ricorrenti studenti intelligenza artificiale",
+      "expected_node": "alfred",
+      "expected_relation": "MANAGES",
+      "expected_target": "Ricognizione_settimanale_IA_per_studenti_status_todo_deadline_ogni_giovedì",
+      "notes": "alfred.md declares MANAGES relation in wikilinks section"
+    },
+    {
+      "id": "E02",
+      "category": "edge",
+      "requires_api": true,
+      "query": "ristrutturazioni progetto Ganaghello appartiene",
+      "expected_node": "ristrutturazioni",
+      "expected_relation": "PART_OF",
+      "expected_target": "Ganaghello",
+      "notes": "ristrutturazioni.md declares PART_OF Ganaghello in frontmatter relations"
+    },
+    {
+      "id": "E03",
+      "category": "edge",
+      "requires_api": true,
+      "query": "Wiki Slides progetto Giorgio presentazione",
+      "expected_node": "Wiki-style_Slides",
+      "expected_relation": "PART_OF",
+      "expected_target": "Giorgio_Borgonovo",
+      "notes": "Wiki-style_Slides.md declares PART_OF Giorgio Borgonovo in frontmatter"
+    },
+    {
+      "id": "A01",
+      "category": "abstention",
+      "abstention_threshold": 0.55,
+      "query": "ricetta pasta carbonara guanciale uova pecorino romano",
+      "notes": "Food recipe, completely outside domain. BASELINE: dist=0.506 (< 0.55) — FAILS. Known false positive."
+    },
+    {
+      "id": "A02",
+      "category": "abstention",
+      "abstention_threshold": 0.65,
+      "query": "prezzo Bitcoin Ethereum criptovalute exchange trading",
+      "notes": "Cryptocurrency, far from domain. BASELINE: dist=0.738 — passes."
+    },
+    {
+      "id": "A03",
+      "category": "abstention",
+      "abstention_threshold": 0.49,
+      "query": "previsioni meteo pioggia temperatura domani",
+      "notes": "Weather forecast. BASELINE: dist=0.514 (> 0.49) — passes with small margin."
+    },
+    {
+      "id": "A04",
+      "category": "abstention",
+      "abstention_threshold": 0.55,
+      "query": "orario treni Milano Roma Frecciarossa prenotazione biglietti",
+      "notes": "Train schedules. BASELINE: dist=0.401 — FAILS badly (returns 'task_ingegnere_contatti'). Known false positive."
+    },
+    {
+      "id": "A05",
+      "category": "abstention",
+      "abstention_threshold": 0.50,
+      "query": "calcio Serie A classifica risultati partite domenica",
+      "notes": "Football. BASELINE: dist=0.415 — FAILS (returns 'dettagli_edificio'). Known false positive."
+    }
+  ]
+}
