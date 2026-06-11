@@ -7,7 +7,7 @@ import os
 import yaml
 from datetime import datetime
 
-from core.utils import strip_leading_frontmatter
+from core.utils import strip_leading_frontmatter, resolve_safe_folder
 
 
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
@@ -68,12 +68,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         path = find_file_recursive(name)
         is_new = path is None
         if not path:
-            if folder:
-                target_dir = os.path.join(knowledge_dir, folder)
-                if not os.path.isdir(target_dir):
-                    raise ValueError(f"Folder '{folder}' does not exist. Use create_project first.")
-            else:
-                target_dir = knowledge_dir
+            # Validates traversal and existence; nested subfolders are allowed.
+            target_dir = resolve_safe_folder(knowledge_dir, folder)
             safe_name = re.sub(r'[^\w\s-]', '', name).strip()
             path = os.path.join(target_dir, f"{safe_name}.md")
 
@@ -173,12 +169,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         parent: relative path of an existing folder (e.g. 'Ganaghello/Operativo');
                 leave empty to create at root level
         """
-        if parent:
-            base_path = os.path.join(knowledge_dir, parent)
-            if not os.path.isdir(base_path):
-                return json.dumps({"status": "error", "message": f"Parent folder '{parent}' does not exist. Use list_projects to see available folders."})
-        else:
-            base_path = knowledge_dir
+        try:
+            # Validates traversal and existence; empty parent → knowledge root.
+            base_path = resolve_safe_folder(knowledge_dir, parent)
+        except ValueError as e:
+            return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
 
         safe_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
 
@@ -226,9 +221,10 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         description: new description text (leave empty to keep existing)
         scope: new default scope for files in this folder (leave empty to keep existing)
         """
-        folder_path = os.path.join(knowledge_dir, folder)
-        if not os.path.isdir(folder_path):
-            return json.dumps({"status": "error", "message": f"Folder '{folder}' does not exist. Use list_projects to see available folders."})
+        try:
+            folder_path = resolve_safe_folder(knowledge_dir, folder)
+        except ValueError as e:
+            return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
 
         defaults_path = os.path.join(folder_path, '_defaults.yaml')
         defaults = {}
