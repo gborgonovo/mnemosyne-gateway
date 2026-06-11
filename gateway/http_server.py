@@ -7,6 +7,8 @@ import uuid
 import re
 import threading
 import time
+
+_GATEWAY_START = time.time()
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
 from datetime import datetime
@@ -352,12 +354,28 @@ def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
 @app.get("/")
 @app.get("/status")
 def health_check():
+    graph = kuzu_mgr.get_stats()
+    knowledge_files = sum(
+        1 for _, _, files in os.walk(KNOWLEDGE_DIR) for f in files if f.endswith(".md")
+    )
     return {
         "status": "ok",
         "service": "mnemosyne-gateway",
         "architecture": "file-first",
         "timestamp": datetime.now().isoformat(),
-        "enrich_queue_depth": event_handler._enrich_queue.qsize(),
+        "uptime_seconds": round(time.time() - _GATEWAY_START),
+        "knowledge": {
+            "files": knowledge_files,
+            "nodes_kuzu": graph["nodes"],
+            "edges_kuzu": graph["edges"],
+            "nodes_by_type": graph["by_type"],
+            "docs_chroma": vector_store.collection.count(),
+        },
+        "workers": {
+            "enrich_queue_depth": event_handler._enrich_queue.qsize(),
+            "gardener_last_run": gd.last_run,
+            "gardener_interval_s": gd.interval,
+        },
     }
 
 @app.get("/search")

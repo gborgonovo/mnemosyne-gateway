@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class Gardener:
         self.vector_store = vector_store
         self.interval = self.config.get("gardener", {}).get("interval_seconds", 3600)
         self.similarity_threshold = self.config.get("gardener", {}).get("similarity_threshold", 0.85)
+        self.last_run: str | None = None
 
     def run_once(self):
         logger.info("Gardener cycle starting...")
@@ -31,6 +33,7 @@ class Gardener:
             self.build_semantic_edges()
         except Exception as e:
             logger.error(f"Error during semantic edge building: {e}")
+        self.last_run = datetime.now().isoformat(timespec="seconds")
         logger.info("Gardener cycle complete.")
 
     def build_semantic_edges(self):

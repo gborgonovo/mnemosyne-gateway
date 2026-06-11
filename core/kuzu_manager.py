@@ -518,3 +518,22 @@ class KuzuManager:
             "MATCH (n:Node) SET n.activation = n.activation * $factor",
             parameters={"factor": decay_factor},
         )
+
+    @_synchronized
+    def get_stats(self) -> dict:
+        """Return lightweight graph statistics for the /status telemetry endpoint."""
+        node_res = self.conn.execute("MATCH (n:Node) RETURN count(n)")
+        node_count = node_res.get_next()[0] if node_res.has_next() else 0
+
+        edge_res = self.conn.execute("MATCH ()-[r:RELATES]->() RETURN count(r)")
+        edge_count = edge_res.get_next()[0] if edge_res.has_next() else 0
+
+        type_res = self.conn.execute(
+            "MATCH (n:Node) RETURN n.node_type, count(n) ORDER BY count(n) DESC"
+        )
+        by_type = {}
+        while type_res.has_next():
+            row = type_res.get_next()
+            by_type[row[0] or "unknown"] = row[1]
+
+        return {"nodes": node_count, "edges": edge_count, "by_type": by_type}
