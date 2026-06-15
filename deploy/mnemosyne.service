@@ -4,9 +4,20 @@ Documentation=https://github.com/gborgonovo/mnemosyne-gateway
 After=network.target
 Wants=network.target
 
+# Stop the restart-loop after 3 failures in 10 min: if the gateway keeps dying
+# (e.g. OOM during a mass re-embed), systemd gives up and leaves it in `failed`
+# instead of relaunching forever and dragging the whole VPS into swap-thrash.
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
 [Service]
 Type=simple
 WorkingDirectory=/srv/mnemosyne-gb
+
+# Cap memory so a runaway gateway is killed before it starves nginx/SSH. Normal
+# steady-state is ~450 MB; a mass re-embed cold boot can spike to ~3 GB and must
+# be run manually with the service stopped (see "Re-embed" note below).
+MemoryMax=2500M
 
 # Load secrets (OPENAI_API_KEY, MNEMOSYNE_API_KEY, OLLAMA_URL, …)
 EnvironmentFile=-/srv/mnemosyne-gb/.env
@@ -14,11 +25,20 @@ Environment=PYTHONPATH=/srv/mnemosyne-gb
 
 ExecStart=/srv/mnemosyne-gb/.venv/bin/python3 /srv/mnemosyne-gb/gateway/http_server.py
 
-# Restart automatically on failure; give the process 15 s to come up before the
-# first liveness check. KuzuDB cold-boot on large knowledge bases can take several
-# minutes — RestartSec keeps systemd from hammering the DB if the process exits early.
+# Restart automatically on failure. RestartSec keeps systemd from hammering the
+# DB if the process exits early; combined with StartLimitBurst above, repeated
+# crashes stop the loop instead of looping forever.
 Restart=on-failure
-RestartSec=30s
+RestartSec=60s
+
+# Re-embed note: a deploy that invalidates embeddings (chunking/ID/model change)
+# triggers a mass re-embed on next boot that can OOM on a small VPS and loop.
+# After such a deploy, run the cold-boot sync manually with the service stopped:
+#   sudo systemctl stop mnemosyne
+#   cd /srv/mnemosyne-gb && sudo PYTHONPATH=/srv/mnemosyne-gb \
+#     .venv/bin/python3 workers/file_watcher.py --once
+#   sudo systemctl start mnemosyne
+# (add temporary swap first if RAM is tight).
 
 # Forward stdout/stderr to journald (view with: journalctl -u mnemosyne -f)
 StandardOutput=journal
