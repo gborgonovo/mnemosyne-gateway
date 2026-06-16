@@ -24,12 +24,15 @@ class VectorStore:
     documents with IDs ``{node_id}__c0``, ``__c1``, etc.  All public methods
     accept and return canonical node_ids (path-based, no chunk suffix).
     """
-    def __init__(self, db_path="./data/chroma_db", collection_name="mnemosyne_wiki", embedding_config: dict = None):
+    def __init__(self, db_path="./data/chroma_db", collection_name="mnemosyne_wiki", embedding_config: dict = None,
+                 embedding_function=None):
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
         self.client = chromadb.PersistentClient(path=self.db_path)
-        ef = self._build_embedding_function(embedding_config or {})
+        # embedding_function lets tests inject a deterministic/counting EF;
+        # production builds it from the config.
+        ef = embedding_function or self._build_embedding_function(embedding_config or {})
         collection_kwargs = {"name": collection_name, "metadata": {"hnsw:space": "cosine"}}
         if ef:
             collection_kwargs["embedding_function"] = ef
@@ -312,18 +315,50 @@ class VectorStore:
 
         return deleted
 
+    def _get_stored_embedding(self, norm_name: str):
+        """Return the embedding vector already stored for a node, or None.
+
+        Single-doc nodes store it under norm_name; chunked nodes under chunk 0.
+        Avoids re-embedding the document: the vector was computed at upsert time.
+        """
+        direct = self.collection.get(ids=[norm_name], include=["embeddings"])
+        if direct and direct.get("ids"):
+            embs = direct.get("embeddings")
+            if embs is not None and len(embs) > 0:
+                return embs[0]
+            return None
+
+        # Chunked node: use chunk 0's vector. NB: ChromaDB returns embeddings as
+        # numpy arrays, so never use them in a boolean/`or` context.
+        r = self.collection.get(where={"_parent_id": norm_name},
+                                include=["embeddings", "metadatas"])
+        if not (r and r.get("ids")):
+            return None
+        embs = r.get("embeddings")
+        if embs is None or len(embs) == 0:
+            return None
+        metas = r.get("metadatas") or []
+        for i, m in enumerate(metas):
+            if m.get("_chunk_index", -1) == 0 and i < len(embs):
+                return embs[i]
+        return embs[0]
+
     def find_similar_nodes(self, node_name: str, similarity_threshold: float = 0.85, limit: int = 5):
         """Returns nodes semantically similar to node_name above the given threshold.
 
         Similarity = 1 - cosine_distance. Excludes the node itself, obs_ nodes,
         and deduplicates across chunks of the same parent node.
         Returns node_id (path-based ID, no chunk suffix) as 'name' for Gardener edge creation.
+
+        Reuses the node's stored embedding (query_embeddings) instead of
+        re-embedding its text: the Gardener calls this for every hot node each
+        cycle, and re-embedding via the (possibly remote/CPU-bound) embedding
+        backend was the source of mass embedding bursts.
         """
-        node_data = self.get_node(node_name)
-        if not node_data:
-            return []
-        document = node_data.get('document', '')
-        if not document or document == '_EMPTY_':
+        norm_name = normalize_node_name(node_name)
+
+        vector = self._get_stored_embedding(norm_name)
+        if vector is None:
             return []
 
         total_docs = self.collection.count()
@@ -332,11 +367,10 @@ class VectorStore:
         fetch_n = min((limit + 1) * 4, total_docs)
 
         results = self.collection.query(
-            query_texts=[document],
+            query_embeddings=[vector],
             n_results=fetch_n,
         )
 
-        norm_name = normalize_node_name(node_name)
         seen_parents = {norm_name}
         similar = []
 
