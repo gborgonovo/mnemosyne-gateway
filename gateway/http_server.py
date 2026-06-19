@@ -27,7 +27,7 @@ from core.attention import AttentionModel, thermal_rerank
 from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
-from workers.file_watcher import WikiSyncHandler
+from workers.file_watcher import WikiSyncHandler, _is_indexable_md
 from watchdog.observers import Observer
 from pydantic import BaseModel, Field
 from gateway.mcp_app import create_mcp_server
@@ -89,7 +89,12 @@ def _assert_write_scope(scope: str, api_auth: dict):
 
 # Initialize Core
 try:
-    kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"))
+    # Optional override: database.kuzu_buffer_pool_mb in settings.yaml. Absent →
+    # KuzuManager's 512 MB default (prevents the ~80%-of-RAM default buffer pool).
+    _kuzu_pool_mb = config.get('database', {}).get('kuzu_buffer_pool_mb')
+    _kuzu_pool_bytes = int(_kuzu_pool_mb) * 1024 * 1024 if _kuzu_pool_mb else None
+    kuzu_mgr = KuzuManager(db_path=os.path.join(BASE_DIR, "data", "kuzu_main"),
+                           buffer_pool_size=_kuzu_pool_bytes)
     vector_store = VectorStore(db_path=os.path.join(BASE_DIR, "data", "chroma_db"), embedding_config=config.get('llm', {}).get('embeddings'))
     am = AttentionModel(kuzu_mgr, config=config.get('attention', {}))
 
@@ -106,7 +111,7 @@ try:
     import os as _os
     for _root, _dirs, _files in _os.walk(KNOWLEDGE_DIR):
         for _fname in _files:
-            if _fname.endswith('.md'):
+            if _is_indexable_md(_fname):
                 event_handler._sync_file(_os.path.join(_root, _fname), is_startup_sync=True)
     observer = Observer()
     observer.schedule(event_handler, KNOWLEDGE_DIR, recursive=True)
@@ -272,7 +277,7 @@ def _find_node_file(name: str) -> Optional[str]:
         target_id = normalize_node_name(cleaned)
         for root, dirs, files in os.walk(KNOWLEDGE_DIR):
             for f in files:
-                if not f.endswith('.md'):
+                if not _is_indexable_md(f):
                     continue
                 fp = os.path.join(root, f)
                 nid, _ = node_id_from_path(fp, KNOWLEDGE_DIR)

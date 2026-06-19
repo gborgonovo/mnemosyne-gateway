@@ -32,15 +32,26 @@ class KuzuManager:
     Schema: Nodes carry normalized name as PK, display name, activation heat,
     node type, scope, interaction timestamps, and interaction count.
     """
-    def __init__(self, db_path="./data/kuzu_main"):
+    # With buffer_pool_size=0 (KuzuDB default) Kuzu reserves ~80% of system RAM
+    # as buffer pool — on an 8 GB host that is ~6.4 GB resident for a few MB of
+    # actual graph, which caused the OOM incident. Cap it: the pool only affects
+    # query speed on very large datasets, not correctness or capacity.
+    DEFAULT_BUFFER_POOL_BYTES = 512 * 1024 * 1024  # 512 MB
+
+    def __init__(self, db_path="./data/kuzu_main", buffer_pool_size: int = None):
         self._lock = threading.RLock()
         self.db_path = os.path.abspath(db_path)
         parent_dir = os.path.dirname(self.db_path)
         os.makedirs(parent_dir, exist_ok=True)
 
-        logger.info(f"Initializing KuzuDatabase at: {self.db_path}")
+        self._buffer_pool_size = buffer_pool_size or self.DEFAULT_BUFFER_POOL_BYTES
+
+        logger.info(
+            f"Initializing KuzuDatabase at: {self.db_path} "
+            f"(buffer_pool_size={self._buffer_pool_size // (1024*1024)} MB)"
+        )
         try:
-            self.db = kuzu.Database(self.db_path)
+            self.db = kuzu.Database(self.db_path, buffer_pool_size=self._buffer_pool_size)
             self.conn = kuzu.Connection(self.db)
             self._init_schema()
         except Exception as e:

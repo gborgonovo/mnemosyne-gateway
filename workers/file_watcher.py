@@ -34,6 +34,18 @@ def _hash_body(body: str) -> str:
     return hashlib.sha256((body or "").encode("utf-8")).hexdigest()
 
 
+# Syncthing conflict copies are named "name.sync-conflict-DATE-TIME-DEVICE.md":
+# they still end in .md, so a bare endswith('.md') would index them as real
+# nodes (the OOM incident: 250 conflict files doubled the graph). Exclude them.
+SYNC_CONFLICT_MARKER = ".sync-conflict-"
+
+
+def _is_indexable_md(path: str) -> bool:
+    """True for real markdown files, excluding Syncthing conflict copies."""
+    name = os.path.basename(path)
+    return name.endswith('.md') and SYNC_CONFLICT_MARKER not in name
+
+
 class WikiSyncHandler(FileSystemEventHandler):
     def __init__(self, kuzu_mgr: KuzuManager, vector_store: VectorStore,
                  knowledge_dir: str, am=None, llm=None):
@@ -63,12 +75,12 @@ class WikiSyncHandler(FileSystemEventHandler):
     # ─── Watchdog event handlers ───────────────────────────────────────────────
 
     def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith('.md'):
+        if not event.is_directory and _is_indexable_md(event.src_path):
             logger.info(f"File modified: {event.src_path}")
             self._sync_file(event.src_path, is_startup_sync=False)
 
     def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith('.md'):
+        if not event.is_directory and _is_indexable_md(event.src_path):
             logger.info(f"File created: {event.src_path}")
             node_id, display_name = node_id_from_path(event.src_path, self.knowledge_dir)
             basename_key = _normalize_segment(display_name)
@@ -78,7 +90,7 @@ class WikiSyncHandler(FileSystemEventHandler):
             self._sync_file(event.src_path, is_startup_sync=False)
 
     def on_deleted(self, event):
-        if not event.is_directory and event.src_path.endswith('.md'):
+        if not event.is_directory and _is_indexable_md(event.src_path):
             logger.info(f"File deleted: {event.src_path}")
             node_id, display_name = node_id_from_path(event.src_path, self.knowledge_dir)
             basename_key = _normalize_segment(display_name)
@@ -92,7 +104,7 @@ class WikiSyncHandler(FileSystemEventHandler):
             logger.info(f"Node '{node_id}' removed from DBs.")
 
     def on_moved(self, event):
-        if not event.is_directory and event.dest_path.endswith('.md'):
+        if not event.is_directory and _is_indexable_md(event.dest_path):
             logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
             src_id, src_display = node_id_from_path(event.src_path, self.knowledge_dir)
             dst_id, dst_display = node_id_from_path(event.dest_path, self.knowledge_dir)
@@ -125,7 +137,7 @@ class WikiSyncHandler(FileSystemEventHandler):
         self._basename_index = {}
         for root, dirs, files in os.walk(self.knowledge_dir):
             for f in files:
-                if not f.endswith('.md'):
+                if not _is_indexable_md(f):
                     continue
                 fp = os.path.join(root, f)
                 node_id, display_name = node_id_from_path(fp, self.knowledge_dir)
@@ -421,7 +433,7 @@ def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):
     count = 0
     for root, dirs, files in os.walk(knowledge_path):
         for filename in files:
-            if filename.endswith('.md'):
+            if _is_indexable_md(filename):
                 event_handler._sync_file(os.path.join(root, filename), is_startup_sync=True)
                 count += 1
     logger.info(f"Cold boot complete. Synced {count} files.")
