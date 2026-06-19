@@ -34,9 +34,15 @@ class KuzuManager:
     """
     # With buffer_pool_size=0 (KuzuDB default) Kuzu reserves ~80% of system RAM
     # as buffer pool — on an 8 GB host that is ~6.4 GB resident for a few MB of
-    # actual graph, which caused the OOM incident. Cap it: the pool only affects
-    # query speed on very large datasets, not correctness or capacity.
-    DEFAULT_BUFFER_POOL_BYTES = 512 * 1024 * 1024  # 512 MB
+    # actual graph, which caused the OOM incident. We cap it instead.
+    #
+    # NB: the cap is a CEILING, not a fixed allocation, but it must be large
+    # enough for KuzuDB to open and checkpoint the DB at startup: 512 MB proved
+    # too low ("Buffer manager exception: buffer pool is full" on open). 2 GB
+    # opens with margin, stays well under the default ~6.4 GB, and at steady
+    # state only the small working set is actually resident. Override via
+    # settings.yaml -> database.kuzu_buffer_pool_mb if needed.
+    DEFAULT_BUFFER_POOL_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 
     def __init__(self, db_path="./data/kuzu_main", buffer_pool_size: int = None):
         self._lock = threading.RLock()
