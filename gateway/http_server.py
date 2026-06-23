@@ -519,7 +519,7 @@ def _node_brief(node_id: str):
 def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] = None) -> dict:
     """Build a briefing (hot topics + dormant nodes), optionally scoped to a project."""
     threshold = config.get("attention", {}).get("activation_threshold", 0.5)
-    hot_limit = config.get("retrieval", {}).get("briefing_hot_limit", 10)
+    hot_limit = config.get("retrieval", {}).get("briefing_hot_limit", 12)
 
     active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter, project=project)
     hot_topics = [n for n in active_nodes if not n['name'].startswith("obs_")]
@@ -546,7 +546,7 @@ def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] 
     )
 
     return {
-        "hot_topics": [_readable_name(n) for n in hot_topics],
+        "hot_topics": [_readable_name(n) for n in hot_topics[:hot_limit]],
         "hot_details": hot_details,
         "dormant": [
             {"name": _readable_name(n), "type": n['node_type'], "days_inactive": n['days_inactive']}
