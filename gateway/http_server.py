@@ -7,8 +7,26 @@ import uuid
 import re
 import threading
 import time
+import random
 
 _GATEWAY_START = time.time()
+
+
+def _weighted_sample(items: list, k: int, weight_key: str = "edge_count") -> list:
+    """Pick up to k items without replacement, weighted by weight_key.
+
+    Used to resurface "forgotten hubs" one at a time on rotation: the more
+    connected a node, the more often it surfaces, but a different one each
+    briefing — so we never flood the mail with the same top hub every day.
+    """
+    pool = list(items)
+    chosen = []
+    while pool and len(chosen) < k:
+        weights = [max(it.get(weight_key, 1) or 1, 1) for it in pool]
+        pick = random.choices(pool, weights=weights, k=1)[0]
+        chosen.append(pick)
+        pool.remove(pick)
+    return chosen
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body, BackgroundTasks, UploadFile, File, Header, Depends
 from datetime import datetime
@@ -536,12 +554,16 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
     topics   = [n for n in dormant_nodes if n['node_type'] == 'Node']
     journals = [n for n in dormant_nodes if n['node_type'] == 'Journal']
 
-    forgotten_hubs = kuzu_mgr.get_dormant_by_connectivity(
-        min_edges=dormant_cfg.get("hub_min_edges", 2),
+    all_hubs = kuzu_mgr.get_dormant_by_connectivity(
+        min_edges=dormant_cfg.get("hub_min_edges", 3),
         activation_ceiling=dormant_cfg.get("hub_activation_ceiling", 0.3),
-        days_inactive=dormant_cfg.get("hub_days_inactive", 14),
+        days_inactive=dormant_cfg.get("hub_days_inactive", 21),
         scopes=scope_filter,
     )
+    # Resurface a few forgotten hubs on rotation rather than always the most
+    # connected ones: weighted-random pick keeps the briefing varied ("oh, do you
+    # remember that important thing...") instead of repeating the same hubs daily.
+    forgotten_hubs = _weighted_sample(all_hubs, dormant_cfg.get("hub_resurface_count", 1))
 
     def fmt(nodes):
         return [{"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']} for n in nodes]

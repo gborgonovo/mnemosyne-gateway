@@ -149,8 +149,7 @@ def main():
     missing = len(file_dates) - len(targets)
 
     def _preview_activation(node_type, ts):
-        if node_type == "Reference":
-            return floor  # evergreen: decay skips them
+        # Reference nodes now decay slowly too (no longer exempt).
         rate = decay_rates.get(node_type or "Node", decay_rates.get("Node", 0.0025))
         hours = max(0.0, (now - ts) / 3600)
         return max(floor * ((1 - rate) ** hours), 0.0)

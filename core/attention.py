@@ -45,6 +45,12 @@ class AttentionModel:
             "Task":        0.00045,
             "Observation": 0.004,
             "Journal":     0.0007,
+            # Reference nodes are long-lived but NOT immortal: a slow decay
+            # (~41-day half-life) lets evergreen knowledge cool down if unused
+            # instead of permanently saturating the "hot" set and the briefing.
+            # Citing/searching a Reference reheats it; a forgotten one drifts into
+            # the dormant pool and can be resurfaced as a "forgotten hub".
+            "Reference":   0.0007,
         })
         self.boost_weights = config.get("boost_weights", {
             "mcp_query": 0.2,
