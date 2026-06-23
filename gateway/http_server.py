@@ -249,9 +249,16 @@ class DormantItem(BaseModel):
     type: str
     days_inactive: int
 
+class HotItem(BaseModel):
+    name: str
+    type: str
+    status: Optional[str] = None
+    preview: Optional[str] = None
+
 class BriefingResponse(BaseModel):
     """Response of GET /briefing and GET /briefing/{project} (C2)."""
     hot_topics: List[str] = Field(..., description="Display names of nodes above the activation threshold.")
+    hot_details: List[HotItem] = Field(default_factory=list, description="Hot nodes with type, status and a body preview, so consumers can tell todo from done.")
     dormant: List[DormantItem] = Field(..., description="Cooled-down nodes, with type and days of inactivity.")
     timestamp: str
 
@@ -484,12 +491,49 @@ def get_graph_stats():
         }
     }
 
+def _readable_name(node: dict) -> str:
+    """Human-readable name for a node. Falls back to the last path segment of the
+    node_id (underscores -> spaces) instead of dumping the raw path-based slug."""
+    nid = node.get("name", "")
+    dn = node.get("display_name")
+    if dn and dn != nid:
+        return dn
+    last = nid.split("__")[-1] if nid else nid
+    return last.replace("_", " ").strip() or nid
+
+
+def _node_brief(node_id: str):
+    """(status, body preview) for a node, read from ChromaDB. Lets the briefing
+    distinguish a todo task from a finished one and quote actual content, instead
+    of guessing from the title alone."""
+    nd = vector_store.get_node(node_id)
+    if not nd:
+        return None, None
+    meta = nd.get("metadata") or {}
+    status = meta.get("status")
+    doc = (nd.get("document") or "").strip()
+    preview = " ".join(doc.split())[:220] if doc and doc != "_EMPTY_" else None
+    return status, preview
+
+
 def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] = None) -> dict:
     """Build a briefing (hot topics + dormant nodes), optionally scoped to a project."""
     threshold = config.get("attention", {}).get("activation_threshold", 0.5)
+    hot_limit = config.get("retrieval", {}).get("briefing_hot_limit", 10)
 
     active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter, project=project)
     hot_topics = [n for n in active_nodes if not n['name'].startswith("obs_")]
+    hot_topics.sort(key=lambda n: n.get("activation_level", n.get("activation", 0)) or 0, reverse=True)
+
+    hot_details = []
+    for n in hot_topics[:hot_limit]:
+        status, preview = _node_brief(n["name"])
+        hot_details.append({
+            "name": _readable_name(n),
+            "type": n.get("node_type", "Node"),
+            "status": status,
+            "preview": preview,
+        })
 
     dormant_cfg = config.get("attention", {}).get("dormant", {})
     dormant_nodes = kuzu_mgr.get_dormant_nodes(
@@ -502,9 +546,10 @@ def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] 
     )
 
     return {
-        "hot_topics": [n.get('display_name') or n['name'] for n in hot_topics],
+        "hot_topics": [_readable_name(n) for n in hot_topics],
+        "hot_details": hot_details,
         "dormant": [
-            {"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']}
+            {"name": _readable_name(n), "type": n['node_type'], "days_inactive": n['days_inactive']}
             for n in dormant_nodes
         ],
         "timestamp": datetime.now().isoformat(),
@@ -566,7 +611,13 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
     forgotten_hubs = _weighted_sample(all_hubs, dormant_cfg.get("hub_resurface_count", 1))
 
     def fmt(nodes):
-        return [{"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive']} for n in nodes]
+        return [{"name": _readable_name(n), "type": n['node_type'], "days_inactive": n['days_inactive']} for n in nodes]
+
+    def fmt_hub(n):
+        _status, preview = _node_brief(n['name'])
+        return {"name": _readable_name(n), "type": n['node_type'],
+                "days_inactive": n['days_inactive'], "edge_count": n['edge_count'],
+                "preview": preview}
 
     return {
         "timestamp": datetime.now().isoformat(),
@@ -574,7 +625,7 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         "dormant_tasks":    fmt(tasks),
         "dormant_topics":   fmt(topics),
         "dormant_journals": fmt(journals),
-        "forgotten_hubs":   [{"name": n.get('display_name') or n['name'], "type": n['node_type'], "days_inactive": n['days_inactive'], "edge_count": n['edge_count']} for n in forgotten_hubs],
+        "forgotten_hubs":   [fmt_hub(n) for n in forgotten_hubs],
         "summary": (
             f"{len(dormant_nodes)} elementi dormienti: "
             f"{len(goals)} goal, {len(tasks)} task, {len(topics)} topic, {len(journals)} journal. "

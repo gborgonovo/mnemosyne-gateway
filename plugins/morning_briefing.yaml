@@ -23,13 +23,28 @@ prompt: |
 
   {context}
 
+  Come leggere il contesto (IMPORTANTE):
+  - Ogni elemento ha un "type" e spesso uno "status" e un "preview" del contenuto.
+    Basati sul contenuto (preview) e sullo status, non solo sul nome.
+  - type Task o Goal con status "todo"/"in_progress"/"active" sono cose DA FARE o
+    in corso: NON descriverle come già fatte né come "progressi compiuti".
+    Solo status "done" indica qualcosa di completato.
+  - type Journal o Observation sono cose accadute/annotate: lì puoi parlare al
+    passato di ciò che è successo.
+  - Non inventare avanzamenti: se non sai se una cosa è fatta, trattala come aperta.
+  - In "forgotten_hubs" c'è al più un argomento importante rimasto inattivo da
+    tempo: introducilo in modo naturale e collegato, es. "a proposito di X, ti
+    ricordo che era rimasto in sospeso Y...". Usa il "name" leggibile, mai uno
+    slug con trattini bassi.
+
   Scrivi una breve nota mattutina personale (massimo 10 righe).
   Regole:
   - Prima riga: solo il saluto ("Buongiorno, Giorgio."). Poi una riga vuota.
   - Seconda riga: solo la data per esteso, da sola. Poi una riga vuota.
   - Corpo: uno o due paragrafi separati da una riga vuota ciascuno.
-  - Menziona solo ciò che è effettivamente rilevante.
-  - Se ci sono argomenti dormienti importanti, ricordali con delicatezza, senza insistere.
+  - Menziona solo ciò che è effettivamente rilevante, distinguendo ciò che è da
+    fare da ciò che è già accaduto.
+  - Se c'è un forgotten hub, dedicagli una frase di richiamo delicata e naturale.
   - Se non c'è nulla di urgente, dillo in una riga e taci.
   - Tono: caldo, diretto, discreto. Non essere prolisso.
-  - Scrivi in italiano, in prosa. Niente elenchi puntati.
+  - Scrivi in italiano, in prosa. Niente elenchi puntati. Niente slug o nomi tecnici.
