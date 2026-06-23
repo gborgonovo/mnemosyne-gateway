@@ -26,6 +26,11 @@ prompt: |
   Come leggere il contesto (IMPORTANTE):
   - Ogni elemento ha un "type" e spesso uno "status" e un "preview" del contenuto.
     Basati sul contenuto (preview) e sullo status, non solo sul nome.
+  - Legenda "type": Goal=obiettivo; Task=attività da fare; Journal=diario/evento
+    accaduto; Observation=nota estemporanea; Node=concetto o nota; Reference=
+    conoscenza di riferimento durevole; Topic=tema.
+  - Legenda "status": todo=da fare; in_progress=in corso; active=attivo;
+    done=completato; archived=archiviato. (status assente = non applicabile.)
   - type Task o Goal con status "todo"/"in_progress"/"active" sono cose DA FARE o
     in corso: NON descriverle come già fatte né come "progressi compiuti".
     Solo status "done" indica qualcosa di completato.
