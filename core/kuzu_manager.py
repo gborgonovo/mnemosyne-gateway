@@ -191,6 +191,22 @@ class KuzuManager:
         self.conn.execute(query, parameters={"name": name, "level": level})
 
     @_synchronized
+    def seed_activation(self, name: str, level: float, reference_ts: float):
+        """Set a node's activation and pin its decay clock to reference_ts.
+
+        Used by the thermal re-seed utility after a graph rebuild: setting both
+        last_interaction and last_decay_applied to reference_ts makes a
+        subsequent apply_decay_per_node() compute decay from that timestamp,
+        so the node lands at the activation it would have if it had been touched
+        at reference_ts and decayed naturally since. No-op if the node is absent.
+        """
+        self.conn.execute(
+            "MATCH (n:Node {name: $name}) "
+            "SET n.activation = $level, n.last_interaction = $ts, n.last_decay_applied = $ts",
+            parameters={"name": normalize_node_name(name), "level": level, "ts": reference_ts},
+        )
+
+    @_synchronized
     def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0):
         """Apply activation boost. If update_timestamp, record this as a direct interaction.
 
