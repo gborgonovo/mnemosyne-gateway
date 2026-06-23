@@ -42,7 +42,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name
+from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler, _is_indexable_md
@@ -490,17 +490,6 @@ def get_graph_stats():
              "kuzu_active": len(kuzu_mgr.get_active_nodes(0.0))
         }
     }
-
-def _readable_name(node: dict) -> str:
-    """Human-readable name for a node. Falls back to the last path segment of the
-    node_id (underscores -> spaces) instead of dumping the raw path-based slug."""
-    nid = node.get("name", "")
-    dn = node.get("display_name")
-    if dn and dn != nid:
-        return dn
-    last = nid.split("__")[-1] if nid else nid
-    return last.replace("_", " ").strip() or nid
-
 
 def _node_brief(node_id: str):
     """(status, body preview) for a node, read from ChromaDB. Lets the briefing

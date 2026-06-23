@@ -1,5 +1,6 @@
 import logging
-import random
+
+from core.utils import readable_name
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +62,19 @@ class InitiativeEngine:
                 if not n_node:
                     continue
                 if n_node.get('activation_level', 0.0) < self.explanation_threshold:
-                    phrases = [
-                        f"Since we are considering **{name}**, **{n_name}** comes to mind.",
-                        f"While reflecting on **{name}**, we might consider its connections with **{n_name}**.",
-                        f"Curious how **{name}** recalls **{n_name}**, isn't it?",
-                    ]
+                    src = readable_name(node)
+                    tgt = readable_name(n_node)
+                    # Readable, Italian fields: Alfred verbalizes these into the
+                    # briefing. No node_id slugs, no pre-baked English sentences.
                     initiatives.append({
-                        "source": name,
-                        "target": n_name,
-                        "message": random.choice(phrases),
-                        "reason": f"'{name}' is hot but '{n_name}' is inactive.",
+                        "source": src,
+                        "target": tgt,
+                        "message": (
+                            f"{src} è in primo piano in questo periodo, mentre un tema "
+                            f"collegato, {tgt}, è rimasto in disparte: potrebbe valere la "
+                            f"pena ricollegarli."
+                        ),
+                        "reason": f"{src} è attivo, {tgt} è inattivo.",
                     })
                     seen_targets.add(n_name)
                     if len(initiatives) >= 3:

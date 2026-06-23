@@ -3,6 +3,21 @@ import re
 import yaml
 
 
+def readable_name(node: dict) -> str:
+    """Human-readable name for a node dict ({name, display_name}).
+
+    Prefers display_name; otherwise derives a label from the last segment of the
+    path-based node_id (underscores -> spaces) instead of exposing the raw slug.
+    Shared by the briefing and the InitiativeEngine so neither leaks node_ids.
+    """
+    nid = node.get("name", "") or ""
+    dn = node.get("display_name")
+    if dn and dn != nid:
+        return dn
+    last = nid.split("__")[-1] if nid else nid
+    return last.replace("_", " ").strip() or nid
+
+
 def resolve_safe_folder(knowledge_dir: str, folder: str) -> str:
     """Resolve and validate a client-supplied subfolder under knowledge_dir.
 

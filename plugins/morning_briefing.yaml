@@ -36,6 +36,9 @@ prompt: |
     tempo: introducilo in modo naturale e collegato, es. "a proposito di X, ti
     ricordo che era rimasto in sospeso Y...". Usa il "name" leggibile, mai uno
     slug con trattini bassi.
+  - In "initiatives" trovi spunti di collegamento (source -> target): un tema
+    attivo e uno trascurato ma connesso. Se uno è pertinente, suggeriscilo con
+    naturalezza in italiano (al massimo uno), senza ripetere il testo cosi' com'è.
 
   Scrivi una breve nota mattutina personale (massimo 10 righe).
   Regole:
