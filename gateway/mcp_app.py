@@ -7,7 +7,7 @@ import os
 import yaml
 from datetime import datetime
 
-from core.utils import strip_leading_frontmatter, resolve_safe_folder, node_id_from_path, normalize_node_name
+from core.utils import strip_leading_frontmatter, resolve_safe_folder, node_id_from_path, normalize_node_name, atomic_write, render_markdown
 from core.attention import thermal_rerank
 from core.mcp_auth import scope_filter, require_privileged, assert_write
 
@@ -103,11 +103,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 if _k in existing_fm and _k not in frontmatter:
                     frontmatter[_k] = existing_fm[_k]
 
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write("---\n")
-            yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-            f.write("---\n\n")
-            f.write(body)
+        atomic_write(path, render_markdown(frontmatter, body))
 
     def _parse_relations(relations_str: str, source: str = None) -> list:
         """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
@@ -233,17 +229,14 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         defaults = {"project": name, "scope": scope}
         if description:
             defaults["description"] = description
-        with open(os.path.join(folder_path, '_defaults.yaml'), 'w') as f:
-            yaml.dump(defaults, f, allow_unicode=True, default_flow_style=False)
+        atomic_write(os.path.join(folder_path, '_defaults.yaml'),
+                     yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
 
         if description:
             index_frontmatter = {"type": "Node", "scope": scope, "created_at": datetime.now().strftime('%Y-%m-%d')}
             index_body = f"# {name}\n\n{description}"
-            with open(os.path.join(folder_path, f"{safe_name}.md"), 'w') as f:
-                f.write("---\n")
-                yaml.dump(index_frontmatter, f, allow_unicode=True, default_flow_style=False)
-                f.write("---\n\n")
-                f.write(index_body)
+            atomic_write(os.path.join(folder_path, f"{safe_name}.md"),
+                         render_markdown(index_frontmatter, index_body))
 
         result_path = os.path.join(parent, safe_name) if parent else safe_name
         msg = f"Project folder '{result_path}' created."
@@ -290,8 +283,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         if scope:
             defaults["scope"] = scope
 
-        with open(defaults_path, 'w') as f:
-            yaml.dump(defaults, f, allow_unicode=True, default_flow_style=False)
+        atomic_write(defaults_path, yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
 
         return json.dumps({"status": "success", "message": f"Project '{folder}' updated.", "current": defaults})
 

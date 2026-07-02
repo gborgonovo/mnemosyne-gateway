@@ -42,7 +42,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name
+from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name, atomic_write, render_markdown
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler, _is_indexable_md
@@ -285,11 +285,7 @@ def _resolve_scope(scope: Optional[str], scopes: str) -> str:
 
 def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
     path = _resolve_write_path(name, folder)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write("---\n")
-        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-        f.write("---\n\n")
-        f.write(body)
+    atomic_write(path, render_markdown(frontmatter, body))
 
 def _find_node_file(name: str) -> Optional[str]:
     """Search for a node's markdown file recursively under KNOWLEDGE_DIR.
@@ -381,11 +377,7 @@ def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
         frontmatter.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
 
     path = existing_path or _resolve_write_path(name, folder)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write("---\n")
-        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-        f.write("---\n\n")
-        f.write(body)
+    atomic_write(path, render_markdown(frontmatter, body))
 
     canonical, _ = node_id_from_path(path, KNOWLEDGE_DIR)
     return canonical, action

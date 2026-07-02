@@ -15,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
-from core.utils import normalize_node_name, node_id_from_path, _normalize_segment, strip_leading_frontmatter
+from core.utils import normalize_node_name, node_id_from_path, _normalize_segment, strip_leading_frontmatter, atomic_write, render_markdown
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - FileWatcher - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -277,13 +277,9 @@ class WikiSyncHandler(FileSystemEventHandler):
             return None, None, [], False
 
     def _write_frontmatter(self, filepath: str, frontmatter: dict, body: str):
-        """Write frontmatter + body back to file."""
+        """Write frontmatter + body back to file (atomically)."""
         body = strip_leading_frontmatter(body)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write("---\n")
-            yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-            f.write("---\n\n")
-            f.write(body)
+        atomic_write(filepath, render_markdown(frontmatter, body))
 
     # ─── Core sync ────────────────────────────────────────────────────────────
 

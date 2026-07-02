@@ -20,7 +20,7 @@ import logging
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.utils import normalize_node_name
+from core.utils import normalize_node_name, atomic_write, render_markdown
 from butler.llm import get_llm_provider
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - backfill - %(levelname)s - %(message)s')
@@ -49,11 +49,7 @@ def parse_markdown(filepath):
 
 
 def write_frontmatter(filepath, frontmatter, body):
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write("---\n")
-        yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-        f.write("---\n\n")
-        f.write(body)
+    atomic_write(filepath, render_markdown(frontmatter, body))
 
 
 def needs_enrichment(filepath, frontmatter, force=False):

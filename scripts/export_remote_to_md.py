@@ -1,9 +1,13 @@
 import requests
 import json
 import os
+import sys
 import yaml
 import re
 import shutil
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from core.utils import atomic_write, render_markdown
 
 TARGET_DIR = "/home/giorgio/Projects/mnemosyne-gateway/knowledge"
 API_URL = "https://memory.borgonovo.org/graph/export"
@@ -210,11 +214,7 @@ def export_knowledge():
         filename = sanitize_filename(node["name"])
         filepath = os.path.join(full_dest_dir, f"{filename}.md")
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write("---\n")
-                yaml.dump(frontmatter, f, allow_unicode=True, default_flow_style=False)
-                f.write("---\n\n")
-                f.write(body)
+            atomic_write(filepath, render_markdown(frontmatter, body))
             count += 1
         except Exception as e:
             print(f"Failed to write {filename}: {e}")
@@ -231,11 +231,8 @@ def export_knowledge():
             body = f"# {node['name']}\n\n{content}\n"
             filepath = os.path.join(obs_dir, f"{sanitize_filename(node['name'])}.md")
             try:
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write("---\n")
-                    yaml.dump({"uuid": nid, "type": "Observation", "tags": node["labels"]}, f)
-                    f.write("---\n\n")
-                    f.write(body)
+                atomic_write(filepath, render_markdown(
+                    {"uuid": nid, "type": "Observation", "tags": node["labels"]}, body))
                 obs_count += 1
             except Exception as e:
                 print(f"Failed to write orphan obs {node['name']}: {e}")

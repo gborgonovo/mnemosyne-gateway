@@ -1,6 +1,47 @@
 import os
 import re
+import tempfile
 import yaml
+
+
+def atomic_write(path: str, content: str, encoding: str = "utf-8") -> None:
+    """Write text to `path` atomically.
+
+    Writes to a temp file in the *same* directory, flushes + fsyncs it, then
+    os.replace()s it over the target. os.replace is atomic on a single
+    filesystem, so a crash mid-write can never leave a half-written or truncated
+    file for the watcher to index or Syncthing to propagate — readers always see
+    either the old file or the complete new one, never a torn state.
+
+    The temp name is dotted and ends in '.part' (not '.md') so the file watcher,
+    which only indexes '.md' files, ignores it during the brief window before the
+    rename; the rename itself surfaces to watchdog as the final '.md' path.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".mnemo-tmp-", suffix=".part")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def render_markdown(frontmatter: dict, body: str) -> str:
+    """Serialize a frontmatter mapping + body into a markdown document string.
+
+    Single chokepoint for the '---\\n<yaml>---\\n\\n<body>' layout, so every
+    writer produces byte-identical framing and can hand the result to
+    atomic_write().
+    """
+    fm = yaml.dump(frontmatter, allow_unicode=True, default_flow_style=False)
+    return f"---\n{fm}---\n\n{body}"
 
 
 def readable_name(node: dict) -> str:
