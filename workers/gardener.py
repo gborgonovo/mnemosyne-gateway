@@ -33,6 +33,14 @@ class Gardener:
             self.build_semantic_edges()
         except Exception as e:
             logger.error(f"Error during semantic edge building: {e}")
+        # Bound the KuzuDB WAL: this cycle just wrote decay/resurface/edge
+        # updates. Checkpointing here keeps the WAL small so that even an
+        # unclean kill (OOM) leaves a cheap-to-replay log at the next boot,
+        # preventing the "buffer pool is full" doom loop.
+        try:
+            self.am.kuzu_mgr.checkpoint()
+        except Exception as e:
+            logger.error(f"Error during WAL checkpoint: {e}")
         self.last_run = datetime.now().isoformat(timespec="seconds")
         logger.info("Gardener cycle complete.")
 

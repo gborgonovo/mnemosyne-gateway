@@ -111,8 +111,46 @@ class KuzuManager:
             except RuntimeError:
                 pass
 
+    @_synchronized
+    def checkpoint(self):
+        """Force a WAL checkpoint: flush the write-ahead log into the main DB
+        file and truncate it.
+
+        Without this the WAL grows unbounded (every write appends to it) and is
+        only ever consolidated on a clean database close. If the process is
+        OOM-killed or restarted uncleanly, a large WAL is left behind; replaying
+        it at the next startup holds too many dirty pages and saturates the
+        buffer pool ("buffer pool is full"), which turns every graph query into
+        a 500. Checkpointing periodically (gardener) and on shutdown keeps the
+        WAL small so a replay is always cheap. Best-effort: a failure here must
+        never crash the caller.
+        """
+        try:
+            self.conn.execute("CHECKPOINT")
+            logger.info("KuzuDB checkpoint complete (WAL flushed).")
+        except Exception as e:
+            logger.warning(f"KuzuDB checkpoint skipped: {e}")
+
     def close(self):
-        pass
+        """Clean shutdown: checkpoint the WAL, then release the connection and
+        database so KuzuDB leaves a consolidated state (small/empty WAL) behind.
+        Wired into the gateway lifespan shutdown so `systemctl stop|restart`
+        (SIGTERM) never leaves a bloated WAL for the next boot to choke on.
+        """
+        with self._lock:
+            try:
+                self.conn.execute("CHECKPOINT")
+            except Exception as e:
+                logger.warning(f"KuzuDB checkpoint on close skipped: {e}")
+            for obj_name in ("conn", "db"):
+                obj = getattr(self, obj_name, None)
+                if obj is not None:
+                    try:
+                        obj.close()
+                    except Exception as e:
+                        logger.warning(f"KuzuDB {obj_name}.close() failed: {e}")
+                    setattr(self, obj_name, None)
+            logger.info("KuzuDB closed cleanly.")
 
     # ─── Node CRUD ────────────────────────────────────────────────────────────
 

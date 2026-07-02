@@ -188,7 +188,16 @@ def read_markdown(name: str):
 @asynccontextmanager
 async def lifespan(app):
     async with mcp_instance.session_manager.run():
-        yield
+        try:
+            yield
+        finally:
+            # Clean shutdown: checkpoint + close KuzuDB so SIGTERM (systemctl
+            # stop|restart) never leaves a bloated WAL for the next boot to
+            # replay into a "buffer pool is full" OOM loop.
+            try:
+                kuzu_mgr.close()
+            except Exception as _e:
+                logger.warning(f"KuzuDB close on shutdown failed: {_e}")
 
 app = FastAPI(title="Mnemosyne File-First API", version="2.0.0", lifespan=lifespan)
 
