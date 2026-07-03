@@ -42,7 +42,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name, atomic_write, render_markdown
+from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name, atomic_write, render_markdown, _normalize_segment
+from core.authz import (validate_api_keys, format_validation_error, normalize_key_config,
+                        territory_allows, filter_by_read)
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler, _is_indexable_md
@@ -69,27 +71,39 @@ if os.path.exists(API_KEYS_FILE):
     with open(API_KEYS_FILE, 'r') as f:
         api_keys = yaml.safe_load(f) or {}
 
-# Fail-closed auth: in production (auth_required: true) refuse to start with an
-# open API rather than silently serving everything if api_keys.yaml went missing.
 RETRIEVAL_CFG = config.get('retrieval', {})
 RERANK_ALPHA = float(RETRIEVAL_CFG.get('rerank_alpha', 0.0))
 CHROMA_PREFETCH = int(RETRIEVAL_CFG.get('chroma_prefetch', 10))
 
+# Fail-closed auth: in production (auth_required: true) refuse to start rather
+# than serve open access or silently apply a permissive default. Two guards:
+#   1. no keys at all → refuse (api_keys.yaml missing/empty).
+#   2. any key under-specified (old list form, or missing read/write) → refuse
+#      with an EXPLICIT, per-key message (never a silent exit).
 GATEWAY_CFG = config.get('gateway', {})
-if GATEWAY_CFG.get('auth_required', False) and not api_keys:
-    logger.error(
-        "auth_required is true but no API keys are configured "
-        "(config/api_keys.yaml missing or empty). Refusing to start with open access."
-    )
-    sys.exit(1)
+AUTH_REQUIRED = GATEWAY_CFG.get('auth_required', False)
+if AUTH_REQUIRED:
+    if not api_keys:
+        logger.error(
+            "auth_required is true but no API keys are configured "
+            "(config/api_keys.yaml missing or empty). Refusing to start with open access."
+        )
+        sys.exit(1)
+    _key_problems = validate_api_keys(api_keys)
+    if _key_problems:
+        logger.error("\n" + format_validation_error(_key_problems))
+        sys.exit(1)
 
-def verify_api_key(x_api_key: Optional[str] = Header(None)) -> Dict[str, List[str]]:
-    if not api_keys: return {"scopes": ["*"], "namespaces": ["*:rw", ":r"]}
+# Pre-resolve every key to normalized grants {scopes, read, write} once, for
+# O(1) lookup per request. Lenient (missing territory -> "*") only in dev
+# (auth_required false); strict fail-closed default ([]) in production.
+API_GRANTS = {k: normalize_key_config(v, lenient=not AUTH_REQUIRED) for k, v in api_keys.items()}
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)) -> Dict[str, Any]:
+    if not api_keys: return {"scopes": ["*"], "read": ["*"], "write": ["*"]}
     if not x_api_key: raise HTTPException(status_code=401, detail="X-API-Key header missing")
     if x_api_key not in api_keys: raise HTTPException(status_code=403, detail="Invalid API Key")
-    key_config = api_keys[x_api_key]
-    scopes = key_config if isinstance(key_config, list) else key_config.get("scopes", ["Public"])
-    return {"scopes": scopes}
+    return API_GRANTS[x_api_key]
 
 def intersect_scopes(requested: str, allowed: List[str]) -> List[str]:
     if not requested: return allowed
@@ -104,6 +118,36 @@ def _assert_write_scope(scope: str, api_auth: dict):
         return
     if scope not in allowed:
         raise HTTPException(status_code=403, detail=f"Key not permitted to write scope '{scope}'")
+
+def _assert_write(scope: str, node_id: str, api_auth: dict):
+    """Raise 403 unless the key may write BOTH this scope AND this node's territory.
+
+    The two authorization axes are enforced in AND: confidentiality (scope) and
+    namespace (folder territory). A key confined to write ['Ganaghello'] cannot
+    write a Private node elsewhere even if it holds the Private scope.
+    """
+    _assert_write_scope(scope, api_auth)
+    if not territory_allows(api_auth.get("write", []), node_id):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Key not permitted to write in the territory of '{node_id}'",
+        )
+
+def _read_grants(api_auth: dict):
+    """Read-territory grants for filtering, or None when unrestricted ('*')."""
+    grants = api_auth.get("read", ["*"])
+    return None if "*" in grants else grants
+
+def _target_node_id(name: str, folder: str = "") -> str:
+    """Path-based node_id a write to (name, folder) will land on.
+
+    Mirrors _upsert_node_file's path resolution (existing file if any, else the
+    new path under folder) so the territory check runs on the real destination
+    before anything is written."""
+    existing = _find_node_file(name)
+    path = existing or _resolve_write_path(name, folder)
+    nid, _ = node_id_from_path(path, KNOWLEDGE_DIR)
+    return nid
 
 # Initialize Core
 try:
@@ -321,11 +365,20 @@ def _find_node_file(name: str) -> Optional[str]:
         if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
             return candidate
 
-    # Bare basename: case-insensitive recursive search
-    target = os.path.basename(cleaned).lower()
+    # Bare basename: normalized comparison (case/space/hyphen/underscore-
+    # insensitive), consistent with how node_id_from_path already treats these
+    # as equivalent. Without this, a canonical name returned by the API (always
+    # normalized, e.g. 'goal_001') could fail to re-resolve to the very file it
+    # names when the original filename normalizes differently (e.g. 'goal-001.md'),
+    # silently breaking the upsert-by-name contract (R4): a second write would
+    # create a duplicate file instead of updating in place.
+    target_norm = _normalize_segment(os.path.basename(cleaned))
     for root, dirs, files in os.walk(KNOWLEDGE_DIR):
         for f in files:
-            if f.lower() == f"{target}.md":
+            if not _is_indexable_md(f):
+                continue
+            stem = os.path.splitext(f)[0]
+            if _normalize_segment(stem) == target_norm:
                 return os.path.join(root, f)
     return None
 
@@ -406,6 +459,7 @@ def health_check():
             "enrich_queue_depth": event_handler._enrich_queue.qsize(),
             "gardener_last_run": gd.last_run,
             "gardener_interval_s": gd.interval,
+            "basename_collisions": len(event_handler.collisions),
         },
     }
 
@@ -413,9 +467,12 @@ def health_check():
 def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
+    read_grants = _read_grants(api_auth)
 
-    # 1. Fetch candidates from Chroma and apply thermal re-rank
+    # 1. Fetch candidates from Chroma, drop those outside the read territory,
+    #    then apply thermal re-rank.
     candidates = vector_store.semantic_search(q, scopes=scope_filter, limit=CHROMA_PREFETCH)
+    candidates = filter_by_read(candidates, read_grants, "node_id")
     if not candidates:
         raise HTTPException(status_code=404, detail=f"Concept '{q}' not found.")
 
@@ -424,9 +481,11 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
     display_name = best['name']
     node_id = best.get('node_id', best['name'])
 
-    # 2. Thermal stimulus and fetch neighbors from Kuzu (use path-based ID)
+    # 2. Thermal stimulus and fetch neighbors from Kuzu (use path-based ID),
+    #    filtered to the read territory so we never surface off-limits links.
     am.record_interaction(node_id, interaction_type="mcp_query")
     neighbors_data = kuzu_mgr.get_neighbors(node_id, scopes=scope_filter)
+    neighbors_data = filter_by_read(neighbors_data, read_grants, "node_name")
 
     related = [{"name": n['node_name'], "rel": n['rel_type']} for n in neighbors_data[:15]]
 
@@ -444,6 +503,7 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
 def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
+    read_grants = _read_grants(api_auth)
     # Try direct lookup (works for path-based IDs); fall back to basename resolution
     node_data = vector_store.get_node(name)
     if not node_data:
@@ -454,7 +514,13 @@ def get_node(name: str, scopes: Optional[str] = None, api_auth: Dict[str, List[s
             name = resolved_id
     if not node_data:
         raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
-    neighbors = kuzu_mgr.get_neighbors(name, scopes=scope_filter)
+    resolved_id = node_data.get("name", name)
+    # Territory check: a node outside the read grant is reported as not found
+    # (404 rather than 403) so its existence isn't leaked to a confined key.
+    if read_grants and not territory_allows(read_grants, resolved_id):
+        raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
+    neighbors = kuzu_mgr.get_neighbors(resolved_id, scopes=scope_filter)
+    neighbors = filter_by_read(neighbors, read_grants, "node_name")
     return {"data": node_data, "neighbors": neighbors}
 
 @app.delete("/nodes/{name}")
@@ -477,7 +543,8 @@ def delete_node_api(name: str, scopes: Optional[str] = None, api_auth: Dict[str,
             node_scope = fm.get("scope", "Private")
     except Exception:
         pass
-    _assert_write_scope(node_scope, api_auth)
+    del_node_id, _ = node_id_from_path(path, KNOWLEDGE_DIR)
+    _assert_write(node_scope, del_node_id, api_auth)
 
     os.remove(path)
     return {"status": "success", "message": f"Node '{name}' deleted"}
@@ -506,12 +573,14 @@ def _node_brief(node_id: str):
     return status, preview
 
 
-def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] = None) -> dict:
+def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] = None,
+                      read_grants: Optional[List[str]] = None) -> dict:
     """Build a briefing (hot topics + dormant nodes), optionally scoped to a project."""
     threshold = config.get("attention", {}).get("activation_threshold", 0.5)
     hot_limit = config.get("retrieval", {}).get("briefing_hot_limit", 12)
 
     active_nodes = kuzu_mgr.get_active_nodes(threshold=threshold, scopes=scope_filter, project=project)
+    active_nodes = filter_by_read(active_nodes, read_grants, "name")
     hot_topics = [n for n in active_nodes if not n['name'].startswith("obs_")]
     hot_topics.sort(key=lambda n: n.get("activation_level", n.get("activation", 0)) or 0, reverse=True)
 
@@ -534,6 +603,7 @@ def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] 
         days_journal=dormant_cfg.get("days_journal", 45),
         project=project,
     )
+    dormant_nodes = filter_by_read(dormant_nodes, read_grants, "name")
 
     return {
         "hot_topics": [_readable_name(n) for n in hot_topics[:hot_limit]],
@@ -549,7 +619,7 @@ def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] 
 def get_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
-    return _compute_briefing(scope_filter)
+    return _compute_briefing(scope_filter, read_grants=_read_grants(api_auth))
 
 @app.get("/briefing/initiatives")
 def get_initiatives(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
@@ -563,7 +633,7 @@ def get_initiatives(scopes: Optional[str] = None, api_auth: Dict[str, List[str]]
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
     engine = InitiativeEngine(kuzu_mgr, config=config)
-    items = engine.generate_initiatives(scopes=scope_filter)
+    items = engine.generate_initiatives(scopes=scope_filter, read_grants=_read_grants(api_auth))
     return {
         "timestamp": datetime.now().isoformat(),
         "count": len(items),
@@ -574,6 +644,7 @@ def get_initiatives(scopes: Optional[str] = None, api_auth: Dict[str, List[str]]
 def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
+    read_grants = _read_grants(api_auth)
 
     dormant_cfg = config.get("attention", {}).get("dormant", {})
     dormant_nodes = kuzu_mgr.get_dormant_nodes(
@@ -583,6 +654,7 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         days_goal_task=dormant_cfg.get("days_goal_task", 30),
         days_journal=dormant_cfg.get("days_journal", 45),
     )
+    dormant_nodes = filter_by_read(dormant_nodes, read_grants, "name")
 
     goals    = [n for n in dormant_nodes if n['node_type'] == 'Goal']
     tasks    = [n for n in dormant_nodes if n['node_type'] == 'Task']
@@ -595,6 +667,7 @@ def get_longitudinal_briefing(scopes: Optional[str] = None, api_auth: Dict[str, 
         days_inactive=dormant_cfg.get("hub_days_inactive", 21),
         scopes=scope_filter,
     )
+    all_hubs = filter_by_read(all_hubs, read_grants, "name")
     # Resurface a few forgotten hubs on rotation rather than always the most
     # connected ones: weighted-random pick keeps the briefing varied ("oh, do you
     # remember that important thing...") instead of repeating the same hubs daily.
@@ -628,11 +701,11 @@ def get_project_briefing(project: str, scopes: Optional[str] = None, api_auth: D
     """Briefing filtered to a single project/folder: hot_topics + dormant nodes of that project."""
     actual_scopes = intersect_scopes(scopes, api_auth["scopes"])
     scope_filter = actual_scopes if "*" not in actual_scopes else None
-    return _compute_briefing(scope_filter, project=project)
+    return _compute_briefing(scope_filter, project=project, read_grants=_read_grants(api_auth))
 @app.post("/observations")
 def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    _assert_write_scope(obs.scope, api_auth)
     obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
+    _assert_write(obs.scope, _target_node_id(obs_id), api_auth)
     frontmatter = {"type": "Observation", "scope": obs.scope}
     write_markdown(obs_id, frontmatter, obs.content)
     return {"status": "success", "id": obs_id}
@@ -640,7 +713,7 @@ def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depen
 @app.post("/goals", response_model=NodeWriteResponse)
 def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     scope = _resolve_scope(goal.scope, goal.scopes)
-    _assert_write_scope(scope, api_auth)
+    _assert_write(scope, _target_node_id(goal.name, goal.folder), api_auth)
     frontmatter: Dict[str, Any] = {
          "type": "Goal",
          "status": "active",
@@ -656,7 +729,7 @@ def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_
 @app.post("/tasks", response_model=NodeWriteResponse)
 def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     scope = _resolve_scope(task.scope, task.scopes)
-    _assert_write_scope(scope, api_auth)
+    _assert_write(scope, _target_node_id(task.name, task.folder), api_auth)
     frontmatter: Dict[str, Any] = {
          "type": "Task",
          "status": "todo",
@@ -676,7 +749,7 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
 
 @app.post("/nodes", response_model=NodeWriteResponse)
 def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
-    _assert_write_scope(node.scope, api_auth)
+    _assert_write(node.scope, _target_node_id(node.name, node.folder), api_auth)
     frontmatter: Dict[str, Any] = {
         "type": node.node_type,
         "scope": node.scope,
@@ -692,7 +765,7 @@ def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verif
 # surface would be unauthenticated. The middleware validates X-API-Key and
 # publishes the caller's scopes into a ContextVar the tools read.
 from core.mcp_auth import MCPAuthMiddleware
-app.mount("/mcp", MCPAuthMiddleware(mcp_app, api_keys=api_keys))
+app.mount("/mcp", MCPAuthMiddleware(mcp_app, grants_map=API_GRANTS))
 
 if __name__ == "__main__":
     host = config.get('gateway', {}).get('host', "0.0.0.0")

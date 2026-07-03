@@ -61,7 +61,7 @@ class TestUpsertEndpoints(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self._orig_kdir = self.hs.KNOWLEDGE_DIR
         self.hs.KNOWLEDGE_DIR = self.tmp
-        self.auth = {"scopes": ["*"]}
+        self.auth = {"scopes": ["*"], "read": ["*"], "write": ["*"]}
 
     def tearDown(self):
         self.hs.KNOWLEDGE_DIR = self._orig_kdir
@@ -77,13 +77,30 @@ class TestUpsertEndpoints(unittest.TestCase):
                          scopes="Private", relations="area-001:LOCATED_IN"),
             api_auth=self.auth,
         )
-        self.assertEqual(resp["name"], "goal-001")
+        # Canonical name is the normalized node_id (node_id_from_path lowercases
+        # and folds hyphens to underscores), not an echo of the raw input: it
+        # must match what every other lookup (Kuzu, Chroma, GET /nodes) uses.
+        self.assertEqual(resp["name"], "goal_001")
         self.assertEqual(resp["type"], "Goal")
         self.assertEqual(resp["scope"], "Private")
         self.assertEqual(resp["action"], "created")
         fm, _ = _read_frontmatter(self._path("goal-001"))
         self.assertEqual(fm["relations"], [{"target": "area-001", "type": "LOCATED_IN", "source": "user"}])
         self.assertEqual(fm["scope"], "Private")
+
+        # R4 round-trip: reusing the canonical name the API just returned must
+        # update the SAME file, not spawn a duplicate. This is the real contract
+        # ("the client should store and reuse this for upserts") and was broken
+        # for any name containing a hyphen until _find_node_file's bare-basename
+        # lookup was made normalization-aware.
+        resp2 = self.hs.create_goal_api(
+            self.hs.Goal(name=resp["name"], description="d2", scopes="Private"),
+            api_auth=self.auth,
+        )
+        self.assertEqual(resp2["action"], "updated")
+        self.assertEqual(resp2["name"], "goal_001")
+        md_files = [f for f in os.listdir(self.tmp) if f.endswith(".md")]
+        self.assertEqual(md_files, ["goal-001.md"], "must update the existing file, not duplicate it")
 
     # R1 + R2 ---------------------------------------------------------------
     def test_task_relations_and_goal_name_becomes_contributes_to(self):
@@ -93,7 +110,7 @@ class TestUpsertEndpoints(unittest.TestCase):
                          relations="task-padre-001:PART_OF,area-001:LOCATED_IN"),
             api_auth=self.auth,
         )
-        self.assertEqual(resp["name"], "task-001")
+        self.assertEqual(resp["name"], "task_001")
         fm, body = _read_frontmatter(self._path("task-001"))
         rels = fm["relations"]
         self.assertIn({"target": "task-padre-001", "type": "PART_OF", "source": "user"}, rels)

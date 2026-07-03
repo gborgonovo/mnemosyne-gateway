@@ -1,9 +1,9 @@
 """End-to-end test for MCP auth middleware + ContextVar propagation.
 
 The critical risk: FastMCP runs sync tool functions via anyio.to_thread, so we
-must prove that scopes set by the ASGI middleware actually reach the tool body.
-This test drives a real FastMCP streamable-HTTP app through httpx's ASGITransport
-(no DBs, no network) and asserts the three tiers behave correctly.
+must prove that the grants set by the ASGI middleware actually reach the tool
+body. This test drives a real FastMCP streamable-HTTP app through httpx's
+ASGITransport (no DBs, no network) and asserts scope + territory tiers behave.
 """
 import json
 import unittest
@@ -15,42 +15,48 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from core.mcp_auth import (
     MCPAuthMiddleware,
-    resolve_scopes,
+    resolve_grants,
+    get_scopes,
     scope_filter,
+    read_filter_grants,
     require_privileged,
     assert_write,
-    current_scopes,
+    current_grants,
 )
 
+# Normalized grants map (the shape gateway.http_server.API_GRANTS holds).
+GRANTS = {
+    "KFULL": {"scopes": ["Private", "Internal", "Public"], "read": ["*"], "write": ["*"]},
+    "KPUB":  {"scopes": ["Public"], "read": ["*"], "write": ["*"]},
+    "KGANA": {"scopes": ["Private", "Public"], "read": ["Ganaghello"], "write": ["Ganaghello"]},
+    "KRO":   {"scopes": ["Private", "Internal", "Public"], "read": ["*"], "write": []},
+}
 
-def _build_mcp(api_keys):
-    # Disable DNS-rebinding protection for the in-process test host (prod keeps it).
+
+def _build_mcp(grants_map):
     sec = TransportSecuritySettings(enable_dns_rebinding_protection=False)
     mcp = FastMCP("auth-test", stateless_http=True, streamable_http_path="/",
                   transport_security=sec)
 
     @mcp.tool()
     def whoami() -> str:
-        """Return the scopes visible inside the tool, plus tier decisions."""
+        """Report scope + territory decisions visible inside the tool."""
         return json.dumps({
-            "scopes": current_scopes.get(),
+            "scopes": get_scopes(),
             "scope_filter": scope_filter(),
+            "read_filter": read_filter_grants(),
             "diagnostic_denied": require_privileged() is not None,
-            "write_private_denied": assert_write("Private") is not None,
-            "write_public_denied": assert_write("Public") is not None,
+            # write checks now take (scope, node_id): territory matters
+            "w_priv_gana":  assert_write("Private", "ganaghello__conti") is not None,
+            "w_priv_other": assert_write("Private", "vangelo__nota") is not None,
+            "w_pub_gana":   assert_write("Public", "ganaghello__pagina") is not None,
         })
 
-    app = MCPAuthMiddleware(mcp.streamable_http_app(), api_keys=api_keys)
+    app = MCPAuthMiddleware(mcp.streamable_http_app(), grants_map=grants_map)
     return mcp, app
 
 
 async def _call_whoami(mcp, app, header_key=None, query_key=None):
-    """Drive the MCP stateless protocol and return (status, parsed_tool_json).
-
-    Wraps the call in session_manager.run() exactly like the gateway lifespan,
-    since the streamable-HTTP task group is created there. The key can be passed
-    via the X-API-Key header or the ?k= query param (Claude web's path).
-    """
     transport = httpx.ASGITransport(app=app)
     headers = {
         "Content-Type": "application/json",
@@ -58,7 +64,6 @@ async def _call_whoami(mcp, app, header_key=None, query_key=None):
     }
     if header_key is not None:
         headers["X-API-Key"] = header_key
-
     url = "/" if query_key is None else f"/?k={query_key}"
 
     async with mcp.session_manager.run():
@@ -70,8 +75,6 @@ async def _call_whoami(mcp, app, header_key=None, query_key=None):
             resp = await client.post(url, json=body, headers=headers)
             if resp.status_code != 200:
                 return resp.status_code, None
-
-            # Response is SSE: find the `data:` line carrying the JSON-RPC result
             payload = None
             for line in resp.text.splitlines():
                 if line.startswith("data:"):
@@ -81,24 +84,24 @@ async def _call_whoami(mcp, app, header_key=None, query_key=None):
             return 200, json.loads(text)
 
 
-class TestMCPAuthHelpers(unittest.TestCase):
-    def test_resolve_scopes(self):
-        # No keys configured → unrestricted (dev mode)
-        self.assertEqual(resolve_scopes({}, None), ["*"])
-        # Keys configured, missing/invalid → None (401)
-        keys = {"KPRIV": ["Private"], "KPUB": ["Public"]}
-        self.assertIsNone(resolve_scopes(keys, None))
-        self.assertIsNone(resolve_scopes(keys, "WRONG"))
-        # Valid keys → their scopes
-        self.assertEqual(resolve_scopes(keys, "KPRIV"), ["Private"])
-        self.assertEqual(resolve_scopes(keys, "KPUB"), ["Public"])
+class TestResolveGrants(unittest.TestCase):
+    def test_no_keys_is_dev_unrestricted(self):
+        g = resolve_grants({}, None)
+        self.assertEqual(g["scopes"], ["*"])
+        self.assertEqual(g["read"], ["*"])
+        self.assertEqual(g["write"], ["*"])
+
+    def test_missing_or_invalid_key_is_none(self):
+        self.assertIsNone(resolve_grants(GRANTS, None))
+        self.assertIsNone(resolve_grants(GRANTS, "WRONG"))
+
+    def test_valid_key_returns_grants(self):
+        self.assertEqual(resolve_grants(GRANTS, "KGANA")["read"], ["Ganaghello"])
 
 
 class TestMCPAuthE2E(unittest.TestCase):
-    API_KEYS = {"KPRIV": ["Private", "Internal", "Public"], "KPUB": ["Public"]}
-
     def setUp(self):
-        self.mcp, self.app = _build_mcp(self.API_KEYS)
+        self.mcp, self.app = _build_mcp(GRANTS)
 
     def test_no_key_is_401(self):
         status, _ = anyio.run(_call_whoami, self.mcp, self.app, None)
@@ -108,40 +111,48 @@ class TestMCPAuthE2E(unittest.TestCase):
         status, _ = anyio.run(_call_whoami, self.mcp, self.app, "NOPE")
         self.assertEqual(status, 401)
 
-    def test_public_key_tiers(self):
-        status, data = anyio.run(_call_whoami, self.mcp, self.app, "KPUB")
-        self.assertEqual(status, 200)
-        # ContextVar propagated all the way into the tool
-        self.assertEqual(data["scopes"], ["Public"])
-        # Read is filtered to Public
-        self.assertEqual(data["scope_filter"], ["Public"])
-        # Diagnostic denied for a Public-only key
-        self.assertTrue(data["diagnostic_denied"])
-        # Cannot write Private, can write Public
-        self.assertTrue(data["write_private_denied"])
-        self.assertFalse(data["write_public_denied"])
-
-    def test_private_key_tiers(self):
-        status, data = anyio.run(_call_whoami, self.mcp, self.app, "KPRIV")
+    def test_full_key(self):
+        status, data = anyio.run(_call_whoami, self.mcp, self.app, "KFULL")
         self.assertEqual(status, 200)
         self.assertEqual(set(data["scopes"]), {"Private", "Internal", "Public"})
-        self.assertTrue(set(data["scope_filter"]) == {"Private", "Internal", "Public"})
-        # Diagnostic allowed (has Private/Internal)
+        self.assertIsNone(data["read_filter"])          # reads everything
         self.assertFalse(data["diagnostic_denied"])
-        # Can write both
-        self.assertFalse(data["write_private_denied"])
-        self.assertFalse(data["write_public_denied"])
+        self.assertFalse(data["w_priv_gana"])           # writes anywhere
+        self.assertFalse(data["w_priv_other"])
+        self.assertFalse(data["w_pub_gana"])
+
+    def test_public_key_scope_tier(self):
+        status, data = anyio.run(_call_whoami, self.mcp, self.app, "KPUB")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["scope_filter"], ["Public"])
+        self.assertTrue(data["diagnostic_denied"])      # Public-only: no diagnostics
+        self.assertTrue(data["w_priv_gana"])            # scope denies Private
+        self.assertFalse(data["w_pub_gana"])            # Public write ok (territory *)
+
+    def test_confined_key_territory(self):
+        status, data = anyio.run(_call_whoami, self.mcp, self.app, "KGANA")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["read_filter"], ["Ganaghello"])   # reads only its tree
+        self.assertFalse(data["w_priv_gana"])           # Private + inside territory: ok
+        self.assertTrue(data["w_priv_other"])           # right scope, wrong territory: denied
+        self.assertFalse(data["w_pub_gana"])            # Public + inside territory: ok
+
+    def test_readonly_key_cannot_write(self):
+        status, data = anyio.run(_call_whoami, self.mcp, self.app, "KRO")
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["read_filter"])          # reads everything
+        # write == [] : no territory writable, even holding every scope
+        self.assertTrue(data["w_priv_gana"])
+        self.assertTrue(data["w_priv_other"])
+        self.assertTrue(data["w_pub_gana"])
 
     def test_query_param_key(self):
-        # Claude web carries the key in the connector URL (?k=...), no header
-        status, data = anyio.run(
-            _call_whoami, self.mcp, self.app, None, "KPUB")
+        status, data = anyio.run(_call_whoami, self.mcp, self.app, None, "KGANA")
         self.assertEqual(status, 200)
-        self.assertEqual(data["scopes"], ["Public"])
+        self.assertEqual(data["read_filter"], ["Ganaghello"])
 
     def test_query_param_invalid_is_401(self):
-        status, _ = anyio.run(
-            _call_whoami, self.mcp, self.app, None, "NOPE")
+        status, _ = anyio.run(_call_whoami, self.mcp, self.app, None, "NOPE")
         self.assertEqual(status, 401)
 
 

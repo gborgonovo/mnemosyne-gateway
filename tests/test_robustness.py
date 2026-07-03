@@ -87,27 +87,36 @@ class TestContentHashSync(_Base):
 
 
 class TestCollisionDetection(_Base):
+    """Path-based node IDs already eliminate cross-folder basename collisions
+    (a file in folder A and one in folder B with the same name get different
+    IDs, e.g. 'a__x' vs 'b__x' — see CLAUDE.md). A genuine collision today only
+    happens WITHIN the same folder, when two different filenames normalize to
+    the same segment (case, space, hyphen/underscore variants)."""
+
     def test_basename_collision_is_flagged(self):
-        a = self._write("x", {"type": "Node", "scope": "Private"}, "from folder a", subdir="A")
-        b = self._write("x", {"type": "Node", "scope": "Private"}, "from folder b", subdir="B")
+        # Same folder, case-only difference: both normalize to node_id 'a__x'.
+        a = self._write("x", {"type": "Node", "scope": "Private"}, "from x", subdir="A")
+        b = self._write("X", {"type": "Node", "scope": "Private"}, "from X", subdir="A")
         self.handler._sync_file(a, is_startup_sync=True)
         self.handler._sync_file(b, is_startup_sync=True)
-        self.assertIn("x", self.handler.collisions)
-        self.assertEqual(len(self.handler.collisions["x"]["paths"]), 2)
+        self.assertIn("a__x", self.handler.collisions)
+        self.assertEqual(len(self.handler.collisions["a__x"]["paths"]), 2)
 
     def test_delete_keeps_node_when_survivor_exists(self):
-        a = self._write("x", {"type": "Node", "scope": "Private"}, "from folder a", subdir="A")
-        b = self._write("x", {"type": "Node", "scope": "Private"}, "from folder b", subdir="B")
+        a = self._write("x", {"type": "Node", "scope": "Private"}, "from x", subdir="A")
+        b = self._write("X", {"type": "Node", "scope": "Private"}, "from X", subdir="A")
         self.handler._sync_file(a, is_startup_sync=True)
         self.handler._sync_file(b, is_startup_sync=True)
-        # Delete A/x.md; B/x.md still maps to node 'x'.
+        # Delete A/x.md; A/X.md still normalizes to the same node_id 'a__x'.
         os.remove(a)
 
         class _Evt:
             is_directory = False
             src_path = a
         self.handler.on_deleted(_Evt())
-        self.assertIsNotNone(self.kuzu.get_node("x"), "node must survive: another file maps to it")
+        self.assertIsNotNone(self.kuzu.get_node("a__x"), "node must survive: another file maps to it")
+        # Collision resolved: only one backing file remains.
+        self.assertNotIn("a__x", self.handler.collisions)
 
     def test_delete_removes_node_when_no_survivor(self):
         path = self._write("solo", {"type": "Node", "scope": "Private"}, "only one")
