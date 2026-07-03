@@ -59,6 +59,15 @@ class WikiSyncHandler(FileSystemEventHandler):
         # Maps normalized basename -> [path_based_node_id, ...].
         # Built during startup; maintained incrementally on create/delete/move.
         self._basename_index: dict = {}
+        # Maps node_id -> {relative file paths that currently produce it}.
+        # Path-based IDs already eliminate cross-folder basename collisions (two
+        # files with the same name in different folders get different IDs), but
+        # a same-folder normalization collision is still possible (e.g. 'x.md'
+        # and 'X.md', or 'note-a.md' and 'note_a.md', normalize to the same ID).
+        # Used to flag such collisions and to avoid wiping a node's graph/vector
+        # data when one of its backing files is deleted while another survives.
+        self._node_id_paths: dict = {}
+        self.collisions: dict = {}
         if llm is not None:
             t = threading.Thread(target=self._run_enrichment_worker, daemon=True)
             t.start()
@@ -99,19 +108,37 @@ class WikiSyncHandler(FileSystemEventHandler):
                 ids.remove(node_id)
                 if not ids:
                     self._basename_index.pop(basename_key, None)
-            self.kuzu_mgr.delete_node(node_id)
-            self.vector_store.delete_node(node_id)
-            logger.info(f"Node '{node_id}' removed from DBs.")
+            rel_path = os.path.relpath(event.src_path, self.knowledge_dir)
+            no_survivor = self._unregister_path(node_id, rel_path)
+            if no_survivor:
+                self.kuzu_mgr.delete_node(node_id)
+                self.vector_store.delete_node(node_id)
+                logger.info(f"Node '{node_id}' removed from DBs.")
+            else:
+                survivors = sorted(self._node_id_paths.get(node_id, []))
+                logger.warning(
+                    f"Node '{node_id}' kept: still backed by {survivors} "
+                    f"after deleting '{rel_path}'."
+                )
+                # Refresh the node's graph/vector data from a surviving file so
+                # it doesn't keep reflecting the just-deleted file's content.
+                survivor_path = os.path.join(self.knowledge_dir, survivors[0])
+                if os.path.isfile(survivor_path):
+                    self._sync_file(survivor_path, is_startup_sync=False)
 
     def on_moved(self, event):
         if not event.is_directory and _is_indexable_md(event.dest_path):
             logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
             src_id, src_display = node_id_from_path(event.src_path, self.knowledge_dir)
             dst_id, dst_display = node_id_from_path(event.dest_path, self.knowledge_dir)
+            src_rel_path = os.path.relpath(event.src_path, self.knowledge_dir)
+            no_survivor = self._unregister_path(src_id, src_rel_path)
             if src_id != dst_id:
-                # Remove old node from DB and index
-                self.kuzu_mgr.delete_node(src_id)
-                self.vector_store.delete_node(src_id)
+                # Remove old node from DB and index, unless another file still
+                # backs the same (pre-move) node_id.
+                if no_survivor:
+                    self.kuzu_mgr.delete_node(src_id)
+                    self.vector_store.delete_node(src_id)
                 src_key = _normalize_segment(src_display)
                 ids = self._basename_index.get(src_key, [])
                 if src_id in ids:
@@ -124,6 +151,42 @@ class WikiSyncHandler(FileSystemEventHandler):
                 if dst_id not in self._basename_index[dst_key]:
                     self._basename_index[dst_key].append(dst_id)
             self._sync_file(event.dest_path, is_startup_sync=False)
+
+    # ─── Node-id collision tracking ────────────────────────────────────────────
+
+    def _register_path(self, node_id: str, rel_path: str):
+        """Record that rel_path currently produces node_id.
+
+        Flags a collision when another file already claims the same node_id
+        (e.g. 'x.md' and 'X.md', or 'note-a.md' and 'note_a.md', in the same
+        folder: distinct files that normalize to the same path-based ID).
+        """
+        paths = self._node_id_paths.setdefault(node_id, set())
+        paths.add(rel_path)
+        if len(paths) > 1:
+            self.collisions[node_id] = {"paths": sorted(paths)}
+            logger.warning(f"Basename collision on node_id '{node_id}': {sorted(paths)}")
+        else:
+            self.collisions.pop(node_id, None)
+
+    def _unregister_path(self, node_id: str, rel_path: str) -> bool:
+        """Remove rel_path from node_id's backing-path set.
+
+        Returns True if no path remains for node_id (caller should delete the
+        node), False if another file still maps to it (caller should keep the
+        node's graph/vector data intact).
+        """
+        paths = self._node_id_paths.get(node_id)
+        if paths is not None:
+            paths.discard(rel_path)
+            if not paths:
+                self._node_id_paths.pop(node_id, None)
+        remaining = self._node_id_paths.get(node_id)
+        if remaining:
+            self.collisions[node_id] = {"paths": sorted(remaining)}
+            return False
+        self.collisions.pop(node_id, None)
+        return True
 
     # ─── Basename index ────────────────────────────────────────────────────────
 
@@ -285,6 +348,8 @@ class WikiSyncHandler(FileSystemEventHandler):
 
     def _sync_file(self, filepath: str, is_startup_sync: bool = False):
         node_id, display_name = node_id_from_path(filepath, self.knowledge_dir)
+        rel_path = os.path.relpath(filepath, self.knowledge_dir)
+        self._register_path(node_id, rel_path)
 
         frontmatter, body, raw_wikilinks, has_frontmatter = self._parse_markdown(filepath)
         if frontmatter is None:
@@ -328,7 +393,6 @@ class WikiSyncHandler(FileSystemEventHandler):
         # ChromaDB sync (B3: re-embed only on body change)
         file_mtime = os.path.getmtime(filepath)
         body_hash = _hash_body(body)
-        rel_path = os.path.relpath(filepath, self.knowledge_dir)
         existing = self.vector_store.get_node(node_id)
         existing_meta = existing.get('metadata', {}) if existing else {}
         body_changed = existing_meta.get('_body_hash') != body_hash

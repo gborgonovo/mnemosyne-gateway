@@ -42,7 +42,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name, atomic_write, render_markdown
+from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name, atomic_write, render_markdown, _normalize_segment
 from core.authz import (validate_api_keys, format_validation_error, normalize_key_config,
                         territory_allows, filter_by_read)
 from butler.initiative import InitiativeEngine
@@ -365,11 +365,20 @@ def _find_node_file(name: str) -> Optional[str]:
         if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
             return candidate
 
-    # Bare basename: case-insensitive recursive search
-    target = os.path.basename(cleaned).lower()
+    # Bare basename: normalized comparison (case/space/hyphen/underscore-
+    # insensitive), consistent with how node_id_from_path already treats these
+    # as equivalent. Without this, a canonical name returned by the API (always
+    # normalized, e.g. 'goal_001') could fail to re-resolve to the very file it
+    # names when the original filename normalizes differently (e.g. 'goal-001.md'),
+    # silently breaking the upsert-by-name contract (R4): a second write would
+    # create a duplicate file instead of updating in place.
+    target_norm = _normalize_segment(os.path.basename(cleaned))
     for root, dirs, files in os.walk(KNOWLEDGE_DIR):
         for f in files:
-            if f.lower() == f"{target}.md":
+            if not _is_indexable_md(f):
+                continue
+            stem = os.path.splitext(f)[0]
+            if _normalize_segment(stem) == target_norm:
                 return os.path.join(root, f)
     return None
 
@@ -450,6 +459,7 @@ def health_check():
             "enrich_queue_depth": event_handler._enrich_queue.qsize(),
             "gardener_last_run": gd.last_run,
             "gardener_interval_s": gd.interval,
+            "basename_collisions": len(event_handler.collisions),
         },
     }
 

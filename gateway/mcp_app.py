@@ -65,11 +65,18 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
                 return candidate
 
-        # 3) Bare basename: case-insensitive recursive match.
-        target = os.path.basename(cleaned).lower()
+        # 3) Bare basename: normalized comparison (case/space/hyphen/underscore-
+        # insensitive), consistent with node_id_from_path. Without this, a
+        # canonical id (always normalized) can fail to re-resolve to the file
+        # that produced it when the filename normalizes differently (e.g. a
+        # hyphen where the id has an underscore).
+        target_norm = _normalize_segment(os.path.basename(cleaned))
         for root, dirs, files in os.walk(knowledge_dir):
             for f in files:
-                if f.lower() == f"{target}.md":
+                if not f.endswith('.md'):
+                    continue
+                stem = os.path.splitext(f)[0]
+                if _normalize_segment(stem) == target_norm:
                     return os.path.join(root, f)
         return None
 

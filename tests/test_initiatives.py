@@ -39,8 +39,11 @@ class TestInitiativeEngineOnGraph(unittest.TestCase):
         engine = InitiativeEngine(self.kuzu, config={})
         items = engine.generate_initiatives()
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["source"], "progetto_caldo")
-        self.assertEqual(items[0]["target"], "tema_freddo")
+        # readable_name() renders underscores as spaces for a node with no
+        # separate display_name (added in 80f3f44, "initiatives leggibili in
+        # italiano", so Alfred's briefing shows human text, not raw slugs).
+        self.assertEqual(items[0]["source"], "progetto caldo")
+        self.assertEqual(items[0]["target"], "tema freddo")
         self.assertIn("message", items[0])
         self.assertIn("reason", items[0])
 
