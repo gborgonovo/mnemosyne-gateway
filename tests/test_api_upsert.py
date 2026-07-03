@@ -120,6 +120,53 @@ class TestUpsertEndpoints(unittest.TestCase):
         self.assertNotIn("[[goal-001]]", body)
         self.assertNotIn("Linked Goal", body)
 
+    # Status: create-only default, never silently reset on update ----------
+    def test_goal_status_defaults_on_create_and_is_not_reset_on_update(self):
+        resp = self.hs.create_goal_api(self.hs.Goal(name="goal-status", description="d"), api_auth=self.auth)
+        self.assertEqual(resp["action"], "created")
+        fm, _ = _read_frontmatter(self._path("goal-status"))
+        self.assertEqual(fm["status"], "active")
+
+        # Someone (e.g. via MCP) marks it done...
+        fm["status"] = "done"
+        path = self._path("goal-status")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("---\n"); yaml.dump(fm, f); f.write("---\n\nbody")
+
+        # ...then Ganaghello re-POSTs the Goal to change only the deadline.
+        # Before the fix, this silently reset status back to "active".
+        resp2 = self.hs.create_goal_api(
+            self.hs.Goal(name="goal-status", description="d", deadline="2027-01-01"),
+            api_auth=self.auth,
+        )
+        self.assertEqual(resp2["action"], "updated")
+        fm2, _ = _read_frontmatter(path)
+        self.assertEqual(fm2["status"], "done", "status must survive an update that doesn't touch it")
+        self.assertEqual(fm2["deadline"], "2027-01-01")
+
+        # An explicit status IS honored on update.
+        self.hs.create_goal_api(self.hs.Goal(name="goal-status", status="archived"), api_auth=self.auth)
+        fm3, _ = _read_frontmatter(path)
+        self.assertEqual(fm3["status"], "archived")
+
+    def test_task_status_defaults_on_create_and_is_not_reset_on_update(self):
+        resp = self.hs.create_task_api(self.hs.Task(name="task-status"), api_auth=self.auth)
+        self.assertEqual(resp["action"], "created")
+        fm, _ = _read_frontmatter(self._path("task-status"))
+        self.assertEqual(fm["status"], "todo")
+
+        resp2 = self.hs.create_task_api(
+            self.hs.Task(name="task-status", status="in_progress"), api_auth=self.auth,
+        )
+        self.assertEqual(resp2["action"], "updated")
+        fm2, _ = _read_frontmatter(self._path("task-status"))
+        self.assertEqual(fm2["status"], "in_progress")
+
+        # A repeat update that doesn't pass status must not reset it to "todo".
+        self.hs.create_task_api(self.hs.Task(name="task-status", description="notes"), api_auth=self.auth)
+        fm3, _ = _read_frontmatter(self._path("task-status"))
+        self.assertEqual(fm3["status"], "in_progress")
+
     # R3 -------------------------------------------------------------------
     def test_upsert_is_idempotent_and_preserves_created_at(self):
         self.hs.create_task_api(self.hs.Task(name="task-x", description="v1", scopes="Private"), api_auth=self.auth)

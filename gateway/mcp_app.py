@@ -87,7 +87,19 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 return f.read()
         return None
 
-    def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
+    def write_markdown(name: str, frontmatter: dict, body: str, folder: str = "", defaults: dict = None):
+        """Find-or-create a node's markdown file, merging frontmatter (upsert by name).
+
+        On update, starts from the file's EXISTING frontmatter and applies the
+        given `frontmatter` on top, so fields the caller didn't pass (e.g.
+        relations added by enrichment, or a status set via update_task_status)
+        survive a repeat call instead of being silently wiped. `defaults` (e.g.
+        {"status": "active"} for a new Goal) are applied via setdefault ONLY
+        when creating a new file, before `frontmatter` — so an explicit value
+        always wins, and a type default is never used to reset an existing
+        node's field on a later call (this previously reset status to "active"/
+        "todo" on every repeat create_goal/create_task with the same name).
+        """
         # Guard: never let a frontmatter block end up embedded in the body
         # (e.g. when a caller passes raw file content as the new body).
         body = strip_leading_frontmatter(body)
@@ -100,19 +112,18 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             safe_name = re.sub(r'[^\w\s-]', '', name).strip()
             path = os.path.join(target_dir, f"{safe_name}.md")
 
-        if is_new and 'created_at' not in frontmatter:
-            frontmatter['created_at'] = datetime.now().strftime('%Y-%m-%d')
-        elif not is_new:
-            # Upsert: preserve provenance fields the caller didn't supply so a
-            # re-write doesn't wipe created_at or the enrichment timestamp.
+        merged: dict = {}
+        if not is_new:
             with open(path, 'r', encoding='utf-8') as f:
                 _m = re.match(r'^---\n(.*?)\n---\n', f.read(), re.DOTALL)
-            existing_fm = (yaml.safe_load(_m.group(1)) if _m else None) or {}
-            for _k in ('created_at', 'enriched_at'):
-                if _k in existing_fm and _k not in frontmatter:
-                    frontmatter[_k] = existing_fm[_k]
+            merged = (yaml.safe_load(_m.group(1)) if _m else None) or {}
+        else:
+            for _k, _v in (defaults or {}).items():
+                merged.setdefault(_k, _v)
+            merged.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
 
-        atomic_write(path, render_markdown(frontmatter, body))
+        merged.update(frontmatter)
+        atomic_write(path, render_markdown(merged, body))
 
     def _parse_relations(relations_str: str, source: str = None) -> list:
         """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
@@ -617,11 +628,15 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
-    def create_goal(name: str, description: str = "", deadline: str = "",
+    def create_goal(name: str, description: str = "", deadline: str = "", status: str = "",
                     scopes: str = "Private,Public", folder: str = "", relations: str = "") -> str:
-        """Creates a new high-level strategic Goal as a Markdown file.
+        """Creates a new high-level strategic Goal as a Markdown file, or updates an
+        existing one with the same name (upsert).
 
         folder: relative path of an existing project folder (e.g. 'Ganaghello')
+        status: e.g. 'active', 'done'. Omit to leave unchanged on update
+                (defaults to 'active' on creation only — never resets an
+                existing Goal's status on a later call).
         relations: typed relationships as 'Target:TYPE' pairs (e.g. 'Progetto:PART_OF')
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
@@ -633,22 +648,28 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         denied = assert_write(scope_list[0], target_id)
         if denied:
             return denied
-        frontmatter = {"type": "Goal", "status": "active", "scope": scope_list[0]}
+        frontmatter = {"type": "Goal", "scope": scope_list[0]}
+        if status: frontmatter["status"] = status
         if deadline: frontmatter["deadline"] = deadline
         if relations: frontmatter["relations"] = _parse_relations(relations, source="user")
         body = f"# {name}\n\n{description}"
         try:
-            write_markdown(name, frontmatter, body, folder=folder)
+            write_markdown(name, frontmatter, body, folder=folder, defaults={"status": "active"})
             return json.dumps({"status": "success", "message": f"Goal '{name}' created."})
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
     @mcp.tool()
     def create_task(name: str, goal_name: str, description: str = "", deadline: str = "",
-                    scopes: str = "Private,Public", folder: str = "", relations: str = "") -> str:
-        """Creates an actionable Task and links it to an existing Goal via wikilinks.
+                    status: str = "", scopes: str = "Private,Public", folder: str = "",
+                    relations: str = "") -> str:
+        """Creates an actionable Task and links it to an existing Goal via wikilinks,
+        or updates an existing Task with the same name (upsert).
 
         folder: relative path of an existing project folder (e.g. 'Ganaghello')
+        status: e.g. 'todo', 'in_progress', 'done'. Omit to leave unchanged on
+                update (defaults to 'todo' on creation only — never resets an
+                existing Task's status on a later call).
         relations: typed relationships beyond the goal link, as 'Target:TYPE' pairs
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
@@ -660,7 +681,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         denied = assert_write(scope_list[0], target_id)
         if denied:
             return denied
-        frontmatter = {"type": "Task", "status": "todo", "scope": scope_list[0]}
+        frontmatter = {"type": "Task", "scope": scope_list[0]}
+        if status: frontmatter["status"] = status
         if deadline: frontmatter["deadline"] = deadline
         # goal_name becomes a typed CONTRIBUTES_TO edge rather than an implicit
         # LINKED_TO wikilink in the body (R2).
@@ -671,7 +693,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             frontmatter["relations"] = rels
         body = f"# {name}\n\n{description}"
         try:
-            write_markdown(name, frontmatter, body, folder=folder)
+            write_markdown(name, frontmatter, body, folder=folder, defaults={"status": "todo"})
             return json.dumps({"status": "success", "message": f"Task '{name}' created and linked to '{goal_name}'."})
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})

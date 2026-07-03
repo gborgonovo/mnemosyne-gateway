@@ -266,6 +266,7 @@ class Goal(BaseModel):
     name: str = Field(..., description="Stable identifier chosen by the client; reused for upserts.")
     description: str = ""
     deadline: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. Empty/omitted means no deadline.")
+    status: Optional[str] = Field(None, description="e.g. 'active', 'done'. Omit to leave unchanged on update (defaults to 'active' on creation only).")
     scope: Optional[str] = Field(None, description="Preferred: a single scope (e.g. 'Private'). Takes precedence over 'scopes'.")
     scopes: str = Field("Private,Public", description="Legacy/compat: comma-separated; only the first scope is used.")
     folder: str = Field("", description="Existing project subfolder under knowledge/.")
@@ -276,6 +277,7 @@ class Task(BaseModel):
     goal_name: Optional[str] = Field(None, description="If set, recorded as a CONTRIBUTES_TO relation to that goal.")
     description: str = ""
     deadline: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. Empty/omitted means no deadline.")
+    status: Optional[str] = Field(None, description="e.g. 'todo', 'in_progress', 'done'. Omit to leave unchanged on update (defaults to 'todo' on creation only).")
     scope: Optional[str] = Field(None, description="Preferred: a single scope (e.g. 'Private'). Takes precedence over 'scopes'.")
     scopes: str = Field("Private,Public", description="Legacy/compat: comma-separated; only the first scope is used.")
     folder: str = Field("", description="Existing project subfolder under knowledge/.")
@@ -404,7 +406,7 @@ def _parse_relations_str(relations_str: str, source: Optional[str] = None) -> li
     return result
 
 def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
-                      folder: str = "") -> tuple:
+                      folder: str = "", defaults: Optional[Dict[str, Any]] = None) -> tuple:
     """Find-or-create a node markdown file, merging frontmatter (upsert by name).
 
     Locates an existing file anywhere under KNOWLEDGE_DIR (so a second write with
@@ -413,6 +415,13 @@ def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
     from frontmatter_updates (e.g. relations when the caller passes none) are left
     untouched. Returns (canonical_name, action) where canonical_name is the slug
     actually written — the value the client should store and reuse for upserts.
+
+    `defaults` (e.g. {"status": "active"} for a new Goal) are applied via
+    setdefault ONLY when creating a new file, then frontmatter_updates is applied
+    on top (so an explicit value always wins). Without this split, a caller that
+    always sends its type default (e.g. status="active" on every /goals POST)
+    would silently reset an existing node's status back to that default on every
+    update — this previously happened for every re-POST of an existing Goal/Task.
     """
     existing_path = _find_node_file(name)
     action = "updated" if existing_path else "created"
@@ -424,10 +433,12 @@ def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
         m = re.match(r'^---\n(.*?)\n---\n', raw, re.DOTALL)
         if m:
             frontmatter = yaml.safe_load(m.group(1)) or {}
+    else:
+        for k, v in (defaults or {}).items():
+            frontmatter.setdefault(k, v)
+        frontmatter.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
 
     frontmatter.update(frontmatter_updates)
-    if not existing_path:
-        frontmatter.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
 
     path = existing_path or _resolve_write_path(name, folder)
     atomic_write(path, render_markdown(frontmatter, body))
@@ -714,27 +725,30 @@ def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depen
 def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     scope = _resolve_scope(goal.scope, goal.scopes)
     _assert_write(scope, _target_node_id(goal.name, goal.folder), api_auth)
-    frontmatter: Dict[str, Any] = {
-         "type": "Goal",
-         "status": "active",
-         "scope": scope,
-    }
+    # "status" defaults to "active" on creation only (via _upsert_node_file's
+    # `defaults`); an existing Goal's status is left untouched unless the caller
+    # explicitly sets it here — a repeated POST (e.g. to change the deadline)
+    # must never silently reset a Goal marked "done" back to "active".
+    frontmatter: Dict[str, Any] = {"type": "Goal", "scope": scope}
+    if goal.status:
+        frontmatter["status"] = goal.status
     if goal.deadline: frontmatter["deadline"] = goal.deadline
     if goal.relations:
         frontmatter["relations"] = _parse_relations_str(goal.relations, source="user")
     body = f"# {goal.name}\n\n{goal.description}"
-    canonical, action = _upsert_node_file(goal.name, body, frontmatter, folder=goal.folder)
+    canonical, action = _upsert_node_file(goal.name, body, frontmatter, folder=goal.folder,
+                                          defaults={"status": "active"})
     return {"status": "success", "action": action, "name": canonical, "type": "Goal", "scope": scope}
 
 @app.post("/tasks", response_model=NodeWriteResponse)
 def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
     scope = _resolve_scope(task.scope, task.scopes)
     _assert_write(scope, _target_node_id(task.name, task.folder), api_auth)
-    frontmatter: Dict[str, Any] = {
-         "type": "Task",
-         "status": "todo",
-         "scope": scope,
-    }
+    # Same create-only default as /goals: "status" defaults to "todo" on
+    # creation, and is left untouched on update unless explicitly set here.
+    frontmatter: Dict[str, Any] = {"type": "Task", "scope": scope}
+    if task.status:
+        frontmatter["status"] = task.status
     if task.deadline: frontmatter["deadline"] = task.deadline
     # Typed relations from the client; goal_name becomes a CONTRIBUTES_TO edge
     # rather than an implicit LINKED_TO wikilink in the body (R2).
@@ -744,7 +758,8 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
     if relations:
         frontmatter["relations"] = relations
     body = f"# {task.name}\n\n{task.description}"
-    canonical, action = _upsert_node_file(task.name, body, frontmatter, folder=task.folder)
+    canonical, action = _upsert_node_file(task.name, body, frontmatter, folder=task.folder,
+                                          defaults={"status": "todo"})
     return {"status": "success", "action": action, "name": canonical, "type": "Task", "scope": scope}
 
 @app.post("/nodes", response_model=NodeWriteResponse)
