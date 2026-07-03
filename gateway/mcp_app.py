@@ -7,9 +7,11 @@ import os
 import yaml
 from datetime import datetime
 
-from core.utils import strip_leading_frontmatter, resolve_safe_folder, node_id_from_path, normalize_node_name, atomic_write, render_markdown
+from core.utils import (strip_leading_frontmatter, resolve_safe_folder, node_id_from_path,
+                        normalize_node_name, atomic_write, render_markdown, _normalize_segment)
 from core.attention import thermal_rerank
-from core.mcp_auth import scope_filter, require_privileged, assert_write
+from core.mcp_auth import scope_filter, require_privileged, assert_write, read_filter_grants
+from core.authz import filter_by_read, territory_allows
 
 
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
@@ -181,6 +183,27 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             pass
         return "Private"
 
+    def _territory_id(abs_path: str) -> str:
+        """Path-based territory id for a file or folder, for authz.territory_allows.
+
+        Segments of the path relative to knowledge_dir, each normalized and joined
+        with '__' (same shape as a node_id), so a write/read grant like
+        'Ganaghello' matches everything under it."""
+        rel = os.path.relpath(os.path.abspath(abs_path), os.path.abspath(knowledge_dir))
+        return "__".join(_normalize_segment(p) for p in rel.replace("\\", "/").split("/")
+                         if p and p != ".")
+
+    def _target_node_id(name: str, folder: str = "") -> str:
+        """Territory id a write to (name, folder) will land on: the existing file
+        if one matches, else the resolved new path under folder. Raises ValueError
+        if folder is invalid (surfaced to the caller as an error)."""
+        path = find_file_recursive(name)
+        if not path:
+            target_dir = resolve_safe_folder(knowledge_dir, folder)
+            safe_name = re.sub(r'[^\w\s-]', '', name).strip()
+            path = os.path.join(target_dir, f"{safe_name}.md")
+        return _territory_id(path)
+
     @mcp.tool()
     def list_projects() -> str:
         """
@@ -204,9 +227,6 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         parent: relative path of an existing folder (e.g. 'Ganaghello/Operativo');
                 leave empty to create at root level
         """
-        denied = assert_write(scope)
-        if denied:
-            return denied
         try:
             # Validates traversal and existence; empty parent → knowledge root.
             base_path = resolve_safe_folder(knowledge_dir, parent)
@@ -214,6 +234,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
 
         safe_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
+
+        # Gate on both scope and the territory the new folder would live in.
+        denied = assert_write(scope, _territory_id(os.path.join(base_path, safe_name)))
+        if denied:
+            return denied
 
         existing_dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and not d.startswith('_')]
         for existing in existing_dirs:
@@ -270,11 +295,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             except Exception as e:
                 return json.dumps({"status": "error", "message": f"Could not read _defaults.yaml: {e}"})
 
-        denied = assert_write(defaults.get("scope", "Private"))
+        territory = _territory_id(folder_path)
+        denied = assert_write(defaults.get("scope", "Private"), territory)
         if denied:
             return denied
         if scope:
-            denied = assert_write(scope)
+            denied = assert_write(scope, territory)
             if denied:
                 return denied
 
@@ -306,6 +332,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         prefetch = max(limit * 2, int(retrieval_cfg.get('chroma_prefetch', 10)))
 
         candidates = vector_store.semantic_search(query, scopes=scope_filter(), limit=prefetch)
+        candidates = filter_by_read(candidates, read_filter_grants(), "node_id")
         if not candidates:
             return f"No concepts matching '{query}' found in memory."
 
@@ -335,10 +362,10 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
         When in doubt, prefer create_node.
         """
-        denied = assert_write(scope)
+        obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
+        denied = assert_write(scope, _target_node_id(obs_id))
         if denied:
             return denied
-        obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
         frontmatter = {"type": "Observation", "scope": scope}
         try:
             write_markdown(obs_id, frontmatter, content)
@@ -366,7 +393,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         relations: typed relationships as 'Target:TYPE' pairs (e.g. 'Ganaghello:PART_OF,Giorgio:MANAGES')
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
-        denied = assert_write(scope)
+        try:
+            target_id = _target_node_id(name, folder)
+        except ValueError as e:
+            return json.dumps({"status": "error", "message": str(e)})
+        denied = assert_write(scope, target_id)
         if denied:
             return denied
         frontmatter = {"type": node_type, "scope": scope}
@@ -387,10 +418,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     def get_memory_briefing() -> str:
         """Get a briefing on currently active (hot) topics."""
         sf = scope_filter()
+        rg = read_filter_grants()
         active_nodes = kuzu_mgr.get_active_nodes(threshold=0.5, scopes=sf)
+        active_nodes = filter_by_read(active_nodes, rg, "name")
         if not active_nodes:
              return "The memory is currently resting. No active thoughts."
-             
+
         active_nodes.sort(key=lambda x: x['activation_level'], reverse=True)
         hot_nodes = [n for n in active_nodes
                      if not n['name'].startswith("obs_") and "__obs_" not in n['name']][:10]
@@ -410,6 +443,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             days_node=dormant_cfg.get("days_node", 27),
             days_goal_task=dormant_cfg.get("days_goal_task", 30),
         )
+        dormant_nodes = filter_by_read(dormant_nodes, rg, "name")
         if dormant_nodes:
             briefing += "\nDormienti (erano attivi, ora inattivi):\n"
             for n in dormant_nodes[:5]:
@@ -449,10 +483,15 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         denied = require_privileged()
         if denied:
             return denied
+        rg = read_filter_grants()
         files_found = []
         for root, dirs, files in os.walk(knowledge_dir):
             for f in files:
-                files_found.append(os.path.relpath(os.path.join(root, f), knowledge_dir))
+                full = os.path.join(root, f)
+                # A privileged but territory-confined key only sees its own tree.
+                if rg is not None and not territory_allows(rg, _territory_id(full)):
+                    continue
+                files_found.append(os.path.relpath(full, knowledge_dir))
         return "\n".join(files_found)
 
     @mcp.tool()
@@ -466,6 +505,12 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         denied = require_privileged()
         if denied:
             return denied
+        # Territory check: a confined key can only inspect files in its read
+        # tree, reported as not found otherwise so existence isn't leaked.
+        rg = read_filter_grants()
+        path = find_file_recursive(name)
+        if rg is not None and (not path or not territory_allows(rg, _territory_id(path))):
+            return json.dumps({"error": f"File '{name}' not found"}, indent=2)
         content = read_markdown(name)
         if not content:
             return json.dumps({"error": f"File '{name}' not found"}, indent=2)
@@ -474,14 +519,14 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     @mcp.tool()
     def forget_knowledge_node(name: str) -> str:
         """Completely erases a concept by deleting its Markdown file."""
-        denied = assert_write(_node_scope(name))
+        path = find_file_recursive(name)
+        if not (path and os.path.exists(path)):
+            return json.dumps({"status": "error", "message": f"File '{name}.md' not found."}, indent=2)
+        denied = assert_write(_node_scope(name), _territory_id(path))
         if denied:
             return denied
-        path = find_file_recursive(name)
-        if path and os.path.exists(path):
-             os.remove(path)
-             return json.dumps({"status": "success", "message": f"File '{name}.md' deleted."}, indent=2)
-        return json.dumps({"status": "error", "message": f"File '{name}.md' not found."}, indent=2)
+        os.remove(path)
+        return json.dumps({"status": "success", "message": f"File '{name}.md' deleted."}, indent=2)
 
     @mcp.tool()
     def update_knowledge_frontmatter(name: str, updates: str) -> str:
@@ -489,7 +534,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         path = find_file_recursive(name)
         if not path or not os.path.exists(path):
             return json.dumps({"status": "error", "message": f"Entity '{name}' not found."})
-        denied = assert_write(_node_scope(name))
+        territory = _territory_id(path)
+        denied = assert_write(_node_scope(name), territory)
         if denied:
             return denied
         try:
@@ -497,7 +543,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         except json.JSONDecodeError:
              return json.dumps({"error": "The 'updates' argument must be valid JSON."})
         if "scope" in properties_dict:
-            denied = assert_write(properties_dict["scope"])
+            denied = assert_write(properties_dict["scope"], territory)
             if denied:
                 return denied
         try:
@@ -532,7 +578,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             return json.dumps({"status": "error", "message": f"Node '{name}' not found."})
         if not content and not updates:
             return json.dumps({"status": "error", "message": "Provide at least one of 'content' or 'updates'."})
-        denied = assert_write(_node_scope(name))
+        territory = _territory_id(path)
+        denied = assert_write(_node_scope(name), territory)
         if denied:
             return denied
         properties_dict = {}
@@ -542,7 +589,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             except json.JSONDecodeError:
                 return json.dumps({"error": "The 'updates' argument must be valid JSON."})
         if "scope" in properties_dict:
-            denied = assert_write(properties_dict["scope"])
+            denied = assert_write(properties_dict["scope"], territory)
             if denied:
                 return denied
         try:
@@ -572,7 +619,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
-        denied = assert_write(scope_list[0])
+        try:
+            target_id = _target_node_id(name, folder)
+        except ValueError as e:
+            return json.dumps({"status": "error", "message": str(e)})
+        denied = assert_write(scope_list[0], target_id)
         if denied:
             return denied
         frontmatter = {"type": "Goal", "status": "active", "scope": scope_list[0]}
@@ -595,7 +646,11 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
         scope_list = [s.strip() for s in scopes.split(",")] if scopes else ["Private"]
-        denied = assert_write(scope_list[0])
+        try:
+            target_id = _target_node_id(name, folder)
+        except ValueError as e:
+            return json.dumps({"status": "error", "message": str(e)})
+        denied = assert_write(scope_list[0], target_id)
         if denied:
             return denied
         frontmatter = {"type": "Task", "status": "todo", "scope": scope_list[0]}

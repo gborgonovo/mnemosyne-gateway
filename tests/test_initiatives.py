@@ -92,8 +92,8 @@ class TestInitiativesEndpoint(unittest.TestCase):
         self.assertEqual(resp["count"], 1)
         self.assertEqual(resp["initiatives"], canned)
         self.assertIn("timestamp", resp)
-        # full-scope key -> engine called without a scope filter
-        Eng.return_value.generate_initiatives.assert_called_once_with(scopes=None)
+        # full-scope key -> engine called without scope or territory filter
+        Eng.return_value.generate_initiatives.assert_called_once_with(scopes=None, read_grants=None)
 
     def test_endpoint_scopes_are_intersected(self):
         with mock.patch.object(self.hs, "InitiativeEngine") as Eng:

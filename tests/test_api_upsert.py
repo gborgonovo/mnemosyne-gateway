@@ -61,7 +61,7 @@ class TestUpsertEndpoints(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self._orig_kdir = self.hs.KNOWLEDGE_DIR
         self.hs.KNOWLEDGE_DIR = self.tmp
-        self.auth = {"scopes": ["*"]}
+        self.auth = {"scopes": ["*"], "read": ["*"], "write": ["*"]}
 
     def tearDown(self):
         self.hs.KNOWLEDGE_DIR = self._orig_kdir

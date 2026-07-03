@@ -1,6 +1,7 @@
 import logging
 
 from core.utils import readable_name
+from core.authz import territory_allows
 
 logger = logging.getLogger(__name__)
 
@@ -44,19 +45,22 @@ class InitiativeEngine:
             return ""
         return "Proactive Insights (dormant but relevant ideas):\n" + "\n".join(suggestions[:3])
 
-    def generate_initiatives(self, scopes: list = None) -> list:
+    def generate_initiatives(self, scopes: list = None, read_grants: list = None) -> list:
         initiatives = []
         active_nodes = self.kuzu_mgr.get_active_nodes(threshold=self.threshold, scopes=scopes)
         seen_targets = set()
 
+        def _in_territory(node_id: str) -> bool:
+            return read_grants is None or territory_allows(read_grants, node_id)
+
         for node in active_nodes:
             name = node['name']
-            if name.startswith("obs_"):
+            if name.startswith("obs_") or not _in_territory(name):
                 continue
             neighbors = self.kuzu_mgr.get_neighbors(name, scopes=scopes)
             for neighbor in neighbors:
                 n_name = neighbor['node_name']
-                if n_name in seen_targets or n_name.startswith("obs_"):
+                if n_name in seen_targets or n_name.startswith("obs_") or not _in_territory(n_name):
                     continue
                 n_node = self.kuzu_mgr.get_node(n_name)
                 if not n_node:

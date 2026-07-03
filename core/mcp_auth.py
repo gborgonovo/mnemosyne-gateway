@@ -7,70 +7,84 @@ the MCP surface would otherwise be completely unauthenticated. This module adds:
   - MCPAuthMiddleware: an ASGI middleware that extracts and validates X-API-Key
     on every HTTP request before it reaches the MCP transport. With auth
     configured, a missing/invalid key is rejected with 401 (fail-closed).
-  - A task-local ContextVar carrying the caller's allowed scopes, since MCP tool
-    functions receive no request object. Tools read it via the helpers below.
+  - A task-local ContextVar carrying the caller's grants (scopes + read/write
+    territories), since MCP tool functions receive no request object. Tools read
+    it via the helpers below.
 
-Authorization tiers (enforced inside the tools):
-  - read      : results filtered to the caller's scopes (scope_filter)
-  - diagnostic: debug_filesystem / inspect_file_raw / gardening — require
-                Internal or Private (require_privileged)
-  - write     : create/update/delete — require the target node's scope
-                (assert_write)
+Authorization axes (enforced inside the tools), always in AND:
+  - scope     : confidentiality tier the caller may touch (scope_filter for
+                reads, can_write/assert_write for writes)
+  - territory : folder namespace the caller may read (read_filter_grants) or
+                write (assert_write). See core.authz.
+  - privilege : diagnostic tools (debug_filesystem / inspect_file_raw /
+                gardening) require Internal or Private (require_privileged)
 """
 import json
 from contextvars import ContextVar
 from typing import List, Optional
 from urllib.parse import parse_qs
 
-# Allowed scopes for the current request. "*" means unrestricted (dev mode with
-# no api_keys.yaml configured). Empty list should never be observed inside a tool
-# because the middleware rejects unauthenticated requests before they run.
-current_scopes: ContextVar[List[str]] = ContextVar("current_scopes", default=["*"])
+from core.authz import territory_allows
+
+# Grants for the current request: {scopes, read, write}. The default is the
+# unrestricted dev grant ("*"), used only when no api_keys are configured; the
+# middleware rejects unauthenticated requests before any tool runs otherwise.
+_UNRESTRICTED = {"scopes": ["*"], "read": ["*"], "write": ["*"]}
+current_grants: ContextVar[dict] = ContextVar("current_grants", default=_UNRESTRICTED)
 
 PRIVILEGED_SCOPES = ("Internal", "Private")
 
 
-def resolve_scopes(api_keys: dict, api_key: Optional[str]) -> Optional[List[str]]:
-    """Map an API key to its allowed scopes.
+def resolve_grants(grants_map: dict, api_key: Optional[str]) -> Optional[dict]:
+    """Map an API key to its normalized grants {scopes, read, write}.
 
     Returns:
-      - ["*"] if no api_keys are configured (dev: auth disabled)
-      - the key's scope list if the key is valid
+      - the unrestricted dev grant if no keys are configured (auth disabled)
+      - the key's grants if the key is valid
       - None if a key is required but missing or invalid (caller should 401)
+
+    grants_map is the pre-resolved {key: {scopes, read, write}} built once at
+    startup (see gateway.http_server.API_GRANTS), so no normalization happens
+    per request.
     """
-    if not api_keys:
-        return ["*"]
+    if not grants_map:
+        return dict(_UNRESTRICTED)
     if not api_key:
         return None
-    if api_key not in api_keys:
+    if api_key not in grants_map:
         return None
-    cfg = api_keys[api_key]
-    if isinstance(cfg, list):
-        return cfg
-    return cfg.get("scopes", ["Public"])
+    return grants_map[api_key]
 
 
 # ─── Tool-side helpers (read the ContextVar) ────────────────────────────────
 
 def get_scopes() -> List[str]:
-    return current_scopes.get()
+    return current_grants.get().get("scopes", [])
 
 
 def is_unrestricted() -> bool:
-    return "*" in current_scopes.get()
+    return "*" in get_scopes()
 
 
 def scope_filter() -> Optional[List[str]]:
     """Scope list to pass to read queries, or None for unrestricted access."""
-    scopes = current_scopes.get()
+    scopes = get_scopes()
     if "*" in scopes:
         return None
     return list(scopes)
 
 
+def read_filter_grants() -> Optional[List[str]]:
+    """Read-territory grants to filter query results, or None when unrestricted."""
+    read = current_grants.get().get("read", ["*"])
+    if "*" in read:
+        return None
+    return list(read)
+
+
 def has_privileged() -> bool:
     """True if the caller may use diagnostic/maintenance tools."""
-    scopes = current_scopes.get()
+    scopes = get_scopes()
     if "*" in scopes:
         return True
     return any(s in scopes for s in PRIVILEGED_SCOPES)
@@ -85,36 +99,45 @@ def require_privileged() -> Optional[str]:
             "con scope Internal o Private.")
 
 
-def can_write(scope: str) -> bool:
-    scopes = current_scopes.get()
-    if "*" in scopes:
-        return True
-    return scope in scopes
+def can_write(scope: str, node_id: str) -> bool:
+    """True only if the caller may write BOTH this scope AND this territory."""
+    grants = current_grants.get()
+    scopes = grants.get("scopes", [])
+    scope_ok = "*" in scopes or scope in scopes
+    return scope_ok and territory_allows(grants.get("write", []), node_id)
 
 
-def assert_write(scope: str) -> Optional[str]:
+def assert_write(scope: str, node_id: str) -> Optional[str]:
     """Guard for write tools. Returns a JSON error string to return directly if
-    the caller may not write the given scope, or None if access is granted."""
-    if can_write(scope):
-        return None
-    return json.dumps({
-        "status": "error",
-        "message": f"⛔ Accesso negato: la chiave API non può scrivere nodi con scope '{scope}'.",
-    })
+    the caller may not write the given (scope, territory), or None if allowed."""
+    grants = current_grants.get()
+    scopes = grants.get("scopes", [])
+    if not ("*" in scopes or scope in scopes):
+        return json.dumps({
+            "status": "error",
+            "message": f"⛔ Accesso negato: la chiave API non può scrivere nodi con scope '{scope}'.",
+        })
+    if not territory_allows(grants.get("write", []), node_id):
+        return json.dumps({
+            "status": "error",
+            "message": (f"⛔ Accesso negato: la chiave API non può scrivere nel "
+                        f"territorio di '{node_id}'."),
+        })
+    return None
 
 
 # ─── ASGI middleware ────────────────────────────────────────────────────────
 
 class MCPAuthMiddleware:
     """Validates X-API-Key on every HTTP request to the wrapped MCP app and
-    publishes the resolved scopes into the `current_scopes` ContextVar.
+    publishes the resolved grants into the `current_grants` ContextVar.
 
     Non-HTTP scopes (lifespan, websocket) pass through untouched.
     """
 
-    def __init__(self, app, api_keys: dict):
+    def __init__(self, app, grants_map: dict):
         self.app = app
-        self.api_keys = api_keys
+        self.grants_map = grants_map
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -122,17 +145,17 @@ class MCPAuthMiddleware:
             return
 
         api_key = self._extract_api_key(scope)
-        scopes = resolve_scopes(self.api_keys, api_key)
+        grants = resolve_grants(self.grants_map, api_key)
 
-        if scopes is None:
+        if grants is None:
             await self._send_401(send)
             return
 
-        token = current_scopes.set(scopes)
+        token = current_grants.set(grants)
         try:
             await self.app(scope, receive, send)
         finally:
-            current_scopes.reset(token)
+            current_grants.reset(token)
 
     @staticmethod
     def _extract_api_key(scope) -> Optional[str]:
