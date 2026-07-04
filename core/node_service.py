@@ -223,3 +223,139 @@ def delete_node_file(knowledge_dir: str, name: str) -> bool:
         os.remove(path)
         return True
     return False
+
+
+def update_node(knowledge_dir: str, name: str, content: Optional[str] = None,
+                frontmatter_updates: Optional[dict] = None) -> tuple:
+    """Merge frontmatter (and optionally replace the body) of an EXISTING node.
+
+    Reuses the existing body when `content` is None/empty; merges
+    `frontmatter_updates` onto the current frontmatter (via upsert). Raises
+    FileNotFoundError if the node doesn't exist. Returns (canonical, 'updated').
+    """
+    path = find_node_file(knowledge_dir, name)
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(name)
+    with open(path, "r", encoding="utf-8") as f:
+        raw = f.read()
+    m = re.match(r"^---\n(.*?)\n---\n(.*)", raw, re.DOTALL)
+    existing_body = m.group(2) if m else raw
+    body = content if content else existing_body
+    return upsert(knowledge_dir, name, body, frontmatter_updates or {})
+
+
+# ─── Project folders ──────────────────────────────────────────────────────────
+
+def normalize_folder_name(name: str) -> str:
+    return re.sub(r"[\s_\-]+", "", name).lower()
+
+
+def folder_tree(knowledge_dir: str, base_dir: Optional[str] = None, prefix: str = "") -> str:
+    """Indented tree of project folders under base_dir (default: knowledge root),
+    annotating each with scope/description from its _defaults.yaml."""
+    base_dir = base_dir or knowledge_dir
+    try:
+        entries = sorted(os.listdir(base_dir))
+    except (PermissionError, FileNotFoundError):
+        return ""
+    dirs = [e for e in entries if os.path.isdir(os.path.join(base_dir, e))
+            and not e.startswith("_") and not e.startswith(".")]
+    lines = []
+    for d in dirs:
+        dir_path = os.path.join(base_dir, d)
+        meta = ""
+        defaults_path = os.path.join(dir_path, "_defaults.yaml")
+        if os.path.exists(defaults_path):
+            try:
+                with open(defaults_path) as f:
+                    defaults = yaml.safe_load(f) or {}
+                parts = []
+                if "scope" in defaults:
+                    parts.append(f"scope={defaults['scope']}")
+                if "description" in defaults:
+                    parts.append(f"'{defaults['description']}'")
+                if parts:
+                    meta = f" [{', '.join(parts)}]"
+            except Exception:
+                pass
+        lines.append(f"{prefix}{d}/{meta}")
+        subtree = folder_tree(knowledge_dir, dir_path, prefix + "  ")
+        if subtree:
+            lines.append(subtree)
+    return "\n".join(lines)
+
+
+def project_folder_path(knowledge_dir: str, name: str, parent: str = "") -> str:
+    """Absolute path a new project folder (name, under parent) would occupy.
+    Raises ValueError on a bad/absent parent. Used for territory authz before
+    creating anything."""
+    base_path = resolve_safe_folder(knowledge_dir, parent)
+    safe_name = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
+    return os.path.join(base_path, safe_name)
+
+
+def project_defaults(knowledge_dir: str, folder: str) -> dict:
+    """Current _defaults.yaml of an existing project folder (or {}). Raises
+    ValueError on a bad/absent folder. Read before authz on update."""
+    folder_path = resolve_safe_folder(knowledge_dir, folder)
+    defaults_path = os.path.join(folder_path, "_defaults.yaml")
+    if os.path.exists(defaults_path):
+        with open(defaults_path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def create_project(knowledge_dir: str, name: str, description: str = "",
+                   scope: str = "Private", parent: str = "") -> dict:
+    """Create a project folder with _defaults.yaml (+ an index .md if description).
+
+    Raises ValueError on a bad parent or if a folder with the same name already
+    exists at that level. Returns {result_path, warnings} (warnings = similar
+    folder names, for the caller to surface).
+    """
+    base_path = resolve_safe_folder(knowledge_dir, parent)
+    safe_name = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
+
+    existing_dirs = [d for d in os.listdir(base_path)
+                     if os.path.isdir(os.path.join(base_path, d)) and not d.startswith("_")]
+    for existing in existing_dirs:
+        if existing.lower() == safe_name.lower():
+            raise ValueError(f"Folder '{existing}' already exists at this level.")
+    warnings = [e for e in existing_dirs
+                if normalize_folder_name(e) == normalize_folder_name(safe_name)]
+
+    folder_path = os.path.join(base_path, safe_name)
+    os.makedirs(folder_path, exist_ok=True)
+
+    defaults = {"project": name, "scope": scope}
+    if description:
+        defaults["description"] = description
+    atomic_write(os.path.join(folder_path, "_defaults.yaml"),
+                 yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
+
+    if description:
+        index_fm = {"type": "Node", "scope": scope,
+                    "created_at": datetime.now().strftime("%Y-%m-%d")}
+        atomic_write(os.path.join(folder_path, f"{safe_name}.md"),
+                     render_markdown(index_fm, f"# {name}\n\n{description}"))
+
+    result_path = os.path.join(parent, safe_name) if parent else safe_name
+    return {"result_path": result_path, "warnings": warnings}
+
+
+def update_project(knowledge_dir: str, folder: str, description: str = "",
+                   scope: str = "") -> dict:
+    """Update a project folder's _defaults.yaml in place (description and/or scope).
+    Raises ValueError on a bad/absent folder. Returns the updated defaults."""
+    folder_path = resolve_safe_folder(knowledge_dir, folder)
+    defaults_path = os.path.join(folder_path, "_defaults.yaml")
+    defaults = {}
+    if os.path.exists(defaults_path):
+        with open(defaults_path) as f:
+            defaults = yaml.safe_load(f) or {}
+    if description:
+        defaults["description"] = description
+    if scope:
+        defaults["scope"] = scope
+    atomic_write(defaults_path, yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
+    return defaults

@@ -42,7 +42,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import node_id_from_path, readable_name as _readable_name, atomic_write, render_markdown
+from core.utils import node_id_from_path, readable_name as _readable_name
 from core.authz import (validate_api_keys, format_validation_error, normalize_key_config,
                         territory_allows, filter_by_read)
 from core import node_service
@@ -272,7 +272,24 @@ class NodeUpsert(BaseModel):
     node_type: str = Field("Node", description="e.g. Node, Reference, Goal, Task, Journal (Journal decays over ~40 days).")
     scope: str = "Private"
     folder: str = Field("", description="Existing project subfolder under knowledge/.")
+    links: str = Field("", description="Comma-separated node names for untyped [[wikilinks]] appended to the body.")
     relations: str = Field("", description="Typed edges as 'Target:TYPE,Other:TYPE' (default type RELATED_TO).")
+
+class NodePatch(BaseModel):
+    """Partial update of an existing node: merge frontmatter and/or replace body."""
+    content: Optional[str] = Field(None, description="New markdown body; omit to leave the body unchanged.")
+    updates: Dict[str, Any] = Field(default_factory=dict, description="Frontmatter fields to merge (e.g. {\"status\":\"done\"}).")
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., description="Folder name (sanitized; spaces become underscores).")
+    description: str = ""
+    scope: str = "Private"
+    parent: str = Field("", description="Existing parent folder; empty = knowledge root.")
+
+class ProjectUpdate(BaseModel):
+    folder: str = Field(..., description="Existing folder to update (e.g. 'Ganaghello' or 'Ganaghello/Operativo').")
+    description: str = ""
+    scope: str = ""
 
 class NodeWriteResponse(BaseModel):
     """Canonical response of POST /goals, /tasks, /nodes (R4)."""
@@ -302,11 +319,6 @@ class BriefingResponse(BaseModel):
 
 def _resolve_scope(scope: Optional[str], scopes: str) -> str:
     return node_service.resolve_scope(scope, scopes)
-
-def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
-    # Simple create-only write (Observations): no frontmatter merge, no created_at.
-    path = _resolve_write_path(name, folder)
-    atomic_write(path, render_markdown(frontmatter, body))
 
 def _find_node_file(name: str) -> Optional[str]:
     return node_service.find_node_file(KNOWLEDGE_DIR, name)
@@ -601,7 +613,9 @@ def add_observation_api(obs: Observation, api_auth: Dict[str, List[str]] = Depen
     obs_id = f"Obs_{uuid.uuid4().hex[:8]}"
     _assert_write(obs.scope, _target_node_id(obs_id), api_auth)
     frontmatter = {"type": "Observation", "scope": obs.scope}
-    write_markdown(obs_id, frontmatter, obs.content)
+    # Route through the shared upsert so an Observation gets created_at like every
+    # other node (goals/tasks/nodes always did; this closes the last REST/MCP gap).
+    _upsert_node_file(obs_id, obs.content, frontmatter)
     return {"status": "success", "id": obs_id}
 
 @app.post("/goals", response_model=NodeWriteResponse)
@@ -654,9 +668,67 @@ def upsert_node(node: NodeUpsert, api_auth: Dict[str, List[str]] = Depends(verif
     }
     if node.relations:
         frontmatter["relations"] = _parse_relations_str(node.relations, source="user")
-    canonical, action = _upsert_node_file(node.name, node.content, frontmatter, folder=node.folder)
+    body = node.content
+    if node.links:
+        targets = [l.strip() for l in node.links.split(",") if l.strip()]
+        if targets:
+            body += "\n\n" + " ".join(f"[[{t}]]" for t in targets)
+    canonical, action = _upsert_node_file(node.name, body, frontmatter, folder=node.folder)
     return {"status": "success", "action": action, "name": canonical,
             "type": node.node_type, "scope": node.scope}
+
+@app.patch("/nodes/{name}")
+def patch_node_api(name: str, patch: NodePatch, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Partial update of an existing node: merge frontmatter fields and/or replace
+    the body. Mirrors the MCP update_node / update_knowledge_frontmatter tools."""
+    if not _find_node_file(name):
+        raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
+    if not patch.content and not patch.updates:
+        raise HTTPException(status_code=400, detail="Provide at least one of 'content' or 'updates'.")
+    node_id = _target_node_id(name)
+    _assert_write(node_service.node_scope(KNOWLEDGE_DIR, name), node_id, api_auth)
+    if "scope" in patch.updates:
+        _assert_write(patch.updates["scope"], node_id, api_auth)
+    try:
+        canonical, action = node_service.update_node(
+            KNOWLEDGE_DIR, name, content=patch.content, frontmatter_updates=patch.updates)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Node '{name}' not found")
+    return {"status": "success", "action": action, "name": canonical}
+
+@app.get("/projects")
+def list_projects_api(api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Project folder tree (mirrors MCP list_projects)."""
+    return {"status": "success", "tree": node_service.folder_tree(KNOWLEDGE_DIR)}
+
+@app.post("/projects")
+def create_project_api(proj: ProjectCreate, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Create a project folder + _defaults.yaml (mirrors MCP create_project)."""
+    try:
+        folder_path = node_service.project_folder_path(KNOWLEDGE_DIR, proj.name, proj.parent)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _assert_write(proj.scope, node_service.territory_id(KNOWLEDGE_DIR, folder_path), api_auth)
+    try:
+        res = node_service.create_project(KNOWLEDGE_DIR, proj.name, proj.description,
+                                          proj.scope, proj.parent)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"status": "success", "name": res["result_path"], "warnings": res["warnings"]}
+
+@app.patch("/projects")
+def update_project_api(proj: ProjectUpdate, api_auth: Dict[str, List[str]] = Depends(verify_api_key)):
+    """Update a project's _defaults.yaml (mirrors MCP update_project)."""
+    try:
+        defaults = node_service.project_defaults(KNOWLEDGE_DIR, proj.folder)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    territory = node_service.territory_id(KNOWLEDGE_DIR, os.path.join(KNOWLEDGE_DIR, proj.folder))
+    _assert_write(defaults.get("scope", "Private"), territory, api_auth)
+    if proj.scope:
+        _assert_write(proj.scope, territory, api_auth)
+    updated = node_service.update_project(KNOWLEDGE_DIR, proj.folder, proj.description, proj.scope)
+    return {"status": "success", "folder": proj.folder, "current": updated}
 
 # Mount MCP behind the auth middleware. FastAPI's Depends(verify_api_key) does
 # NOT propagate to mounted sub-apps, so without this wrapper the entire MCP

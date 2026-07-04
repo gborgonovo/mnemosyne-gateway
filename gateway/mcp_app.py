@@ -2,9 +2,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 import json
 import uuid
-import re
 import os
-import yaml
 from datetime import datetime
 
 from core.utils import resolve_safe_folder, atomic_write, render_markdown
@@ -41,40 +39,6 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     def _parse_relations(relations_str: str, source: str = None) -> list:
         return node_service.parse_relations(relations_str, source)
 
-    def _normalize_folder_name(name: str) -> str:
-        return re.sub(r'[\s_\-]+', '', name).lower()
-
-    def _folder_tree(base_dir: str, prefix: str = "") -> str:
-        try:
-            entries = sorted(os.listdir(base_dir))
-        except PermissionError:
-            return ""
-        dirs = [e for e in entries if os.path.isdir(os.path.join(base_dir, e))
-                and not e.startswith('_') and not e.startswith('.')]
-        lines = []
-        for d in dirs:
-            dir_path = os.path.join(base_dir, d)
-            defaults_path = os.path.join(dir_path, '_defaults.yaml')
-            meta = ""
-            if os.path.exists(defaults_path):
-                try:
-                    with open(defaults_path) as f:
-                        defaults = yaml.safe_load(f) or {}
-                    parts = []
-                    if 'scope' in defaults:
-                        parts.append(f"scope={defaults['scope']}")
-                    if 'description' in defaults:
-                        parts.append(f"'{defaults['description']}'")
-                    if parts:
-                        meta = f" [{', '.join(parts)}]"
-                except Exception:
-                    pass
-            lines.append(f"{prefix}{d}/{meta}")
-            subtree = _folder_tree(dir_path, prefix + "  ")
-            if subtree:
-                lines.append(subtree)
-        return "\n".join(lines)
-
     def _node_scope(name: str) -> str:
         return node_service.node_scope(knowledge_dir, name)
 
@@ -90,7 +54,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         List all project folders in the knowledge base as an indented tree.
         Call this before create_project to check if a suitable folder already exists.
         """
-        tree = _folder_tree(knowledge_dir)
+        tree = node_service.folder_tree(knowledge_dir)
         if not tree:
             return "No project folders found in the knowledge base."
         return f"Knowledge folder structure:\n\n{tree}"
@@ -108,47 +72,22 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 leave empty to create at root level
         """
         try:
-            # Validates traversal and existence; empty parent → knowledge root.
-            base_path = resolve_safe_folder(knowledge_dir, parent)
+            folder_path = node_service.project_folder_path(knowledge_dir, name, parent)
         except ValueError as e:
             return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
-
-        safe_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
-
-        # Gate on both scope and the territory the new folder would live in.
-        denied = assert_write(scope, _territory_id(os.path.join(base_path, safe_name)))
+        denied = assert_write(scope, _territory_id(folder_path))
         if denied:
             return denied
+        try:
+            res = node_service.create_project(knowledge_dir, name, description, scope, parent)
+        except ValueError as e:
+            tree = node_service.folder_tree(knowledge_dir)
+            return json.dumps({"status": "error", "message": f"{e} Use it or choose a different name.\n\nCurrent structure:\n{tree}"})
 
-        existing_dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and not d.startswith('_')]
-        for existing in existing_dirs:
-            if existing.lower() == safe_name.lower():
-                tree = _folder_tree(knowledge_dir)
-                return json.dumps({"status": "error", "message": f"Folder '{existing}' already exists at this level. Use it or choose a different name.\n\nCurrent structure:\n{tree}"})
-
-        warnings = [e for e in existing_dirs if _normalize_folder_name(e) == _normalize_folder_name(safe_name)]
-
-        folder_path = os.path.join(base_path, safe_name)
-        os.makedirs(folder_path, exist_ok=True)
-
-        defaults = {"project": name, "scope": scope}
-        if description:
-            defaults["description"] = description
-        atomic_write(os.path.join(folder_path, '_defaults.yaml'),
-                     yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
-
-        if description:
-            index_frontmatter = {"type": "Node", "scope": scope, "created_at": datetime.now().strftime('%Y-%m-%d')}
-            index_body = f"# {name}\n\n{description}"
-            atomic_write(os.path.join(folder_path, f"{safe_name}.md"),
-                         render_markdown(index_frontmatter, index_body))
-
-        result_path = os.path.join(parent, safe_name) if parent else safe_name
-        msg = f"Project folder '{result_path}' created."
-        if warnings:
-            msg += f"\n\nWarning: similar folder(s) already exist at this level: {', '.join(warnings)}. Verify this is intentional."
-        tree = _folder_tree(knowledge_dir)
-        msg += f"\n\nUpdated structure:\n{tree}"
+        msg = f"Project folder '{res['result_path']}' created."
+        if res["warnings"]:
+            msg += f"\n\nWarning: similar folder(s) already exist at this level: {', '.join(res['warnings'])}. Verify this is intentional."
+        msg += f"\n\nUpdated structure:\n{node_service.folder_tree(knowledge_dir)}"
         return json.dumps({"status": "success", "message": msg})
 
     @mcp.tool()
@@ -163,17 +102,9 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         """
         try:
             folder_path = resolve_safe_folder(knowledge_dir, folder)
+            defaults = node_service.project_defaults(knowledge_dir, folder)
         except ValueError as e:
             return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
-
-        defaults_path = os.path.join(folder_path, '_defaults.yaml')
-        defaults = {}
-        if os.path.exists(defaults_path):
-            try:
-                with open(defaults_path) as f:
-                    defaults = yaml.safe_load(f) or {}
-            except Exception as e:
-                return json.dumps({"status": "error", "message": f"Could not read _defaults.yaml: {e}"})
 
         territory = _territory_id(folder_path)
         denied = assert_write(defaults.get("scope", "Private"), territory)
@@ -184,14 +115,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if denied:
                 return denied
 
-        if description:
-            defaults["description"] = description
-        if scope:
-            defaults["scope"] = scope
-
-        atomic_write(defaults_path, yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
-
-        return json.dumps({"status": "success", "message": f"Project '{folder}' updated.", "current": defaults})
+        updated = node_service.update_project(knowledge_dir, folder, description, scope)
+        return json.dumps({"status": "success", "message": f"Project '{folder}' updated.", "current": updated})
 
     @mcp.tool()
     def trigger_gardening_cycle() -> str:
@@ -427,18 +352,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if denied:
                 return denied
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', content, re.DOTALL)
-            if yaml_match:
-                frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
-                body = yaml_match.group(2)
-            else:
-                frontmatter = {}
-                body = content
-            for k, v in properties_dict.items():
-                 frontmatter[k] = v
-            write_markdown(name, frontmatter, body)
+            node_service.update_node(knowledge_dir, name, frontmatter_updates=properties_dict)
             return json.dumps({"status": "success", "message": f"File '{name}.md' frontmatter updated."})
         except Exception as e:
              return json.dumps({"error": str(e)})
@@ -473,18 +387,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if denied:
                 return denied
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                raw = f.read()
-            yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', raw, re.DOTALL)
-            if yaml_match:
-                frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
-                existing_body = yaml_match.group(2)
-            else:
-                frontmatter = {}
-                existing_body = raw
-            for k, v in properties_dict.items():
-                frontmatter[k] = v
-            write_markdown(name, frontmatter, content if content else existing_body)
+            node_service.update_node(knowledge_dir, name, content=content,
+                                     frontmatter_updates=properties_dict)
             return json.dumps({"status": "success", "message": f"Node '{name}' updated."})
         except Exception as e:
             return json.dumps({"error": str(e)})
