@@ -245,6 +245,49 @@ class KuzuManager:
         )
 
     @_synchronized
+    def get_thermal_state(self) -> list:
+        """Snapshot of every node's thermal state, for backup (see core.thermal_backup).
+
+        Returns [{name, activation, last_interaction, interaction_count,
+        last_decay_applied}, ...]. This is the ONLY authoritative state that is not
+        derivable from the markdown files, hence the only thing that needs backing up.
+        """
+        res = self.conn.execute(
+            "MATCH (n:Node) RETURN n.name, n.activation, n.last_interaction, "
+            "n.interaction_count, n.last_decay_applied"
+        )
+        rows = []
+        while res.has_next():
+            r = res.get_next()
+            rows.append({
+                "name": r[0],
+                "activation": r[1],
+                "last_interaction": r[2],
+                "interaction_count": r[3],
+                "last_decay_applied": r[4],
+            })
+        return rows
+
+    @_synchronized
+    def restore_thermal(self, name: str, activation: float, last_interaction: float,
+                        interaction_count: int, last_decay_applied: float):
+        """Write a node's thermal fields back verbatim from a backup snapshot.
+
+        Complements seed_activation (which reconstructs from a single reference
+        timestamp): this restores the exact stored values, interaction_count
+        included, so the longitudinal features (dormant/hub detection, gated on
+        interaction_count >= N) work immediately after a rebuild. No-op if absent.
+        """
+        self.conn.execute(
+            "MATCH (n:Node {name: $name}) SET n.activation = $act, "
+            "n.last_interaction = $li, n.interaction_count = $ic, n.last_decay_applied = $lda",
+            parameters={
+                "name": normalize_node_name(name), "act": activation,
+                "li": last_interaction, "ic": interaction_count, "lda": last_decay_applied,
+            },
+        )
+
+    @_synchronized
     def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0):
         """Apply activation boost. If update_timestamp, record this as a direct interaction.
 

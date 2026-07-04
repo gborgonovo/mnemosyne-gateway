@@ -45,7 +45,7 @@ from core.attention import AttentionModel, thermal_rerank
 from core.utils import node_id_from_path, readable_name as _readable_name
 from core.authz import (validate_api_keys, format_validation_error, normalize_key_config,
                         territory_allows, filter_by_read)
-from core import node_service
+from core import node_service, thermal_backup
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler, _is_indexable_md
@@ -182,6 +182,13 @@ try:
     if _GHOST_GC_ENABLED:
         logger.info(f"Cold-boot ghost reconcile: "
                     f"{event_handler.reconcile_ghosts(max_fraction=_GHOST_GC_MAX_FRACTION)}")
+    # Thermal-state backup: the only authoritative state not in the files. A JSON
+    # sidecar under knowledge/_system/ (invisible to the node machinery: not .md)
+    # so the daily git backup includes it. See core/thermal_backup.py.
+    THERMAL_BACKUP_ENABLED = _GHOST_CFG.get("thermal_backup_enabled", True)
+    THERMAL_STATE_PATH = os.path.join(KNOWLEDGE_DIR, "_system", "thermal_state.json")
+    if THERMAL_BACKUP_ENABLED:
+        os.makedirs(os.path.dirname(THERMAL_STATE_PATH), exist_ok=True)
     observer = Observer()
     observer.schedule(event_handler, KNOWLEDGE_DIR, recursive=True)
     observer.start()
@@ -209,6 +216,9 @@ try:
                     event_handler.reconcile_ghosts(max_fraction=_GHOST_GC_MAX_FRACTION)
                 except Exception as _e:
                     logger.error(f"Ghost reconcile error: {_e}")
+            # Thermal-state snapshot (best-effort, never raises out of the module).
+            if THERMAL_BACKUP_ENABLED:
+                thermal_backup.export(kuzu_mgr, THERMAL_STATE_PATH)
             time.sleep(_gardener_interval)
     threading.Thread(target=_gardener_loop, daemon=True, name="gardener").start()
     logger.info(f"Gardener thread started (interval: {_gardener_interval}s)")
@@ -234,6 +244,10 @@ async def lifespan(app):
         try:
             yield
         finally:
+            # Snapshot the thermal state one last time (before closing Kuzu) so a
+            # voluntary restart always leaves the freshest possible backup.
+            if THERMAL_BACKUP_ENABLED:
+                thermal_backup.export(kuzu_mgr, THERMAL_STATE_PATH)
             # Clean shutdown: checkpoint + close KuzuDB so SIGTERM (systemctl
             # stop|restart) never leaves a bloated WAL for the next boot to
             # replay into a "buffer pool is full" OOM loop.
@@ -383,6 +397,10 @@ def health_check():
             "gardener_interval_s": gd.interval,
             "basename_collisions": len(event_handler.collisions),
             "ghost_reconcile": event_handler.last_reconcile,
+            "thermal_backup_at": (
+                datetime.fromtimestamp(os.path.getmtime(THERMAL_STATE_PATH)).isoformat()
+                if THERMAL_BACKUP_ENABLED and os.path.exists(THERMAL_STATE_PATH) else None
+            ),
         },
     }
 
