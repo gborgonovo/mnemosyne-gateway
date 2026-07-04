@@ -42,9 +42,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.kuzu_manager import KuzuManager
 from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
-from core.utils import resolve_safe_folder, node_id_from_path, normalize_node_name, readable_name as _readable_name, atomic_write, render_markdown, _normalize_segment
+from core.utils import node_id_from_path, readable_name as _readable_name, atomic_write, render_markdown
 from core.authz import (validate_api_keys, format_validation_error, normalize_key_config,
                         territory_allows, filter_by_read)
+from core import node_service
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
 from workers.file_watcher import WikiSyncHandler, _is_indexable_md
@@ -139,15 +140,12 @@ def _read_grants(api_auth: dict):
     return None if "*" in grants else grants
 
 def _target_node_id(name: str, folder: str = "") -> str:
-    """Path-based node_id a write to (name, folder) will land on.
-
-    Mirrors _upsert_node_file's path resolution (existing file if any, else the
-    new path under folder) so the territory check runs on the real destination
-    before anything is written."""
-    existing = _find_node_file(name)
-    path = existing or _resolve_write_path(name, folder)
-    nid, _ = node_id_from_path(path, KNOWLEDGE_DIR)
-    return nid
+    """Path-based node_id a write to (name, folder) will land on, for territory
+    authz before anything is written. Invalid folder → HTTP 400."""
+    try:
+        return node_service.target_node_id(KNOWLEDGE_DIR, name, folder)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # Initialize Core
 try:
@@ -204,30 +202,15 @@ except Exception as e:
     sys.exit(1)
 
 def get_file_path(name: str):
-    safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-    return os.path.join(KNOWLEDGE_DIR, f"{safe_name}.md")
+    return node_service.resolve_write_path(KNOWLEDGE_DIR, name)
 
 def _resolve_write_path(name: str, folder: str = "") -> str:
     """Resolve the markdown path for a NEW node, optionally inside a subfolder.
-
-    Shared by /nodes, /goals and /tasks. If `folder` is set it must already exist
-    under KNOWLEDGE_DIR (400 otherwise); without it the node lands in the root.
-    """
-    safe_name = re.sub(r'[^\w\s-]', '', name).strip()
+    Invalid folder (traversal or non-existent) → HTTP 400."""
     try:
-        # Validates traversal and existence; nested subfolders (e.g.
-        # 'Sistema/Claude_Code') are allowed, '..' and absolute paths are not.
-        target_dir = resolve_safe_folder(KNOWLEDGE_DIR, folder)
+        return node_service.resolve_write_path(KNOWLEDGE_DIR, name, folder)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return os.path.join(target_dir, f"{safe_name}.md")
-
-def read_markdown(name: str):
-    path = get_file_path(name)
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.read()
-    return None
 
 @asynccontextmanager
 async def lifespan(app):
@@ -318,71 +301,15 @@ class BriefingResponse(BaseModel):
     timestamp: str
 
 def _resolve_scope(scope: Optional[str], scopes: str) -> str:
-    """Unify the scope vs scopes inconsistency (R6). Prefer the explicit singular
-    `scope`; otherwise fall back to the first of the legacy comma-separated
-    `scopes`; default Private (never silently Public)."""
-    if scope:
-        return scope.strip()
-    if scopes:
-        first = [s.strip() for s in scopes.split(",") if s.strip()]
-        if first:
-            return first[0]
-    return "Private"
+    return node_service.resolve_scope(scope, scopes)
 
 def write_markdown(name: str, frontmatter: dict, body: str, folder: str = ""):
+    # Simple create-only write (Observations): no frontmatter merge, no created_at.
     path = _resolve_write_path(name, folder)
     atomic_write(path, render_markdown(frontmatter, body))
 
 def _find_node_file(name: str) -> Optional[str]:
-    """Search for a node's markdown file recursively under KNOWLEDGE_DIR.
-
-    Accepts:
-      - A path-based node ID (e.g. 'ganaghello__spazi__stalla__stalla'): walks
-        the tree and matches the first file whose computed node_id equals name.
-      - A relative subfolder path (e.g. 'Ganaghello/Spazi/Stalla'): resolves
-        directly under KNOWLEDGE_DIR.
-      - A bare basename (e.g. 'stalla'): case-insensitive recursive search.
-    """
-    cleaned = name.strip()
-    if cleaned.lower().endswith(".md"):
-        cleaned = cleaned[:-3]
-    base = os.path.abspath(KNOWLEDGE_DIR)
-
-    # Path-based ID: match by computing node_id for each file
-    if "__" in cleaned:
-        target_id = normalize_node_name(cleaned)
-        for root, dirs, files in os.walk(KNOWLEDGE_DIR):
-            for f in files:
-                if not _is_indexable_md(f):
-                    continue
-                fp = os.path.join(root, f)
-                nid, _ = node_id_from_path(fp, KNOWLEDGE_DIR)
-                if nid == target_id:
-                    return fp
-        return None
-
-    # Relative subfolder path
-    if "/" in cleaned:
-        candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
-        if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
-            return candidate
-
-    # Bare basename: normalized comparison (case/space/hyphen/underscore-
-    # insensitive), consistent with how node_id_from_path already treats these
-    # as equivalent. Without this, a canonical name returned by the API (always
-    # normalized, e.g. 'goal_001') could fail to re-resolve to the very file it
-    # names when the original filename normalizes differently (e.g. 'goal-001.md'),
-    # silently breaking the upsert-by-name contract (R4): a second write would
-    # create a duplicate file instead of updating in place.
-    target_norm = _normalize_segment(os.path.basename(cleaned))
-    for root, dirs, files in os.walk(KNOWLEDGE_DIR):
-        for f in files:
-            if not _is_indexable_md(f):
-                continue
-            stem = os.path.splitext(f)[0]
-            if _normalize_segment(stem) == target_norm:
-                return os.path.join(root, f)
-    return None
+    return node_service.find_node_file(KNOWLEDGE_DIR, name)
 
 def _parse_relations_str(relations_str: str, source: Optional[str] = None) -> list:
     """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
@@ -390,61 +317,17 @@ def _parse_relations_str(relations_str: str, source: Optional[str] = None) -> li
     If `source` is given (e.g. "user"), it is tagged on each relation so the LLM
     enrichment worker treats them as authoritative and never overwrites them.
     """
-    result = []
-    for item in relations_str.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        if ":" in item:
-            target, rel_type = item.rsplit(":", 1)
-            rel = {"target": target.strip(), "type": rel_type.strip().upper()}
-        else:
-            rel = {"target": item, "type": "RELATED_TO"}
-        if source:
-            rel["source"] = source
-        result.append(rel)
-    return result
+    return node_service.parse_relations(relations_str, source)
 
 def _upsert_node_file(name: str, body: str, frontmatter_updates: Dict[str, Any],
                       folder: str = "", defaults: Optional[Dict[str, Any]] = None) -> tuple:
-    """Find-or-create a node markdown file, merging frontmatter (upsert by name).
-
-    Locates an existing file anywhere under KNOWLEDGE_DIR (so a second write with
-    the same name updates in place instead of duplicating), preserves fields like
-    created_at/enriched_at, then applies frontmatter_updates on top. Keys absent
-    from frontmatter_updates (e.g. relations when the caller passes none) are left
-    untouched. Returns (canonical_name, action) where canonical_name is the slug
-    actually written — the value the client should store and reuse for upserts.
-
-    `defaults` (e.g. {"status": "active"} for a new Goal) are applied via
-    setdefault ONLY when creating a new file, then frontmatter_updates is applied
-    on top (so an explicit value always wins). Without this split, a caller that
-    always sends its type default (e.g. status="active" on every /goals POST)
-    would silently reset an existing node's status back to that default on every
-    update — this previously happened for every re-POST of an existing Goal/Task.
-    """
-    existing_path = _find_node_file(name)
-    action = "updated" if existing_path else "created"
-
-    frontmatter: Dict[str, Any] = {}
-    if existing_path:
-        with open(existing_path, 'r', encoding='utf-8') as f:
-            raw = f.read()
-        m = re.match(r'^---\n(.*?)\n---\n', raw, re.DOTALL)
-        if m:
-            frontmatter = yaml.safe_load(m.group(1)) or {}
-    else:
-        for k, v in (defaults or {}).items():
-            frontmatter.setdefault(k, v)
-        frontmatter.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
-
-    frontmatter.update(frontmatter_updates)
-
-    path = existing_path or _resolve_write_path(name, folder)
-    atomic_write(path, render_markdown(frontmatter, body))
-
-    canonical, _ = node_id_from_path(path, KNOWLEDGE_DIR)
-    return canonical, action
+    """Upsert a node markdown file by name (merge frontmatter). Invalid folder for
+    a new node → HTTP 400. See core.node_service.upsert for the full semantics."""
+    try:
+        return node_service.upsert(KNOWLEDGE_DIR, name, body, frontmatter_updates,
+                                   folder=folder, defaults=defaults)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/")
 @app.get("/status")

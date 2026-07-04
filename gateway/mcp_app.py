@@ -7,11 +7,11 @@ import os
 import yaml
 from datetime import datetime
 
-from core.utils import (strip_leading_frontmatter, resolve_safe_folder, node_id_from_path,
-                        normalize_node_name, atomic_write, render_markdown, _normalize_segment)
+from core.utils import resolve_safe_folder, atomic_write, render_markdown
 from core.attention import thermal_rerank
 from core.mcp_auth import scope_filter, require_privileged, assert_write, read_filter_grants
 from core.authz import filter_by_read, territory_allows
+from core import node_service
 
 
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
@@ -24,127 +24,22 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     
     mcp = FastMCP("Mnemosyne-Memory", transport_security=security, streamable_http_path="/", stateless_http=True)
 
-    # Helper functions
+    # Helper functions — thin adapters over the shared core.node_service, so REST
+    # and MCP can't drift apart (the drift caused the status-reset bug, 88aba32).
     def find_file_recursive(name: str):
-        """Locate a markdown file within the knowledge directory.
-
-        Accepts:
-          - A path-based node ID (e.g. 'ganaghello__spazi__stalla__stalla'):
-            walks the tree and matches the first file whose computed node_id
-            equals the input.
-          - A relative subfolder path (e.g. 'Sistema/Alfred/SystemPrompt'):
-            resolved directly under knowledge_dir.
-          - A bare basename (case-insensitive recursive search).
-        The '.md' extension is optional in all forms.
-        """
-        if not name:
-            return None
-
-        cleaned = name.strip().replace("\\", "/")
-        if cleaned.lower().endswith(".md"):
-            cleaned = cleaned[:-3]
-
-        base = os.path.abspath(knowledge_dir)
-
-        # 1) Path-based ID (contains __): match by computed node_id.
-        if "__" in cleaned:
-            target_id = normalize_node_name(cleaned)
-            for root, dirs, files in os.walk(knowledge_dir):
-                for f in files:
-                    if not f.endswith('.md'):
-                        continue
-                    fp = os.path.join(root, f)
-                    nid, _ = node_id_from_path(fp, knowledge_dir)
-                    if nid == target_id:
-                        return fp
-            return None
-
-        # 2) Relative subfolder path → resolve directly.
-        if "/" in cleaned:
-            candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
-            if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
-                return candidate
-
-        # 3) Bare basename: normalized comparison (case/space/hyphen/underscore-
-        # insensitive), consistent with node_id_from_path. Without this, a
-        # canonical id (always normalized) can fail to re-resolve to the file
-        # that produced it when the filename normalizes differently (e.g. a
-        # hyphen where the id has an underscore).
-        target_norm = _normalize_segment(os.path.basename(cleaned))
-        for root, dirs, files in os.walk(knowledge_dir):
-            for f in files:
-                if not f.endswith('.md'):
-                    continue
-                stem = os.path.splitext(f)[0]
-                if _normalize_segment(stem) == target_norm:
-                    return os.path.join(root, f)
-        return None
+        return node_service.find_node_file(knowledge_dir, name)
 
     def read_markdown(name: str):
-        path = find_file_recursive(name)
-        if path:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
-        return None
+        return node_service.read_markdown(knowledge_dir, name)
 
     def write_markdown(name: str, frontmatter: dict, body: str, folder: str = "", defaults: dict = None):
-        """Find-or-create a node's markdown file, merging frontmatter (upsert by name).
-
-        On update, starts from the file's EXISTING frontmatter and applies the
-        given `frontmatter` on top, so fields the caller didn't pass (e.g.
-        relations added by enrichment, or a status set via update_task_status)
-        survive a repeat call instead of being silently wiped. `defaults` (e.g.
-        {"status": "active"} for a new Goal) are applied via setdefault ONLY
-        when creating a new file, before `frontmatter` — so an explicit value
-        always wins, and a type default is never used to reset an existing
-        node's field on a later call (this previously reset status to "active"/
-        "todo" on every repeat create_goal/create_task with the same name).
-        """
-        # Guard: never let a frontmatter block end up embedded in the body
-        # (e.g. when a caller passes raw file content as the new body).
-        body = strip_leading_frontmatter(body)
-        # Try to find existing file to update it in place
-        path = find_file_recursive(name)
-        is_new = path is None
-        if not path:
-            # Validates traversal and existence; nested subfolders are allowed.
-            target_dir = resolve_safe_folder(knowledge_dir, folder)
-            safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-            path = os.path.join(target_dir, f"{safe_name}.md")
-
-        merged: dict = {}
-        if not is_new:
-            with open(path, 'r', encoding='utf-8') as f:
-                _m = re.match(r'^---\n(.*?)\n---\n', f.read(), re.DOTALL)
-            merged = (yaml.safe_load(_m.group(1)) if _m else None) or {}
-        else:
-            for _k, _v in (defaults or {}).items():
-                merged.setdefault(_k, _v)
-            merged.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
-
-        merged.update(frontmatter)
-        atomic_write(path, render_markdown(merged, body))
+        """Upsert by name (merge frontmatter). Raises ValueError on an invalid
+        folder for a new node; the calling tool turns it into a JSON error."""
+        node_service.upsert(knowledge_dir, name, body, frontmatter,
+                            folder=folder, defaults=defaults)
 
     def _parse_relations(relations_str: str, source: str = None) -> list:
-        """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
-
-        If `source` is given (e.g. "user"), it is tagged on each relation so the
-        LLM enrichment worker treats them as authoritative and never overwrites them.
-        """
-        result = []
-        for item in relations_str.split(","):
-            item = item.strip()
-            if not item:
-                continue
-            if ":" in item:
-                target, rel_type = item.rsplit(":", 1)
-                rel = {"target": target.strip(), "type": rel_type.strip().upper()}
-            else:
-                rel = {"target": item, "type": "RELATED_TO"}
-            if source:
-                rel["source"] = source
-            result.append(rel)
-        return result
+        return node_service.parse_relations(relations_str, source)
 
     def _normalize_folder_name(name: str) -> str:
         return re.sub(r'[\s_\-]+', '', name).lower()
@@ -181,46 +76,13 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         return "\n".join(lines)
 
     def _node_scope(name: str) -> str:
-        """Read the scope from an existing node's frontmatter.
-
-        Used to gate writes/deletes on the node's current scope. Falls back to
-        'Private' (most restrictive) when the file or scope cannot be read, so a
-        node of unknown scope is never writable by a low-privilege key.
-        """
-        path = find_file_recursive(name)
-        if not path or not os.path.exists(path):
-            return "Private"
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                raw = f.read()
-            m = re.match(r'^---\n(.*?)\n---', raw, re.DOTALL)
-            if m:
-                fm = yaml.safe_load(m.group(1)) or {}
-                return fm.get("scope", "Private")
-        except Exception:
-            pass
-        return "Private"
+        return node_service.node_scope(knowledge_dir, name)
 
     def _territory_id(abs_path: str) -> str:
-        """Path-based territory id for a file or folder, for authz.territory_allows.
-
-        Segments of the path relative to knowledge_dir, each normalized and joined
-        with '__' (same shape as a node_id), so a write/read grant like
-        'Ganaghello' matches everything under it."""
-        rel = os.path.relpath(os.path.abspath(abs_path), os.path.abspath(knowledge_dir))
-        return "__".join(_normalize_segment(p) for p in rel.replace("\\", "/").split("/")
-                         if p and p != ".")
+        return node_service.territory_id(knowledge_dir, abs_path)
 
     def _target_node_id(name: str, folder: str = "") -> str:
-        """Territory id a write to (name, folder) will land on: the existing file
-        if one matches, else the resolved new path under folder. Raises ValueError
-        if folder is invalid (surfaced to the caller as an error)."""
-        path = find_file_recursive(name)
-        if not path:
-            target_dir = resolve_safe_folder(knowledge_dir, folder)
-            safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-            path = os.path.join(target_dir, f"{safe_name}.md")
-        return _territory_id(path)
+        return node_service.target_node_id(knowledge_dir, name, folder)
 
     @mcp.tool()
     def list_projects() -> str:
