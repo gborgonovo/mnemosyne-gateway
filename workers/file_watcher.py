@@ -68,6 +68,8 @@ class WikiSyncHandler(FileSystemEventHandler):
         # data when one of its backing files is deleted while another survives.
         self._node_id_paths: dict = {}
         self.collisions: dict = {}
+        # Result of the last ghost reconciliation (see reconcile_ghosts), for /status.
+        self.last_reconcile: dict = {"removed": 0, "at": None, "skipped": False}
         if llm is not None:
             t = threading.Thread(target=self._run_enrichment_worker, daemon=True)
             t.start()
@@ -187,6 +189,81 @@ class WikiSyncHandler(FileSystemEventHandler):
             return False
         self.collisions.pop(node_id, None)
         return True
+
+    # ─── Ghost reconciliation ──────────────────────────────────────────────────
+
+    def _on_disk_ids(self) -> set:
+        """node_id of every indexable .md currently under knowledge_dir."""
+        ids = set()
+        for root, _dirs, files in os.walk(self.knowledge_dir):
+            for f in files:
+                if _is_indexable_md(f):
+                    nid, _ = node_id_from_path(os.path.join(root, f), self.knowledge_dir)
+                    ids.add(nid)
+        return ids
+
+    def reconcile_ghosts(self, max_fraction: float = 0.5) -> dict:
+        """Remove ghost nodes: entries in KuzuDB/ChromaDB whose backing .md file no
+        longer exists (deleted/moved while the gateway was down, or a missed inotify
+        event). The filesystem is the source of truth.
+
+        Preserves wikilink/relation STUBS that are still referenced by an existing
+        file (they have no file of their own but a live node points to them; a sync
+        would just recreate them). Never touches internal indexes because those are
+        built from files only, so they contain no ghosts.
+
+        Safety: does nothing if there are no files on disk at all (transient
+        unreadable/empty knowledge dir), and skips with an error if the ghosts would
+        exceed `max_fraction` of the DB (guards against a bug or fault wiping the
+        graph). Returns a summary dict, also stored on self.last_reconcile.
+        """
+        now = datetime.datetime.now().isoformat(timespec="seconds")
+        on_disk = self._on_disk_ids()
+        if not on_disk:
+            logger.warning("Ghost reconcile skipped: no .md files found on disk "
+                           "(refusing to delete every node).")
+            self.last_reconcile = {"removed": 0, "at": now, "skipped": True}
+            return self.last_reconcile
+
+        # Chroma ghosts: parent ids with no file (content ghosts — the search/briefing pain).
+        chroma_parents = set()
+        for entry in self.vector_store.list_nodes():
+            meta = entry.get("metadata") or {}
+            chroma_parents.add(meta.get("_parent_id", entry["name"]))
+        chroma_ghosts = chroma_parents - on_disk
+
+        # Live stub targets: referenced by an edge FROM an on-disk node → keep them.
+        live_targets = set()
+        for nid in on_disk:
+            for edge in self.kuzu_mgr.get_outgoing_edges(nid):
+                live_targets.add(edge["target"])
+
+        kuzu_names = {n["name"] for n in self.kuzu_mgr.get_all_nodes()}
+        kuzu_ghosts = kuzu_names - on_disk - live_targets
+
+        ghosts = chroma_ghosts | kuzu_ghosts
+        if not ghosts:
+            self.last_reconcile = {"removed": 0, "at": now, "skipped": False}
+            return self.last_reconcile
+
+        total_db = len(kuzu_names | chroma_parents) or 1
+        if len(ghosts) > max_fraction * total_db:
+            logger.error(
+                f"Ghost reconcile skipped: {len(ghosts)} ghosts exceed "
+                f"{max_fraction:.0%} of {total_db} DB nodes. Refusing bulk deletion; "
+                f"investigate before running manually."
+            )
+            self.last_reconcile = {"removed": 0, "at": now, "skipped": True}
+            return self.last_reconcile
+
+        for gid in sorted(ghosts):
+            self.kuzu_mgr.delete_node(gid)
+            self.vector_store.delete_node(gid)
+            logger.info(f"Ghost removed: '{gid}' (no file on disk).")
+
+        logger.info(f"Ghost reconcile: removed {len(ghosts)} node(s) with no file.")
+        self.last_reconcile = {"removed": len(ghosts), "at": now, "skipped": False}
+        return self.last_reconcile
 
     # ─── Basename index ────────────────────────────────────────────────────────
 

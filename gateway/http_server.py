@@ -173,6 +173,15 @@ try:
         for _fname in _files:
             if _is_indexable_md(_fname):
                 event_handler._sync_file(_os.path.join(_root, _fname), is_startup_sync=True)
+    # Ghost GC: after syncing every file (and before the observer starts, so no
+    # concurrent events), remove nodes in Kuzu/Chroma whose .md file is gone —
+    # files deleted while the gateway was down (typically via Syncthing).
+    _GHOST_CFG = config.get("gardener", {})
+    _GHOST_GC_ENABLED = _GHOST_CFG.get("ghost_gc_enabled", True)
+    _GHOST_GC_MAX_FRACTION = _GHOST_CFG.get("ghost_gc_max_fraction", 0.5)
+    if _GHOST_GC_ENABLED:
+        logger.info(f"Cold-boot ghost reconcile: "
+                    f"{event_handler.reconcile_ghosts(max_fraction=_GHOST_GC_MAX_FRACTION)}")
     observer = Observer()
     observer.schedule(event_handler, KNOWLEDGE_DIR, recursive=True)
     observer.start()
@@ -193,6 +202,13 @@ try:
                 gd.run_once()
             except Exception as _e:
                 logger.error(f"Gardener cycle error: {_e}")
+            # Periodic ghost GC: catch files deleted at runtime whose inotify event
+            # was missed (Syncthing bursts). Isolated so a failure never stops the loop.
+            if _GHOST_GC_ENABLED:
+                try:
+                    event_handler.reconcile_ghosts(max_fraction=_GHOST_GC_MAX_FRACTION)
+                except Exception as _e:
+                    logger.error(f"Ghost reconcile error: {_e}")
             time.sleep(_gardener_interval)
     threading.Thread(target=_gardener_loop, daemon=True, name="gardener").start()
     logger.info(f"Gardener thread started (interval: {_gardener_interval}s)")
@@ -366,6 +382,7 @@ def health_check():
             "gardener_last_run": gd.last_run,
             "gardener_interval_s": gd.interval,
             "basename_collisions": len(event_handler.collisions),
+            "ghost_reconcile": event_handler.last_reconcile,
         },
     }
 
