@@ -130,5 +130,64 @@ class TestCollisionDetection(_Base):
         self.assertIsNone(self.kuzu.get_node("solo"), "node must be deleted when no other file maps to it")
 
 
+class TestGhostReconciliation(_Base):
+    """reconcile_ghosts removes nodes whose .md file is gone (deleted while the
+    gateway was down), which normal on_deleted events never caught."""
+
+    def test_ghost_removed_from_both_dbs(self):
+        a = self._write("alpha", {"type": "Node", "scope": "Private"}, "body a")
+        self._write("beta", {"type": "Node", "scope": "Private"}, "body b")
+        self.handler._sync_file(a, is_startup_sync=True)
+        self.handler._sync_file(os.path.join(self.kdir, "beta.md"), is_startup_sync=True)
+        # Delete alpha's file directly, with NO watcher event (the gateway-was-down case).
+        os.remove(a)
+        res = self.handler.reconcile_ghosts()
+        self.assertEqual(res["removed"], 1)
+        self.assertIsNone(self.kuzu.get_node("alpha"), "ghost gone from Kuzu")
+        self.assertIsNone(self.vec.get_node("alpha"), "ghost gone from Chroma")
+        self.assertIsNotNone(self.kuzu.get_node("beta"), "survivor untouched")
+        self.assertIsNotNone(self.vec.get_node("beta"))
+
+    def test_live_wikilink_stub_is_preserved(self):
+        # 'source' links to [[Target]] which has no file → sync creates a stub.
+        src = self._write("source", {"type": "Node", "scope": "Private"}, "see [[Target]]")
+        self.handler._sync_file(src, is_startup_sync=True)
+        self.assertIsNotNone(self.kuzu.get_node("target"), "stub created by the wikilink")
+        res = self.handler.reconcile_ghosts()
+        self.assertEqual(res["removed"], 0, "a stub referenced by a live file is not a ghost")
+        self.assertIsNotNone(self.kuzu.get_node("target"), "live stub preserved")
+
+    def test_empty_knowledge_dir_is_a_no_op(self):
+        p = self._write("solo", {"type": "Node", "scope": "Private"}, "content")
+        self.handler._sync_file(p, is_startup_sync=True)
+        os.remove(p)  # now the knowledge dir has no .md at all
+        res = self.handler.reconcile_ghosts()
+        self.assertTrue(res["skipped"], "must refuse to delete everything when disk is empty")
+        self.assertEqual(res["removed"], 0)
+        self.assertIsNotNone(self.kuzu.get_node("solo"), "node kept: catastrophic guard held")
+
+    def test_max_fraction_guard_skips_bulk_deletion(self):
+        for name in ("n1", "n2", "n3", "n4"):
+            p = self._write(name, {"type": "Node", "scope": "Private"}, f"body {name}")
+            self.handler._sync_file(p, is_startup_sync=True)
+        # Delete 3 of 4 files → 75% would be ghosts, above the default 0.5 guard.
+        for name in ("n1", "n2", "n3"):
+            os.remove(os.path.join(self.kdir, f"{name}.md"))
+        res = self.handler.reconcile_ghosts(max_fraction=0.5)
+        self.assertTrue(res["skipped"])
+        self.assertEqual(res["removed"], 0)
+        self.assertIsNotNone(self.kuzu.get_node("n1"), "bulk deletion refused")
+
+    def test_chroma_only_ghost_removed(self):
+        # A node embedded in Chroma but with no file and no Kuzu node is still a ghost.
+        self.vec.upsert_node("orphan", "stale body", {"type": "Node", "scope": "Private"},
+                             display_name="orphan")
+        keep = self._write("keep", {"type": "Node", "scope": "Private"}, "real")
+        self.handler._sync_file(keep, is_startup_sync=True)
+        res = self.handler.reconcile_ghosts()
+        self.assertEqual(res["removed"], 1)
+        self.assertIsNone(self.vec.get_node("orphan"), "chroma-only ghost removed")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
