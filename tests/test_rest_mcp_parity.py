@@ -29,6 +29,7 @@ Run: python3 -m unittest tests/test_rest_mcp_parity.py
 import os
 import re
 import sys
+import json
 import shutil
 import tempfile
 import unittest
@@ -93,7 +94,8 @@ class TestRestMcpParity(unittest.TestCase):
                                       config={}, knowledge_dir=self.mcp_dir)
         self._mcp = {name: mcp._tool_manager.get_tool(name).fn
                      for name in ("add_observation", "create_node", "create_goal",
-                                  "create_task", "forget_knowledge_node")}
+                                  "create_task", "forget_knowledge_node", "update_node",
+                                  "create_project", "update_project", "list_projects")}
 
     def tearDown(self):
         self.hs.KNOWLEDGE_DIR = self._orig_kdir
@@ -183,16 +185,16 @@ class TestRestMcpParity(unittest.TestCase):
         self.assertEqual(rfm["status"], "in_progress")
         self.assertEqual(rfm, mfm)
 
-    def test_observation_type_scope_body_parity(self):
-        # created_at diverges (see the xfail below); type, scope and body must match.
+    def test_observation_parity(self):
+        # Full frontmatter+body parity, created_at included (converged in point 2).
         self.hs.add_observation_api(self.hs.Observation(content="ciao mondo", scope="Public"),
                                     api_auth=self.auth)
         self._mcp["add_observation"](content="ciao mondo", scope="Public")
         rfm, rbody = _parse(_single_md(self.rest_dir))
         mfm, mbody = _parse(_single_md(self.mcp_dir))
-        self.assertEqual(rfm["type"], mfm["type"], "Observation")
-        self.assertEqual(rfm["scope"], mfm["scope"])
+        self.assertEqual(rfm, mfm)
         self.assertEqual(rbody, mbody)
+        self.assertIn("created_at", rfm, "Observations now get created_at on both surfaces")
 
     def test_delete_parity(self):
         self.hs.create_goal_api(self.hs.Goal(name="del-me", scopes="Private"), api_auth=self.auth)
@@ -211,43 +213,82 @@ class TestRestMcpParity(unittest.TestCase):
         self.assertEqual([f for f in os.listdir(self.rest_dir) if f.endswith(".md")], ["once.md"])
         self.assertEqual([f for f in os.listdir(self.mcp_dir) if f.endswith(".md")], ["once.md"])
 
-    # ── Tier 2: known, partly-intentional divergences (converge in point 2) ──
-    # Each asserts the IDEAL (equality). It fails today, documenting the gap;
-    # unify the surfaces in the service-layer refactor and it flips to a pass
-    # (unexpected success), signalling that the marker can be removed.
+    def test_node_patch_status_parity(self):
+        # PATCH /nodes/{name} vs MCP update_node: merging a frontmatter field onto
+        # an existing node must produce the same file on both surfaces.
+        self.hs.upsert_node(self.hs.NodeUpsert(name="nd", content="corpo", scope="Private"),
+                            api_auth=self.auth)
+        self._mcp["create_node"](name="nd", content="corpo", scope="Private")
+        self.hs.patch_node_api("nd", self.hs.NodePatch(updates={"status": "done"}), api_auth=self.auth)
+        self._mcp["update_node"](name="nd", updates=json.dumps({"status": "done"}))
+        rfm, _ = _parse(self._rest("nd.md"))
+        mfm, _ = _parse(self._mcp_path("nd.md"))
+        self.assertEqual(rfm["status"], "done")
+        self.assertEqual(rfm, mfm)
 
-    @unittest.expectedFailure
-    def test_observation_created_at_parity_TODO_point2(self):
-        # MCP write_markdown stamps created_at on every new file; REST
-        # write_markdown (used by /observations) does not. REST goals/tasks/nodes
-        # DO get created_at (via _upsert_node_file) — only observations diverge.
-        self.hs.add_observation_api(self.hs.Observation(content="x", scope="Public"),
-                                    api_auth=self.auth)
-        self._mcp["add_observation"](content="x", scope="Public")
-        rfm, _ = _parse(_single_md(self.rest_dir))
-        mfm, _ = _parse(_single_md(self.mcp_dir))
-        self.assertEqual("created_at" in rfm, "created_at" in mfm)
+    def test_node_links_parity(self):
+        # The new REST `links` field appends the same [[wikilinks]] MCP create_node
+        # does (body heading still differs by design — see the frozen test below).
+        self.hs.upsert_node(
+            self.hs.NodeUpsert(name="nl", content="corpo", scope="Private", links="Alfa,Beta"),
+            api_auth=self.auth)
+        self._mcp["create_node"](name="nl", content="corpo", scope="Private", links="Alfa,Beta")
+        _, rbody = _parse(self._rest("nl.md"))
+        _, mbody = _parse(self._mcp_path("nl.md"))
+        self.assertIn("[[Alfa]] [[Beta]]", rbody)
+        self.assertIn("[[Alfa]] [[Beta]]", mbody)
 
-    @unittest.expectedFailure
-    def test_node_body_parity_TODO_point2(self):
-        # POST /nodes uses the raw content as body; MCP create_node wraps it in
-        # a "# name" heading (+ optional wikilinks). Different body shape.
+    def test_project_create_parity(self):
+        # POST /projects vs MCP create_project: the folder and its _defaults.yaml
+        # must be identical on both surfaces.
+        self.hs.create_project_api(
+            self.hs.ProjectCreate(name="Progetto X", description="desc", scope="Private"),
+            api_auth=self.auth)
+        self._mcp["create_project"](name="Progetto X", description="desc", scope="Private")
+        with open(os.path.join(self.rest_dir, "Progetto_X", "_defaults.yaml")) as f:
+            rdef = yaml.safe_load(f)
+        with open(os.path.join(self.mcp_dir, "Progetto_X", "_defaults.yaml")) as f:
+            mdef = yaml.safe_load(f)
+        self.assertEqual(rdef, mdef)
+        self.assertEqual(rdef, {"project": "Progetto X", "scope": "Private", "description": "desc"})
+
+    def test_project_update_parity(self):
+        self.hs.create_project_api(self.hs.ProjectCreate(name="P", scope="Private"), api_auth=self.auth)
+        self._mcp["create_project"](name="P", scope="Private")
+        self.hs.update_project_api(self.hs.ProjectUpdate(folder="P", scope="Public",
+                                                         description="nuova"), api_auth=self.auth)
+        self._mcp["update_project"](folder="P", scope="Public", description="nuova")
+        with open(os.path.join(self.rest_dir, "P", "_defaults.yaml")) as f:
+            rdef = yaml.safe_load(f)
+        with open(os.path.join(self.mcp_dir, "P", "_defaults.yaml")) as f:
+            mdef = yaml.safe_load(f)
+        self.assertEqual(rdef, mdef)
+        self.assertEqual(rdef["scope"], "Public")
+        self.assertEqual(rdef["description"], "nuova")
+
+    # ── Frozen intentional differences (NOT drift — different operations) ─────
+    # /nodes is a raw upsert; create_node a formatted node creator. These are
+    # deliberately different and stay so; the tests freeze the current shape so an
+    # accidental change is still caught (converging them would alter what the
+    # Ganaghello app already stores — a separate decision).
+
+    def test_node_body_shape_is_frozen(self):
         self.hs.upsert_node(
             self.hs.NodeUpsert(name="nodo", content="corpo", node_type="Node", scope="Private"),
             api_auth=self.auth)
         self._mcp["create_node"](name="nodo", content="corpo", node_type="Node", scope="Private")
         _, rbody = _parse(self._rest("nodo.md"))
         _, mbody = _parse(self._mcp_path("nodo.md"))
-        self.assertEqual(rbody, mbody)
+        self.assertEqual(rbody, "corpo")                  # REST: raw content
+        self.assertEqual(mbody, "# nodo\n\ncorpo")        # MCP: heading + content
 
-    @unittest.expectedFailure
-    def test_node_default_scope_parity_TODO_point2(self):
-        # Default scope differs: NodeUpsert defaults to Private, create_node to Public.
+    def test_node_default_scope_is_frozen(self):
         self.hs.upsert_node(self.hs.NodeUpsert(name="nodo2", content="c"), api_auth=self.auth)
         self._mcp["create_node"](name="nodo2", content="c")
         rfm, _ = _parse(self._rest("nodo2.md"))
         mfm, _ = _parse(self._mcp_path("nodo2.md"))
-        self.assertEqual(rfm["scope"], mfm["scope"])
+        self.assertEqual(rfm["scope"], "Private")         # NodeUpsert default
+        self.assertEqual(mfm["scope"], "Public")          # create_node default
 
 
 if __name__ == "__main__":

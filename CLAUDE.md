@@ -142,7 +142,9 @@ Node IDs are path-based (`folder__subfolder__basename`); display names preserve 
 **Diagnostics**: `inspect_file_raw`, `debug_filesystem`
 
 ### API endpoints (REST)
-`GET /status`, `GET /search?q=`, `GET /nodes/{name}`, `GET /graph/stats`, `GET /briefing`, `GET /briefing/longitudinal`, `GET /briefing/initiatives`, `GET /briefing/{project}`, `POST /observations`, `POST /goals`, `POST /tasks`, `POST /nodes`, `DELETE /nodes/{name}`
+`GET /status`, `GET /search?q=`, `GET /nodes/{name}`, `GET /graph/stats`, `GET /briefing`, `GET /briefing/longitudinal`, `GET /briefing/initiatives`, `GET /briefing/{project}`, `GET /projects`, `POST /observations`, `POST /goals`, `POST /tasks`, `POST /nodes`, `PATCH /nodes/{name}`, `DELETE /nodes/{name}`, `POST /projects`, `PATCH /projects`
+
+REST and MCP share one persistence core (`core/node_service.py`): both surfaces are thin adapters over it, so the write/upsert/lookup logic can't drift (the drift caused the status-reset bug). `PATCH /nodes/{name}` merges frontmatter (`{"content":..., "updates":{...}}`) mirroring MCP `update_node`; `GET/POST/PATCH /projects` mirror MCP `list_projects`/`create_project`/`update_project`; `POST /nodes` accepts a `links` field for untyped `[[wikilinks]]`. Contract tests in `tests/test_rest_mcp_parity.py` assert REST and MCP produce identical files for equivalent operations.
 
 `GET /status` returns uptime, knowledge file count, KuzuDB node/edge counts (by type), ChromaDB document count, enrichment queue depth, gardener last run and interval.
 

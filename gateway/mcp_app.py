@@ -2,16 +2,14 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 import json
 import uuid
-import re
 import os
-import yaml
 from datetime import datetime
 
-from core.utils import (strip_leading_frontmatter, resolve_safe_folder, node_id_from_path,
-                        normalize_node_name, atomic_write, render_markdown, _normalize_segment)
+from core.utils import resolve_safe_folder, atomic_write, render_markdown
 from core.attention import thermal_rerank
 from core.mcp_auth import scope_filter, require_privileged, assert_write, read_filter_grants
 from core.authz import filter_by_read, territory_allows
+from core import node_service
 
 
 def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
@@ -24,203 +22,31 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
     
     mcp = FastMCP("Mnemosyne-Memory", transport_security=security, streamable_http_path="/", stateless_http=True)
 
-    # Helper functions
+    # Helper functions — thin adapters over the shared core.node_service, so REST
+    # and MCP can't drift apart (the drift caused the status-reset bug, 88aba32).
     def find_file_recursive(name: str):
-        """Locate a markdown file within the knowledge directory.
-
-        Accepts:
-          - A path-based node ID (e.g. 'ganaghello__spazi__stalla__stalla'):
-            walks the tree and matches the first file whose computed node_id
-            equals the input.
-          - A relative subfolder path (e.g. 'Sistema/Alfred/SystemPrompt'):
-            resolved directly under knowledge_dir.
-          - A bare basename (case-insensitive recursive search).
-        The '.md' extension is optional in all forms.
-        """
-        if not name:
-            return None
-
-        cleaned = name.strip().replace("\\", "/")
-        if cleaned.lower().endswith(".md"):
-            cleaned = cleaned[:-3]
-
-        base = os.path.abspath(knowledge_dir)
-
-        # 1) Path-based ID (contains __): match by computed node_id.
-        if "__" in cleaned:
-            target_id = normalize_node_name(cleaned)
-            for root, dirs, files in os.walk(knowledge_dir):
-                for f in files:
-                    if not f.endswith('.md'):
-                        continue
-                    fp = os.path.join(root, f)
-                    nid, _ = node_id_from_path(fp, knowledge_dir)
-                    if nid == target_id:
-                        return fp
-            return None
-
-        # 2) Relative subfolder path → resolve directly.
-        if "/" in cleaned:
-            candidate = os.path.abspath(os.path.join(base, cleaned + ".md"))
-            if (candidate == base or candidate.startswith(base + os.sep)) and os.path.isfile(candidate):
-                return candidate
-
-        # 3) Bare basename: normalized comparison (case/space/hyphen/underscore-
-        # insensitive), consistent with node_id_from_path. Without this, a
-        # canonical id (always normalized) can fail to re-resolve to the file
-        # that produced it when the filename normalizes differently (e.g. a
-        # hyphen where the id has an underscore).
-        target_norm = _normalize_segment(os.path.basename(cleaned))
-        for root, dirs, files in os.walk(knowledge_dir):
-            for f in files:
-                if not f.endswith('.md'):
-                    continue
-                stem = os.path.splitext(f)[0]
-                if _normalize_segment(stem) == target_norm:
-                    return os.path.join(root, f)
-        return None
+        return node_service.find_node_file(knowledge_dir, name)
 
     def read_markdown(name: str):
-        path = find_file_recursive(name)
-        if path:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
-        return None
+        return node_service.read_markdown(knowledge_dir, name)
 
     def write_markdown(name: str, frontmatter: dict, body: str, folder: str = "", defaults: dict = None):
-        """Find-or-create a node's markdown file, merging frontmatter (upsert by name).
-
-        On update, starts from the file's EXISTING frontmatter and applies the
-        given `frontmatter` on top, so fields the caller didn't pass (e.g.
-        relations added by enrichment, or a status set via update_task_status)
-        survive a repeat call instead of being silently wiped. `defaults` (e.g.
-        {"status": "active"} for a new Goal) are applied via setdefault ONLY
-        when creating a new file, before `frontmatter` — so an explicit value
-        always wins, and a type default is never used to reset an existing
-        node's field on a later call (this previously reset status to "active"/
-        "todo" on every repeat create_goal/create_task with the same name).
-        """
-        # Guard: never let a frontmatter block end up embedded in the body
-        # (e.g. when a caller passes raw file content as the new body).
-        body = strip_leading_frontmatter(body)
-        # Try to find existing file to update it in place
-        path = find_file_recursive(name)
-        is_new = path is None
-        if not path:
-            # Validates traversal and existence; nested subfolders are allowed.
-            target_dir = resolve_safe_folder(knowledge_dir, folder)
-            safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-            path = os.path.join(target_dir, f"{safe_name}.md")
-
-        merged: dict = {}
-        if not is_new:
-            with open(path, 'r', encoding='utf-8') as f:
-                _m = re.match(r'^---\n(.*?)\n---\n', f.read(), re.DOTALL)
-            merged = (yaml.safe_load(_m.group(1)) if _m else None) or {}
-        else:
-            for _k, _v in (defaults or {}).items():
-                merged.setdefault(_k, _v)
-            merged.setdefault('created_at', datetime.now().strftime('%Y-%m-%d'))
-
-        merged.update(frontmatter)
-        atomic_write(path, render_markdown(merged, body))
+        """Upsert by name (merge frontmatter). Raises ValueError on an invalid
+        folder for a new node; the calling tool turns it into a JSON error."""
+        node_service.upsert(knowledge_dir, name, body, frontmatter,
+                            folder=folder, defaults=defaults)
 
     def _parse_relations(relations_str: str, source: str = None) -> list:
-        """Parse 'Target:TYPE,Other:PART_OF' into [{target, type}, ...] for frontmatter.
-
-        If `source` is given (e.g. "user"), it is tagged on each relation so the
-        LLM enrichment worker treats them as authoritative and never overwrites them.
-        """
-        result = []
-        for item in relations_str.split(","):
-            item = item.strip()
-            if not item:
-                continue
-            if ":" in item:
-                target, rel_type = item.rsplit(":", 1)
-                rel = {"target": target.strip(), "type": rel_type.strip().upper()}
-            else:
-                rel = {"target": item, "type": "RELATED_TO"}
-            if source:
-                rel["source"] = source
-            result.append(rel)
-        return result
-
-    def _normalize_folder_name(name: str) -> str:
-        return re.sub(r'[\s_\-]+', '', name).lower()
-
-    def _folder_tree(base_dir: str, prefix: str = "") -> str:
-        try:
-            entries = sorted(os.listdir(base_dir))
-        except PermissionError:
-            return ""
-        dirs = [e for e in entries if os.path.isdir(os.path.join(base_dir, e))
-                and not e.startswith('_') and not e.startswith('.')]
-        lines = []
-        for d in dirs:
-            dir_path = os.path.join(base_dir, d)
-            defaults_path = os.path.join(dir_path, '_defaults.yaml')
-            meta = ""
-            if os.path.exists(defaults_path):
-                try:
-                    with open(defaults_path) as f:
-                        defaults = yaml.safe_load(f) or {}
-                    parts = []
-                    if 'scope' in defaults:
-                        parts.append(f"scope={defaults['scope']}")
-                    if 'description' in defaults:
-                        parts.append(f"'{defaults['description']}'")
-                    if parts:
-                        meta = f" [{', '.join(parts)}]"
-                except Exception:
-                    pass
-            lines.append(f"{prefix}{d}/{meta}")
-            subtree = _folder_tree(dir_path, prefix + "  ")
-            if subtree:
-                lines.append(subtree)
-        return "\n".join(lines)
+        return node_service.parse_relations(relations_str, source)
 
     def _node_scope(name: str) -> str:
-        """Read the scope from an existing node's frontmatter.
-
-        Used to gate writes/deletes on the node's current scope. Falls back to
-        'Private' (most restrictive) when the file or scope cannot be read, so a
-        node of unknown scope is never writable by a low-privilege key.
-        """
-        path = find_file_recursive(name)
-        if not path or not os.path.exists(path):
-            return "Private"
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                raw = f.read()
-            m = re.match(r'^---\n(.*?)\n---', raw, re.DOTALL)
-            if m:
-                fm = yaml.safe_load(m.group(1)) or {}
-                return fm.get("scope", "Private")
-        except Exception:
-            pass
-        return "Private"
+        return node_service.node_scope(knowledge_dir, name)
 
     def _territory_id(abs_path: str) -> str:
-        """Path-based territory id for a file or folder, for authz.territory_allows.
-
-        Segments of the path relative to knowledge_dir, each normalized and joined
-        with '__' (same shape as a node_id), so a write/read grant like
-        'Ganaghello' matches everything under it."""
-        rel = os.path.relpath(os.path.abspath(abs_path), os.path.abspath(knowledge_dir))
-        return "__".join(_normalize_segment(p) for p in rel.replace("\\", "/").split("/")
-                         if p and p != ".")
+        return node_service.territory_id(knowledge_dir, abs_path)
 
     def _target_node_id(name: str, folder: str = "") -> str:
-        """Territory id a write to (name, folder) will land on: the existing file
-        if one matches, else the resolved new path under folder. Raises ValueError
-        if folder is invalid (surfaced to the caller as an error)."""
-        path = find_file_recursive(name)
-        if not path:
-            target_dir = resolve_safe_folder(knowledge_dir, folder)
-            safe_name = re.sub(r'[^\w\s-]', '', name).strip()
-            path = os.path.join(target_dir, f"{safe_name}.md")
-        return _territory_id(path)
+        return node_service.target_node_id(knowledge_dir, name, folder)
 
     @mcp.tool()
     def list_projects() -> str:
@@ -228,7 +54,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         List all project folders in the knowledge base as an indented tree.
         Call this before create_project to check if a suitable folder already exists.
         """
-        tree = _folder_tree(knowledge_dir)
+        tree = node_service.folder_tree(knowledge_dir)
         if not tree:
             return "No project folders found in the knowledge base."
         return f"Knowledge folder structure:\n\n{tree}"
@@ -246,47 +72,22 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 leave empty to create at root level
         """
         try:
-            # Validates traversal and existence; empty parent → knowledge root.
-            base_path = resolve_safe_folder(knowledge_dir, parent)
+            folder_path = node_service.project_folder_path(knowledge_dir, name, parent)
         except ValueError as e:
             return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
-
-        safe_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
-
-        # Gate on both scope and the territory the new folder would live in.
-        denied = assert_write(scope, _territory_id(os.path.join(base_path, safe_name)))
+        denied = assert_write(scope, _territory_id(folder_path))
         if denied:
             return denied
+        try:
+            res = node_service.create_project(knowledge_dir, name, description, scope, parent)
+        except ValueError as e:
+            tree = node_service.folder_tree(knowledge_dir)
+            return json.dumps({"status": "error", "message": f"{e} Use it or choose a different name.\n\nCurrent structure:\n{tree}"})
 
-        existing_dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and not d.startswith('_')]
-        for existing in existing_dirs:
-            if existing.lower() == safe_name.lower():
-                tree = _folder_tree(knowledge_dir)
-                return json.dumps({"status": "error", "message": f"Folder '{existing}' already exists at this level. Use it or choose a different name.\n\nCurrent structure:\n{tree}"})
-
-        warnings = [e for e in existing_dirs if _normalize_folder_name(e) == _normalize_folder_name(safe_name)]
-
-        folder_path = os.path.join(base_path, safe_name)
-        os.makedirs(folder_path, exist_ok=True)
-
-        defaults = {"project": name, "scope": scope}
-        if description:
-            defaults["description"] = description
-        atomic_write(os.path.join(folder_path, '_defaults.yaml'),
-                     yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
-
-        if description:
-            index_frontmatter = {"type": "Node", "scope": scope, "created_at": datetime.now().strftime('%Y-%m-%d')}
-            index_body = f"# {name}\n\n{description}"
-            atomic_write(os.path.join(folder_path, f"{safe_name}.md"),
-                         render_markdown(index_frontmatter, index_body))
-
-        result_path = os.path.join(parent, safe_name) if parent else safe_name
-        msg = f"Project folder '{result_path}' created."
-        if warnings:
-            msg += f"\n\nWarning: similar folder(s) already exist at this level: {', '.join(warnings)}. Verify this is intentional."
-        tree = _folder_tree(knowledge_dir)
-        msg += f"\n\nUpdated structure:\n{tree}"
+        msg = f"Project folder '{res['result_path']}' created."
+        if res["warnings"]:
+            msg += f"\n\nWarning: similar folder(s) already exist at this level: {', '.join(res['warnings'])}. Verify this is intentional."
+        msg += f"\n\nUpdated structure:\n{node_service.folder_tree(knowledge_dir)}"
         return json.dumps({"status": "success", "message": msg})
 
     @mcp.tool()
@@ -301,17 +102,9 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         """
         try:
             folder_path = resolve_safe_folder(knowledge_dir, folder)
+            defaults = node_service.project_defaults(knowledge_dir, folder)
         except ValueError as e:
             return json.dumps({"status": "error", "message": f"{e} Use list_projects to see available folders."})
-
-        defaults_path = os.path.join(folder_path, '_defaults.yaml')
-        defaults = {}
-        if os.path.exists(defaults_path):
-            try:
-                with open(defaults_path) as f:
-                    defaults = yaml.safe_load(f) or {}
-            except Exception as e:
-                return json.dumps({"status": "error", "message": f"Could not read _defaults.yaml: {e}"})
 
         territory = _territory_id(folder_path)
         denied = assert_write(defaults.get("scope", "Private"), territory)
@@ -322,14 +115,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if denied:
                 return denied
 
-        if description:
-            defaults["description"] = description
-        if scope:
-            defaults["scope"] = scope
-
-        atomic_write(defaults_path, yaml.dump(defaults, allow_unicode=True, default_flow_style=False))
-
-        return json.dumps({"status": "success", "message": f"Project '{folder}' updated.", "current": defaults})
+        updated = node_service.update_project(knowledge_dir, folder, description, scope)
+        return json.dumps({"status": "success", "message": f"Project '{folder}' updated.", "current": updated})
 
     @mcp.tool()
     def trigger_gardening_cycle() -> str:
@@ -565,18 +352,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if denied:
                 return denied
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', content, re.DOTALL)
-            if yaml_match:
-                frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
-                body = yaml_match.group(2)
-            else:
-                frontmatter = {}
-                body = content
-            for k, v in properties_dict.items():
-                 frontmatter[k] = v
-            write_markdown(name, frontmatter, body)
+            node_service.update_node(knowledge_dir, name, frontmatter_updates=properties_dict)
             return json.dumps({"status": "success", "message": f"File '{name}.md' frontmatter updated."})
         except Exception as e:
              return json.dumps({"error": str(e)})
@@ -611,18 +387,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             if denied:
                 return denied
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                raw = f.read()
-            yaml_match = re.match(r'^---\n(.*?)\n---\n(.*)', raw, re.DOTALL)
-            if yaml_match:
-                frontmatter = yaml.safe_load(yaml_match.group(1)) or {}
-                existing_body = yaml_match.group(2)
-            else:
-                frontmatter = {}
-                existing_body = raw
-            for k, v in properties_dict.items():
-                frontmatter[k] = v
-            write_markdown(name, frontmatter, content if content else existing_body)
+            node_service.update_node(knowledge_dir, name, content=content,
+                                     frontmatter_updates=properties_dict)
             return json.dumps({"status": "success", "message": f"Node '{name}' updated."})
         except Exception as e:
             return json.dumps({"error": str(e)})
