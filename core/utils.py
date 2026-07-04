@@ -16,8 +16,22 @@ def atomic_write(path: str, content: str, encoding: str = "utf-8") -> None:
     The temp name is dotted and ends in '.part' (not '.md') so the file watcher,
     which only indexes '.md' files, ignores it during the brief window before the
     rename; the rename itself surfaces to watchdog as the final '.md' path.
+
+    Permissions: mkstemp() creates the temp 0600 and os.replace() keeps the temp's
+    mode on the destination, so without a fixup every rewrite would flip an
+    existing 0644 file to 0600 (and, when the gateway runs as root, root:root).
+    That silently breaks a Syncthing running as a different user: it can no longer
+    read/hash the file, its index freezes on the old version, and the change never
+    propagates while everything still reports "in sync". So after the replace we
+    restore the destination's previous mode (fallback 0644 for a new file) and
+    always guarantee group/other read, so a different-user reader can still hash it.
+    (The deeper fix is running the gateway as that user; this stays a safety net.)
     """
     directory = os.path.dirname(os.path.abspath(path))
+    try:
+        prev_mode = os.stat(path).st_mode & 0o777
+    except FileNotFoundError:
+        prev_mode = 0o644
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".mnemo-tmp-", suffix=".part")
     try:
         with os.fdopen(fd, "w", encoding=encoding) as f:
@@ -31,6 +45,12 @@ def atomic_write(path: str, content: str, encoding: str = "utf-8") -> None:
         except OSError:
             pass
         raise
+    # Best-effort, after the atomic commit: never fail a successful write over a
+    # chmod. 0o044 = ensure group+other read (the Syncthing-as-another-user case).
+    try:
+        os.chmod(path, prev_mode | 0o044)
+    except OSError:
+        pass
 
 
 def render_markdown(frontmatter: dict, body: str) -> str:
