@@ -4,6 +4,10 @@ After=network.target
 
 [Service]
 Type=oneshot
+# Run as the tree owner (same as the gateway). Once `oste` owns knowledge/.git,
+# a root-run `git add/commit` would abort with "detected dubious ownership".
+User=oste
+Group=oste
 WorkingDirectory=/srv/mnemosyne-gb
 Environment=KNOWLEDGE_DIR=/srv/mnemosyne-gb/knowledge
 ExecStart=/bin/bash /srv/mnemosyne-gb/deploy/knowledge_backup.sh

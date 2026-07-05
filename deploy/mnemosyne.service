@@ -12,6 +12,16 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
+
+# Run as the unprivileged owner of the knowledge base, NOT root. Syncthing runs
+# as 'oste'; when the gateway ran as root, every atomic rewrite flipped a .md to
+# root:root and Syncthing (oste) could no longer read/hash it, so changes stopped
+# propagating silently. Running as oste means the gateway and Syncthing share the
+# same owner. Requires `oste` to own the whole tree (data/ with the KuzuDB/ChromaDB
+# locks, .venv, .env, config/): see deploy/README.md for the one-time chown.
+User=oste
+Group=oste
+
 WorkingDirectory=/srv/mnemosyne-gb
 
 # Cap memory so a runaway gateway is killed before it starves nginx/SSH. Normal
@@ -33,9 +43,11 @@ RestartSec=60s
 
 # Re-embed note: a deploy that invalidates embeddings (chunking/ID/model change)
 # triggers a mass re-embed on next boot that can OOM on a small VPS and loop.
-# After such a deploy, run the cold-boot sync manually with the service stopped:
+# After such a deploy, run the cold-boot sync manually with the service stopped.
+# Run it as 'oste' (NOT root) so it doesn't recreate root-owned files that break
+# Syncthing again:
 #   sudo systemctl stop mnemosyne
-#   cd /srv/mnemosyne-gb && sudo PYTHONPATH=/srv/mnemosyne-gb \
+#   cd /srv/mnemosyne-gb && sudo -u oste PYTHONPATH=/srv/mnemosyne-gb \
 #     .venv/bin/python3 workers/file_watcher.py --once
 #   sudo systemctl start mnemosyne
 # (add temporary swap first if RAM is tight).
