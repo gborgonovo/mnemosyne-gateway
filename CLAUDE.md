@@ -159,5 +159,6 @@ REST and MCP share one persistence core (`core/node_service.py`): both surfaces 
 - Gateway runs as a systemd service (`deploy/mnemosyne.service`) on port 4001, reverse-proxied by Nginx at `memory.borgonovo.org`
 - Chat UI runs on port 8501, proxied at `/chat`
 - Knowledge base is snapshotted daily at 02:00 by a systemd timer (`deploy/mnemosyne-knowledge-backup.timer`) running `deploy/knowledge_backup.sh` — creates a git commit in the `knowledge/` directory. Syncthing ignores `.git/` via `KnowledgeBase/.stignore`.
-- MCP Streamable HTTP transport (`stateless_http=True`) at `/mcp/` — requires `allowed_hosts` whitelist in `config/settings.yaml` (DNS rebinding protection)
+- MCP Streamable HTTP transport (`stateless_http=True`) at `/mcp/` — DNS rebinding protection via an `allowed_hosts`/`allowed_origins` whitelist hardcoded in `gateway/mcp_app.py` (`TransportSecuritySettings`), not read from `config/settings.yaml`
+- Gateway and the knowledge-backup service run as `oste` (not root) via `User=`/`Group=` in their systemd units — required so Syncthing (also `oste`) can read files the gateway rewrites; see `deploy/README.md`
 - Register in Claude Code: `claude mcp add --transport http mnemosyne https://memory.borgonovo.org/mcp/`
