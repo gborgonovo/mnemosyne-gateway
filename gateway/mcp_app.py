@@ -394,8 +394,9 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
-    def create_goal(name: str, description: str = "", deadline: str = "", status: str = "",
-                    scopes: str = "Private,Public", folder: str = "", relations: str = "") -> str:
+    def create_goal(name: str, description: str = "", deadline: str = "", remind_from: str = "",
+                    status: str = "", scopes: str = "Private,Public", folder: str = "",
+                    relations: str = "") -> str:
         """Creates a new high-level strategic Goal as a Markdown file, or updates an
         existing one with the same name (upsert).
 
@@ -403,6 +404,10 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         status: e.g. 'active', 'done'. Omit to leave unchanged on update
                 (defaults to 'active' on creation only — never resets an
                 existing Goal's status on a later call).
+        remind_from: ISO date 'YYYY-MM-DD'. When Alfred's morning briefing should
+                start surfacing this Goal. Omit to default to a lead time before
+                `deadline` based on node type (config/settings.yaml
+                deadlines.lead_days_by_type). Ignored if `deadline` is not set.
         relations: typed relationships as 'Target:TYPE' pairs (e.g. 'Progetto:PART_OF')
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
@@ -417,6 +422,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         frontmatter = {"type": "Goal", "scope": scope_list[0]}
         if status: frontmatter["status"] = status
         if deadline: frontmatter["deadline"] = deadline
+        if remind_from: frontmatter["remind_from"] = remind_from
         if relations: frontmatter["relations"] = _parse_relations(relations, source="user")
         body = f"# {name}\n\n{description}"
         try:
@@ -427,8 +433,8 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
 
     @mcp.tool()
     def create_task(name: str, goal_name: str, description: str = "", deadline: str = "",
-                    status: str = "", scopes: str = "Private,Public", folder: str = "",
-                    relations: str = "") -> str:
+                    remind_from: str = "", status: str = "", scopes: str = "Private,Public",
+                    folder: str = "", relations: str = "") -> str:
         """Creates an actionable Task and links it to an existing Goal via wikilinks,
         or updates an existing Task with the same name (upsert).
 
@@ -436,6 +442,10 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         status: e.g. 'todo', 'in_progress', 'done'. Omit to leave unchanged on
                 update (defaults to 'todo' on creation only — never resets an
                 existing Task's status on a later call).
+        remind_from: ISO date 'YYYY-MM-DD'. When Alfred's morning briefing should
+                start surfacing this Task. Omit to default to a lead time before
+                `deadline` based on node type (config/settings.yaml
+                deadlines.lead_days_by_type). Ignored if `deadline` is not set.
         relations: typed relationships beyond the goal link, as 'Target:TYPE' pairs
                    valid types: BELONGS_TO, REQUIRES, MANAGES, PART_OF, RELATED_TO, IS_A
         """
@@ -450,6 +460,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         frontmatter = {"type": "Task", "scope": scope_list[0]}
         if status: frontmatter["status"] = status
         if deadline: frontmatter["deadline"] = deadline
+        if remind_from: frontmatter["remind_from"] = remind_from
         # goal_name becomes a typed CONTRIBUTES_TO edge rather than an implicit
         # LINKED_TO wikilink in the body (R2).
         rels = _parse_relations(relations, source="user") if relations else []

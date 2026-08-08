@@ -78,6 +78,7 @@ Tests use isolated databases (temp dirs / `data/test_*`) and never touch product
 - **Scope policy**: API keys declare allowed scopes (`Private`, `Internal`, `Public`) in `config/api_keys.yaml`. Write endpoints enforce that the node's scope is in the key's allowed scopes; delete reads the file's frontmatter scope before removing. Read endpoints filter via `intersect_scopes`. Scope is match-exact (no implicit hierarchy).
 - **In-process workers**: file watcher, LLM enrichment, and gardener all run as threads inside the gateway. The old standalone PluginBase/HTTP worker architecture and the pre-Kuzu Neo4j layer have been removed; they live in git history if ever needed.
 - **Plugin runner (Alfred)**: `workers/plugin_runner.py` is LIVE. Invoked by a production cron (`0 7 * * *`) to generate Giorgio's daily "Alfred" briefing email: loads `plugins/morning_briefing.yaml`, pulls context from `/briefing`, `/briefing/longitudinal`, `/briefing/initiatives` over HTTP using `MNEMOSYNE_API_KEY` from `.env`, composes via `butler.llm`, delivers via `adapters/smtp.py`.
+- **Deadline reminders**: deliberately independent of the activation model — activation models *interest* (decays if ignored), a `deadline` is *urgency* (must surface on its own). `core/node_service.py::get_upcoming_deadlines()` scans frontmatter directly (`deadline`/`remind_from` aren't indexed in KuzuDB/ChromaDB) and feeds `/briefing`'s `upcoming_deadlines` field. A node enters the window when today >= `remind_from` (explicit, or `deadline` minus a per-type lead from `config/settings.yaml` `deadlines.lead_days_by_type`/`default_lead_days`), and stays visible past the deadline (negative `days_remaining`) until `status` is done/archived.
 
 ### Components
 
@@ -104,6 +105,7 @@ type: Goal|Task|Observation|Node|Reference|Topic|Journal
 status: active|todo|done|in_progress|archived
 scope: Private|Internal|Public
 deadline: YYYY-MM-DD
+remind_from: YYYY-MM-DD   # optional; when to start surfacing this in Alfred's briefing (see deadline reminders below)
 created_at: YYYY-MM-DD
 relations:
   - target: "Other Node"
@@ -149,6 +151,8 @@ REST and MCP share one persistence core (`core/node_service.py`): both surfaces 
 `GET /status` returns uptime, knowledge file count, KuzuDB node/edge counts (by type), ChromaDB document count, enrichment queue depth, gardener last run and interval.
 
 `GET /search?q=` fetches top-k from ChromaDB, applies thermal re-rank (`score = similarity * (1 + alpha * activation)`), and returns the best match with its graph neighbors.
+
+`GET /briefing`'s `upcoming_deadlines` field lists nodes with a `deadline` inside their reminder window or overdue, independent of activation (see "Deadline reminders" above); consumed by the Alfred morning-briefing plugin, which gives it priority over hot topics/dormant nodes.
 
 `POST /goals`, `/tasks`, `/nodes` are **upsert by name** — a second POST with the same name updates in place, preserving `created_at`/`enriched_at`. Return `NodeWriteResponse`: `{"status":"success","action":"created|updated","name":...,"type":...,"scope":...}`. The `name` field is the canonical path-based slug the client should store and reuse. Write endpoints enforce scope: the key must have the node's scope in its allowed scopes (403 otherwise).
 

@@ -44,6 +44,16 @@ prompt: |
   - In "initiatives" trovi spunti di collegamento (source -> target): un tema
     attivo e uno trascurato ma connesso. Se uno è pertinente, suggeriscilo con
     naturalezza in italiano (al massimo uno), senza ripetere il testo cosi' com'è.
+  - In "upcoming_deadlines" (dentro /briefing) trovi cose con una scadenza reale,
+    indipendenti da quanto Giorgio le ha "toccate" di recente: un corso, un
+    colloquio, una consegna per un cliente. Ogni voce ha "days_remaining":
+    positivo = giorni mancanti alla scadenza; negativo = scadenza già passata e
+    ancora aperta (in ritardo, va segnalato con più urgenza, non ignorato).
+    Menziona le voci più vicine/urgenti per nome e con quanto manca (es. "tra
+    12 giorni hai il colloquio X", oppure se in ritardo "la scadenza di X è
+    passata da N giorni"). Questa è la sezione più importante da non perdere:
+    a differenza degli altri temi, qui Giorgio ha esplicitamente chiesto di
+    essere avvisato per tempo, quindi non va trattata come un dettaglio minore.
 
   Scrivi una breve nota mattutina personale (massimo 10 righe).
   Regole:
@@ -52,6 +62,8 @@ prompt: |
   - Corpo: uno o due paragrafi separati da una riga vuota ciascuno.
   - Menziona solo ciò che è effettivamente rilevante, distinguendo ciò che è da
     fare da ciò che è già accaduto.
+  - Se ci sono upcoming_deadlines vicine o in ritardo, dai loro priorità sulle
+    altre sezioni.
   - Se c'è un forgotten hub, dedicagli una frase di richiamo delicata e naturale.
   - Se non c'è nulla di urgente, dillo in una riga e taci.
   - Tono: caldo, diretto, discreto. Non essere prolisso.

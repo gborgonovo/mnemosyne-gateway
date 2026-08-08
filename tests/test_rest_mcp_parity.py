@@ -133,6 +133,20 @@ class TestRestMcpParity(unittest.TestCase):
         self.assertEqual(rfm["status"], "active")
         self.assertEqual(rfm["scope"], "Private")
 
+    def test_goal_create_with_remind_from_parity(self):
+        self.hs.create_goal_api(
+            self.hs.Goal(name="colloquio", description="d", deadline="2027-01-01",
+                         remind_from="2026-12-01", scopes="Private"),
+            api_auth=self.auth)
+        self._mcp["create_goal"](name="colloquio", description="d",
+                                 deadline="2027-01-01", remind_from="2026-12-01",
+                                 scopes="Private")
+        rfm, rbody = _parse(self._rest("colloquio.md"))
+        mfm, mbody = _parse(self._mcp_path("colloquio.md"))
+        self.assertEqual(rfm, mfm)
+        self.assertEqual(rbody, mbody)
+        self.assertEqual(rfm["remind_from"], "2026-12-01")
+
     def test_goal_status_not_reset_on_update_parity(self):
         # create on both, mark done out-of-band on both, then re-upsert WITHOUT
         # status: both surfaces must preserve "done" (the 88aba32 bug class).

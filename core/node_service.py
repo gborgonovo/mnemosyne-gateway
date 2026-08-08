@@ -16,7 +16,7 @@ Design:
 import os
 import re
 import yaml
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from core.utils import (
@@ -214,6 +214,90 @@ def upsert(knowledge_dir: str, name: str, body: str, frontmatter_updates: dict,
     atomic_write(path, render_markdown(frontmatter, body))
     canonical, _ = node_id_from_path(path, knowledge_dir)
     return canonical, action
+
+
+def _parse_date(value) -> Optional[date]:
+    """A frontmatter date field as a `date`, or None if absent/unparseable.
+
+    YAML's safe_load already coerces an unquoted 'YYYY-MM-DD' into a date/
+    datetime object; a quoted value stays a str. Accept both.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def get_upcoming_deadlines(knowledge_dir: str, lead_days_by_type: Optional[dict] = None,
+                           default_lead_days: int = 7, today: Optional[date] = None) -> list:
+    """Nodes whose `deadline` reminder window is open, or overdue.
+
+    A node enters the window once today >= remind_from: the frontmatter's own
+    `remind_from` if set, else `deadline` minus a per-type lead time
+    (`lead_days_by_type[node_type]`, falling back to `default_lead_days`). Once
+    in the window, a node stays visible past its own deadline (`days_remaining`
+    goes negative) until `status` becomes done/archived — a reminder must not
+    silently vanish just because the date passed unattended.
+
+    Independent of the thermal/activation model by design: a deadline is
+    urgency, not interest, so it must surface whether or not the node was
+    touched. Scans markdown frontmatter directly (deadline/remind_from are not
+    indexed in KuzuDB or ChromaDB); fine at this knowledge-base scale.
+
+    Returns dicts sorted by deadline ascending (most overdue/soonest first):
+    {name, display_name, type, status, scope, deadline, days_remaining, preview}.
+    """
+    today = today or datetime.now().date()
+    lead_days_by_type = lead_days_by_type or {}
+    results = []
+    for root, _dirs, files in os.walk(knowledge_dir):
+        for f in files:
+            if not _indexable(f):
+                continue
+            path = os.path.join(root, f)
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    raw = fh.read()
+            except OSError:
+                continue
+            m = re.match(r"^---\n(.*?)\n---\n(.*)", raw, re.DOTALL)
+            if not m:
+                continue
+            try:
+                fm = yaml.safe_load(m.group(1)) or {}
+            except yaml.YAMLError:
+                continue
+            deadline = _parse_date(fm.get("deadline"))
+            if deadline is None or fm.get("status") in ("done", "archived"):
+                continue
+            remind_from = _parse_date(fm.get("remind_from"))
+            if remind_from is None:
+                node_type = fm.get("type", "Node")
+                lead = lead_days_by_type.get(node_type, default_lead_days)
+                remind_from = deadline - timedelta(days=lead)
+            if today < remind_from:
+                continue
+            node_id, display_name = node_id_from_path(path, knowledge_dir)
+            body = m.group(2).strip()
+            preview = " ".join(body.split())[:220] if body else None
+            results.append({
+                "name": node_id,
+                "display_name": display_name,
+                "type": fm.get("type", "Node"),
+                "status": fm.get("status"),
+                "scope": fm.get("scope", "Private"),
+                "deadline": deadline.isoformat(),
+                "days_remaining": (deadline - today).days,
+                "preview": preview,
+            })
+    results.sort(key=lambda r: r["deadline"])
+    return results
 
 
 def delete_node_file(knowledge_dir: str, name: str) -> bool:

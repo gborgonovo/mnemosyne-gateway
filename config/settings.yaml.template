@@ -48,6 +48,20 @@ initiative:
   initiative_threshold: 0.5     # Min activation for a source node to trigger checks
   explanation_threshold: 0.4    # Max activation for a neighbor to be considered forgotten
 
+# Deadline reminders: separate from the thermal model on purpose. Activation
+# models INTEREST (decays if ignored); a deadline is URGENCY (must surface on
+# its own, whether or not you've touched the node). A node with a `deadline`
+# enters the briefing's "upcoming_deadlines" once today >= remind_from — either
+# the file's own `remind_from` field, or deadline minus a lead time below. Once
+# in the window it stays visible past the deadline (flagged overdue) until
+# status becomes done/archived, so a missed reminder doesn't silently vanish.
+deadlines:
+  default_lead_days: 7          # Fallback lead time for a type not listed below
+  lead_days_by_type:
+    Goal: 14                    # e.g. a job interview: needs weeks of prep
+    Task: 7
+  briefing_limit: 10            # Max entries surfaced in the briefing, soonest/most overdue first
+
 llm:
   # The Butler: Higher level reasoning, extraction, and initiative.
   # MODES: 

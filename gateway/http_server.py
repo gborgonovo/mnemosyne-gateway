@@ -279,6 +279,7 @@ class Goal(BaseModel):
     name: str = Field(..., description="Stable identifier chosen by the client; reused for upserts.")
     description: str = ""
     deadline: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. Empty/omitted means no deadline.")
+    remind_from: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. When Alfred's briefing should start surfacing this Goal. Empty/omitted defaults to a lead time before `deadline` based on node type (config/settings.yaml deadlines.lead_days_by_type). Ignored if `deadline` is not set.")
     status: Optional[str] = Field(None, description="e.g. 'active', 'done'. Omit to leave unchanged on update (defaults to 'active' on creation only).")
     scope: Optional[str] = Field(None, description="Preferred: a single scope (e.g. 'Private'). Takes precedence over 'scopes'.")
     scopes: str = Field("Private,Public", description="Legacy/compat: comma-separated; only the first scope is used.")
@@ -290,6 +291,7 @@ class Task(BaseModel):
     goal_name: Optional[str] = Field(None, description="If set, recorded as a CONTRIBUTES_TO relation to that goal.")
     description: str = ""
     deadline: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. Empty/omitted means no deadline.")
+    remind_from: str = Field("", description="Optional, ISO date 'YYYY-MM-DD'. When Alfred's briefing should start surfacing this Task. Empty/omitted defaults to a lead time before `deadline` based on node type (config/settings.yaml deadlines.lead_days_by_type). Ignored if `deadline` is not set.")
     status: Optional[str] = Field(None, description="e.g. 'todo', 'in_progress', 'done'. Omit to leave unchanged on update (defaults to 'todo' on creation only).")
     scope: Optional[str] = Field(None, description="Preferred: a single scope (e.g. 'Private'). Takes precedence over 'scopes'.")
     scopes: str = Field("Private,Public", description="Legacy/compat: comma-separated; only the first scope is used.")
@@ -340,11 +342,20 @@ class HotItem(BaseModel):
     status: Optional[str] = None
     preview: Optional[str] = None
 
+class DeadlineItem(BaseModel):
+    name: str
+    type: str
+    status: Optional[str] = None
+    deadline: str
+    days_remaining: int = Field(..., description="Negative means the deadline has passed and the node is still open (overdue).")
+    preview: Optional[str] = None
+
 class BriefingResponse(BaseModel):
     """Response of GET /briefing and GET /briefing/{project} (C2)."""
     hot_topics: List[str] = Field(..., description="Display names of nodes above the activation threshold.")
     hot_details: List[HotItem] = Field(default_factory=list, description="Hot nodes with type, status and a body preview, so consumers can tell todo from done.")
     dormant: List[DormantItem] = Field(..., description="Cooled-down nodes, with type and days of inactivity.")
+    upcoming_deadlines: List[DeadlineItem] = Field(default_factory=list, description="Nodes with a `deadline` inside their reminder window, or overdue; independent of activation. Soonest/most overdue first.")
     timestamp: str
 
 def _resolve_scope(scope: Optional[str], scopes: str) -> str:
@@ -546,12 +557,36 @@ def _compute_briefing(scope_filter: Optional[List[str]], project: Optional[str] 
     )
     dormant_nodes = filter_by_read(dormant_nodes, read_grants, "name")
 
+    deadlines_cfg = config.get("deadlines", {})
+    upcoming = node_service.get_upcoming_deadlines(
+        KNOWLEDGE_DIR,
+        lead_days_by_type=deadlines_cfg.get("lead_days_by_type", {}),
+        default_lead_days=deadlines_cfg.get("default_lead_days", 7),
+    )
+    if scope_filter is not None:
+        upcoming = [d for d in upcoming if d["scope"] in scope_filter]
+    if project:
+        upcoming = filter_by_read(upcoming, [project], "name")
+    upcoming = filter_by_read(upcoming, read_grants, "name")
+    upcoming = upcoming[:deadlines_cfg.get("briefing_limit", 10)]
+
     return {
         "hot_topics": [_readable_name(n) for n in hot_topics[:hot_limit]],
         "hot_details": hot_details,
         "dormant": [
             {"name": _readable_name(n), "type": n['node_type'], "days_inactive": n['days_inactive']}
             for n in dormant_nodes
+        ],
+        "upcoming_deadlines": [
+            {
+                "name": _readable_name(d),
+                "type": d["type"],
+                "status": d["status"],
+                "deadline": d["deadline"],
+                "days_remaining": d["days_remaining"],
+                "preview": d["preview"],
+            }
+            for d in upcoming
         ],
         "timestamp": datetime.now().isoformat(),
     }
@@ -665,6 +700,7 @@ def create_goal_api(goal: Goal, api_auth: Dict[str, List[str]] = Depends(verify_
     if goal.status:
         frontmatter["status"] = goal.status
     if goal.deadline: frontmatter["deadline"] = goal.deadline
+    if goal.remind_from: frontmatter["remind_from"] = goal.remind_from
     if goal.relations:
         frontmatter["relations"] = _parse_relations_str(goal.relations, source="user")
     body = f"# {goal.name}\n\n{goal.description}"
@@ -682,6 +718,7 @@ def create_task_api(task: Task, api_auth: Dict[str, List[str]] = Depends(verify_
     if task.status:
         frontmatter["status"] = task.status
     if task.deadline: frontmatter["deadline"] = task.deadline
+    if task.remind_from: frontmatter["remind_from"] = task.remind_from
     # Typed relations from the client; goal_name becomes a CONTRIBUTES_TO edge
     # rather than an implicit LINKED_TO wikilink in the body (R2).
     relations = _parse_relations_str(task.relations, source="user") if task.relations else []
