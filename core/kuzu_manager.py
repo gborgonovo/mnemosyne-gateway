@@ -77,6 +77,9 @@ class KuzuManager:
                     last_interaction DOUBLE,
                     last_decay_applied DOUBLE,
                     interaction_count INT64,
+                    query_count INT64,
+                    last_accessed_agent STRING,
+                    last_resurfaced_at DOUBLE,
                     PRIMARY KEY (name)
                 )
             """)
@@ -100,6 +103,12 @@ class KuzuManager:
             ("last_interaction",   "DOUBLE", str(now)),
             ("last_decay_applied", "DOUBLE", str(now)),
             ("interaction_count",  "INT64",  "0"),
+            # Telemetry: interaction_count conflates reads, file edits and
+            # proximity propagation, so it cannot answer "is this graph ever
+            # read, and by whom". These three separate the signal.
+            ("query_count",          "INT64",  "0"),
+            ("last_accessed_agent",  "STRING", "''"),
+            ("last_resurfaced_at",   "DOUBLE", "0.0"),
         ]
         for col_name, col_type, default_val in migrations:
             try:
@@ -249,12 +258,18 @@ class KuzuManager:
         """Snapshot of every node's thermal state, for backup (see core.thermal_backup).
 
         Returns [{name, activation, last_interaction, interaction_count,
-        last_decay_applied}, ...]. This is the ONLY authoritative state that is not
-        derivable from the markdown files, hence the only thing that needs backing up.
+        last_decay_applied, query_count, last_accessed_agent, last_resurfaced_at}, ...].
+        This is the ONLY authoritative state that is not derivable from the markdown
+        files, hence the only thing that needs backing up. The telemetry counters
+        belong here for the same reason: a rebuild would otherwise silently reset
+        the very measurement being collected.
+
+        Keep the keys in sync with thermal_backup._FIELDS.
         """
         res = self.conn.execute(
             "MATCH (n:Node) RETURN n.name, n.activation, n.last_interaction, "
-            "n.interaction_count, n.last_decay_applied"
+            "n.interaction_count, n.last_decay_applied, n.query_count, "
+            "n.last_accessed_agent, n.last_resurfaced_at"
         )
         rows = []
         while res.has_next():
@@ -265,12 +280,17 @@ class KuzuManager:
                 "last_interaction": r[2],
                 "interaction_count": r[3],
                 "last_decay_applied": r[4],
+                "query_count": r[5] or 0,
+                "last_accessed_agent": r[6] or "",
+                "last_resurfaced_at": r[7] or 0.0,
             })
         return rows
 
     @_synchronized
     def restore_thermal(self, name: str, activation: float, last_interaction: float,
-                        interaction_count: int, last_decay_applied: float):
+                        interaction_count: int, last_decay_applied: float,
+                        query_count: int = 0, last_accessed_agent: str = "",
+                        last_resurfaced_at: float = 0.0):
         """Write a node's thermal fields back verbatim from a backup snapshot.
 
         Complements seed_activation (which reconstructs from a single reference
@@ -280,19 +300,26 @@ class KuzuManager:
         """
         self.conn.execute(
             "MATCH (n:Node {name: $name}) SET n.activation = $act, "
-            "n.last_interaction = $li, n.interaction_count = $ic, n.last_decay_applied = $lda",
+            "n.last_interaction = $li, n.interaction_count = $ic, n.last_decay_applied = $lda, "
+            "n.query_count = $qc, n.last_accessed_agent = $aga, n.last_resurfaced_at = $lra",
             parameters={
                 "name": normalize_node_name(name), "act": activation,
                 "li": last_interaction, "ic": interaction_count, "lda": last_decay_applied,
+                "qc": query_count, "aga": last_accessed_agent, "lra": last_resurfaced_at,
             },
         )
 
     @_synchronized
-    def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0):
+    def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0,
+                           agent: str = "", is_query: bool = False):
         """Apply activation boost. If update_timestamp, record this as a direct interaction.
 
         floor: lift the resulting activation to at least this value (used for the
         recency floor on file edits); never lowers an already-hotter node.
+
+        agent / is_query: telemetry only, never affects activation. `agent` is the
+        calling client's label; `is_query` counts the interaction as a read, kept
+        apart from interaction_count which also grows on file edits.
         """
         norm_name = normalize_node_name(name)
         node = self.get_node(norm_name)
@@ -307,14 +334,73 @@ class KuzuManager:
             MATCH (n:Node {name: $name})
             SET n.activation = $act,
                 n.last_interaction = $now,
-                n.interaction_count = COALESCE(n.interaction_count, 0) + 1
+                n.interaction_count = COALESCE(n.interaction_count, 0) + 1,
+                n.query_count = COALESCE(n.query_count, 0) + $q,
+                n.last_accessed_agent = CASE WHEN $agent = '' THEN COALESCE(n.last_accessed_agent, '') ELSE $agent END
             """
-            self.conn.execute(query, parameters={"name": norm_name, "act": new_activation, "now": now})
+            self.conn.execute(query, parameters={"name": norm_name, "act": new_activation, "now": now,
+                                                 "q": 1 if is_query else 0, "agent": agent or ""})
         else:
             self.conn.execute(
                 "MATCH (n:Node {name: $name}) SET n.activation = $act",
                 parameters={"name": norm_name, "act": new_activation},
             )
+
+    @_synchronized
+    def mark_resurfaced(self, names: list, ts: float = None):
+        """Stamp the nodes the Gardener just pushed back into the briefing.
+
+        Without this stamp there is no record of what was resurfaced or when, so
+        the question "does resurfacing produce useful recalls?" is unanswerable:
+        the thermal backup is a snapshot, not a time series. Efficacy is then
+        last_interaction > last_resurfaced_at within a window.
+        """
+        if not names:
+            return
+        ts = ts if ts is not None else time.time()
+        for name in names:
+            self.conn.execute(
+                "MATCH (n:Node {name: $name}) SET n.last_resurfaced_at = $ts",
+                parameters={"name": normalize_node_name(name), "ts": ts},
+            )
+
+    @_synchronized
+    def usage_stats(self, window_days: int = 14) -> dict:
+        """Who reads the graph, and does resurfacing lead anywhere.
+
+        Both numbers are forward-looking: they only describe the period since the
+        counters were introduced, so a low count right after deployment means
+        "not measured yet", not "not used".
+        """
+        cutoff = time.time() - window_days * 86400
+        rows = self.conn.execute(
+            "MATCH (n:Node) RETURN n.query_count, n.last_accessed_agent, n.last_resurfaced_at, n.last_interaction"
+        )
+        by_agent, queried_nodes, total_queries = {}, 0, 0
+        resurfaced = followed = 0
+        while rows.has_next():
+            qc, agent, res_at, last_int = rows.get_next()
+            qc = qc or 0
+            total_queries += qc
+            if qc:
+                queried_nodes += 1
+                if agent:
+                    by_agent[agent] = by_agent.get(agent, 0) + qc
+            if res_at and res_at >= cutoff:
+                resurfaced += 1
+                if last_int and last_int > res_at:
+                    followed += 1
+        return {
+            "queries_total": total_queries,
+            "nodes_ever_queried": queried_nodes,
+            "queries_by_agent": by_agent,
+            "resurfacing": {
+                "window_days": window_days,
+                "resurfaced": resurfaced,
+                "followed_by_interaction": followed,
+                "rate": round(followed / resurfaced, 3) if resurfaced else None,
+            },
+        }
 
     @_synchronized
     def delete_node(self, name: str):

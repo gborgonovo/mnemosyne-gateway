@@ -524,7 +524,7 @@ class WikiSyncHandler(FileSystemEventHandler):
         # Activation boost for real body edits only (not cold boot, not system rewrites)
         if not is_startup_sync and body_changed:
             if self.am:
-                self.am.record_interaction(node_id, "file_edit")
+                self.am.record_interaction(node_id, "file_edit", agent="watcher")
             else:
                 node_data = self.kuzu_mgr.get_node(node_id)
                 current = (node_data.get('activation_level') or 0.0) if node_data else 0.0

@@ -29,7 +29,7 @@ from core.authz import territory_allows
 # Grants for the current request: {scopes, read, write}. The default is the
 # unrestricted dev grant ("*"), used only when no api_keys are configured; the
 # middleware rejects unauthenticated requests before any tool runs otherwise.
-_UNRESTRICTED = {"scopes": ["*"], "read": ["*"], "write": ["*"]}
+_UNRESTRICTED = {"scopes": ["*"], "read": ["*"], "write": ["*"], "agent": "dev"}
 current_grants: ContextVar[dict] = ContextVar("current_grants", default=_UNRESTRICTED)
 
 PRIVILEGED_SCOPES = ("Internal", "Private")
@@ -60,6 +60,11 @@ def resolve_grants(grants_map: dict, api_key: Optional[str]) -> Optional[dict]:
 
 def get_scopes() -> List[str]:
     return current_grants.get().get("scopes", [])
+
+
+def get_agent() -> str:
+    """Calling client's label, for telemetry only (see KuzuManager.usage_stats)."""
+    return current_grants.get().get("agent", "")
 
 
 def is_unrestricted() -> bool:

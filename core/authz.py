@@ -48,6 +48,25 @@ def territory_allows(grants: List[str], node_id: str) -> bool:
     return False
 
 
+def agent_label(api_key: str) -> str:
+    """Short client label derived from the key prefix.
+
+    Keys are named `mnm_sk_<client>_<random>`, so the segment after the prefix
+    already says who is calling: mcp, alfred, ganaghello, master. Used only for
+    telemetry (who reads the graph), never for authorization: the grants decide
+    that. Returns "unknown" for a key that does not follow the convention.
+
+    Caveat worth knowing when reading the numbers: the `mcp` key is shared by
+    Claude Code and claude.ai, so those two are not distinguishable until they
+    get separate keys.
+    """
+    if not api_key or not api_key.startswith("mnm_sk_"):
+        return "unknown"
+    rest = api_key[len("mnm_sk_"):]
+    label = rest.split("_", 1)[0]
+    return label or "unknown"
+
+
 def normalize_key_config(cfg, lenient: bool = False) -> dict:
     """Coerce a single api_keys.yaml entry into {scopes, read, write}.
 

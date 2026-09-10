@@ -44,7 +44,7 @@ from core.vector_store import VectorStore
 from core.attention import AttentionModel, thermal_rerank
 from core.utils import node_id_from_path, readable_name as _readable_name
 from core.authz import (validate_api_keys, format_validation_error, normalize_key_config,
-                        territory_allows, filter_by_read)
+                        territory_allows, filter_by_read, agent_label)
 from core import node_service, thermal_backup
 from butler.initiative import InitiativeEngine
 from workers.gardener import Gardener
@@ -98,10 +98,11 @@ if AUTH_REQUIRED:
 # Pre-resolve every key to normalized grants {scopes, read, write} once, for
 # O(1) lookup per request. Lenient (missing territory -> "*") only in dev
 # (auth_required false); strict fail-closed default ([]) in production.
-API_GRANTS = {k: normalize_key_config(v, lenient=not AUTH_REQUIRED) for k, v in api_keys.items()}
+API_GRANTS = {k: {**normalize_key_config(v, lenient=not AUTH_REQUIRED), "agent": agent_label(k)}
+              for k, v in api_keys.items()}
 
 def verify_api_key(x_api_key: Optional[str] = Header(None)) -> Dict[str, Any]:
-    if not api_keys: return {"scopes": ["*"], "read": ["*"], "write": ["*"]}
+    if not api_keys: return {"scopes": ["*"], "read": ["*"], "write": ["*"], "agent": "dev"}
     if not x_api_key: raise HTTPException(status_code=401, detail="X-API-Key header missing")
     if x_api_key not in api_keys: raise HTTPException(status_code=403, detail="Invalid API Key")
     return API_GRANTS[x_api_key]
@@ -413,6 +414,11 @@ def health_check():
                 if THERMAL_BACKUP_ENABLED and os.path.exists(THERMAL_STATE_PATH) else None
             ),
         },
+        # Is this graph ever read, and by whom. interaction_count alone cannot
+        # say: it also grows on file edits and proximity propagation. Counters
+        # start from their introduction, so a low number right after deploy
+        # means "not measured yet", not "not used".
+        "usage": kuzu_mgr.usage_stats(),
     }
 
 @app.get("/search")
@@ -435,7 +441,7 @@ def search(q: str, scopes: Optional[str] = None, api_auth: Dict[str, List[str]] 
 
     # 2. Thermal stimulus and fetch neighbors from Kuzu (use path-based ID),
     #    filtered to the read territory so we never surface off-limits links.
-    am.record_interaction(node_id, interaction_type="mcp_query")
+    am.record_interaction(node_id, interaction_type="mcp_query", agent=api_auth.get("agent", ""))
     neighbors_data = kuzu_mgr.get_neighbors(node_id, scopes=scope_filter)
     neighbors_data = filter_by_read(neighbors_data, read_grants, "node_name")
 

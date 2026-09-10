@@ -81,10 +81,11 @@ class AttentionModel:
 
     # ─── Interaction recording ─────────────────────────────────────────────────
 
-    def record_interaction(self, node_name: str, interaction_type: str = "mcp_query"):
+    def record_interaction(self, node_name: str, interaction_type: str = "mcp_query", agent: str = ""):
         """
         Record a direct interaction with a node and propagate proximity boost to neighbors.
         interaction_type: 'file_edit' | 'mcp_query' | 'proximity'
+        agent: calling client's label, telemetry only (see KuzuManager.usage_stats).
         """
         update_ts = interaction_type != "proximity"
 
@@ -94,10 +95,11 @@ class AttentionModel:
             # itself is 0 — the recency floor does the lifting.
             boost = 0.0
             self.kuzu_mgr.update_interaction(node_name, 0.0, update_timestamp=update_ts,
-                                             floor=self.recency_activation)
+                                             floor=self.recency_activation, agent=agent)
         else:
             boost = self.boost_weights.get(interaction_type, self.boost_weights["mcp_query"])
-            self.kuzu_mgr.update_interaction(node_name, boost, update_timestamp=update_ts)
+            self.kuzu_mgr.update_interaction(node_name, boost, update_timestamp=update_ts,
+                                             agent=agent, is_query=(interaction_type == "mcp_query"))
         logger.debug(f"Interaction '{interaction_type}' on '{node_name}' (boost={boost:.2f})")
 
         node = self.kuzu_mgr.get_node(node_name)
@@ -142,12 +144,19 @@ class AttentionModel:
             days_goal_task=self.dormant_days_goal_task,
             days_journal=self.dormant_days_journal,
         )
+        resurfaced = []
         for node in dormant_nodes:
             current = node["activation"]
             if current < self.dormant_ceiling:
                 boost = min(self.dormant_resurface_boost, self.dormant_ceiling - current)
                 self.kuzu_mgr.update_interaction(node["name"], boost, update_timestamp=False)
+                resurfaced.append(node["name"])
                 logger.debug(f"Resurfaced dormant node '{node['name']}' (+{boost:.3f})")
 
+        # Stamp what was actually pushed back up, so its efficacy is measurable
+        # later. Only the nodes that got a boost: the ones already at the ceiling
+        # were not resurfaced this round and would inflate the denominator.
+        self.kuzu_mgr.mark_resurfaced(resurfaced)
+
         if dormant_nodes:
-            logger.info(f"Resurfaced {len(dormant_nodes)} dormant nodes.")
+            logger.info(f"Resurfaced {len(resurfaced)} dormant nodes.")
