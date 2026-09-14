@@ -7,7 +7,7 @@ from datetime import datetime
 
 from core.utils import resolve_safe_folder, atomic_write, render_markdown
 from core.attention import thermal_rerank
-from core.mcp_auth import scope_filter, require_privileged, assert_write, read_filter_grants
+from core.mcp_auth import scope_filter, require_privileged, assert_write, read_filter_grants, get_agent
 from core.authz import filter_by_read, territory_allows
 from core import node_service
 
@@ -150,7 +150,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
             content = read_markdown(node_id)
             if content:
                 output += f"### FILE: {display}.md (score: {r['score']:.3f})\n```markdown\n{content}\n```\n\n"
-                am.record_interaction(node_id, interaction_type="mcp_query")
+                am.record_interaction(node_id, interaction_type="mcp_query", agent=get_agent())
         return output
 
     @mcp.tool()

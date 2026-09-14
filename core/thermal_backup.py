@@ -23,7 +23,8 @@ from core.utils import atomic_write
 
 logger = logging.getLogger(__name__)
 
-_FIELDS = ("activation", "last_interaction", "interaction_count", "last_decay_applied")
+_FIELDS = ("activation", "last_interaction", "interaction_count", "last_decay_applied",
+           "query_count", "last_accessed_agent", "last_resurfaced_at")
 
 
 def export(kuzu_mgr, path: str) -> dict:
@@ -70,6 +71,9 @@ def restore(kuzu_mgr, path: str) -> dict:
             last_interaction=fields.get("last_interaction", 0.0),
             interaction_count=fields.get("interaction_count", 0),
             last_decay_applied=fields.get("last_decay_applied", 0.0),
+            query_count=fields.get("query_count", 0),
+            last_accessed_agent=fields.get("last_accessed_agent", "") or "",
+            last_resurfaced_at=fields.get("last_resurfaced_at", 0.0) or 0.0,
         )
         restored += 1
     logger.info(f"Thermal state restored: {restored} nodes, {skipped} skipped (absent).")

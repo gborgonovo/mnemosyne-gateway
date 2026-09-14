@@ -92,8 +92,12 @@ class TestThermalBackup(unittest.TestCase):
         with open(self.snap) as f:
             payload = json.load(f)
         self.assertIn("x", payload["nodes"])
+        # Exact set on purpose: adding a field to the snapshot must be a deliberate
+        # act, not a side effect. The three telemetry counters are in here because
+        # a rebuild would otherwise reset the very measurement being collected.
         self.assertEqual(set(payload["nodes"]["x"].keys()),
-                         {"activation", "last_interaction", "interaction_count", "last_decay_applied"})
+                         {"activation", "last_interaction", "interaction_count", "last_decay_applied",
+                          "query_count", "last_accessed_agent", "last_resurfaced_at"})
 
 
 if __name__ == "__main__":
