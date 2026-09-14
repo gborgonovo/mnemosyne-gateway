@@ -8,153 +8,203 @@
       "nota": "Il set v1 e' diventato inutilizzabile senza che nessuno se ne accorgesse: tutti i 21 nodi che si aspettava erano scomparsi dal vault. Questi campi esistono perche' validate_eval_set.py possa dire se e' successo di nuovo."
     },
     "embedder_di_riferimento": "Qwen3-Embedding:0.6b (produzione). Il v1 girava col default di ChromaDB, all-MiniLM-L6-v2, inglese: i suoi numeri non erano confrontabili con la produzione.",
-    "stato": "bozza: tutte le domande sono da_confermare. Le risposte attese sono proposte, e solo Giorgio puo' dire se sono giuste.",
+    "stato": "Prima tornata di conferma fatta con Giorgio il 2026-09-14. Le note 'nota_giorgio' riportano il suo giudizio testuale dove non era una conferma secca.",
     "come_si_confermano": "Per ogni domanda: leggere query e expected_top, poi mettere stato a 'confermata' se la risposta attesa e' quella che vorresti, 'corretta' dopo aver cambiato expected_top, o 'scartata' se la domanda non ha senso. Le scartate restano nel file con la ragione, per non riproporle."
   },
-
   "soglie_astensione": {
     "nota": "NON ereditate dal v1: erano tarate sulle distanze di all-MiniLM e con Qwen non significano niente. Vanno calibrate eseguendo le domande di astensione e guardando dove cadono le distanze reali. Finche' sono null, run_eval salta la categoria invece di misurare a caso.",
-    "default": null
+    "default": null,
+    "calibrazione_2026_09_14": {
+      "esito": "nessuna soglia separa le due popolazioni",
+      "misura": "Con il prefisso di istruzione, sullo stesso indice: la risposta CORRETTA piu' lontana sta a 0,508 (R07, il nodo del computer), mentre la domanda fuori tema piu' vicina sta a 0,510 (A01, la carbonara, che pesca 'il-barbeque-101'). Sette millesimi di separazione, cioe' niente.",
+      "conseguenza": "L'astensione non e' un problema di taratura come l'audit del 2 luglio supponeva ('alzare l'abstention con una soglia di distanza calibrata sui dati dell'eval'): a questa soglia non esiste. Serve un segnale diverso dalla sola distanza. Una soglia messa comunque a 0,51 rifiuterebbe una risposta giusta su dodici per evitare una fantasia su quattro.",
+      "default": null
+    }
   },
-
   "queries": [
     {
       "id": "R01",
       "category": "recall",
       "query": "quanto abbiamo pagato di notaio e imposte per il rogito",
-      "expected_top": ["rogito-153"],
+      "expected_top": [
+        "rogito-153"
+      ],
       "why": "Fatto puntuale e numerico dentro il corpo di un nodo (Imposte 3.915,06 / Notaio 2.591,94). Verifica il caso piu' semplice: la risposta e' scritta e va trovata.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "R02",
       "category": "recall",
       "query": "quando e' arrivato l'allaccio dell'acqua a Ganaghello",
-      "expected_top": ["abbiamo-ufficialmente-lacqua-66", "abbiamo-ufficialmente-lacqua-69"],
+      "expected_top": [
+        "abbiamo-ufficialmente-lacqua-66",
+        "abbiamo-ufficialmente-lacqua-69"
+      ],
       "why": "Evento datato nel diario. Due nodi lo raccontano: se ne trova uno dei due va bene, ed e' anche un caso in cui la coppia merita attenzione.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "R03",
       "category": "recall",
       "query": "la festa dei diciotto anni di Rossella",
-      "expected_top": ["festa-dei-18-di-rossella-213"],
+      "expected_top": [
+        "festa-dei-18-di-rossella-213"
+      ],
       "why": "Evento con nome proprio. Verifica che un nome di persona nel titolo sia raggiungibile anche se il corpo e' breve.",
-      "stato": "da_confermare"
+      "stato": "scartata",
+      "nota_giorgio": "Giorgio il 2026-09-14: 'non capisco la query'. Causa probabile: il nodo atteso contiene due righe ('E' una specie di inaugurazione. E direi che ha funzionato tutto a dovere') che della festa non dicono nulla. La domanda verificherebbe solo la corrispondenza col titolo, che e' un buco noto, non il recupero della conoscenza. Da riscrivere o scartare.",
+      "motivo_scarto": "Scartata il 2026-09-14. Il nodo atteso contiene due righe che della festa non dicono nulla ('E' una specie di inaugurazione. E direi che ha funzionato tutto a dovere'), quindi la domanda misurerebbe solo se il titolo e' raggiungibile: un buco gia' noto e misurato altrove. Un nodo da due righe non puo' fare da prova onesta del recupero."
     },
     {
       "id": "R04",
       "category": "recall",
       "query": "come funziona il sistema con cui genero le slide per le lezioni",
-      "expected_top": ["user_slide_system"],
+      "expected_top": [
+        "Atlante specifica software",
+        "Atlante v01 sviluppato"
+      ],
       "why": "Conoscenza di lavoro che vive in una memoria di Claude Code. Se questa non si trova, la nicchia trasversale non funziona.",
-      "stato": "da_confermare"
+      "stato": "corretta",
+      "nota_giorgio": "Corretta da Giorgio il 2026-09-14: le slide si producono con Atlante (~/Workspace/progetti/atlante), non con user_slide_system, che per giunta e' uno dei sette nodi senza corpo. La risposta attesa proposta era una nota vuota."
     },
     {
       "id": "R05",
       "category": "recall",
-      "query": "perche' il deploy in produzione non passa da SSH diretto",
-      "expected_top": ["feedback_deploy_via_github"],
-      "why": "Regola operativa con un perche'. Verifica il recupero di una decisione, non di un fatto.",
-      "stato": "da_confermare"
+      "query": "come devo fare il deploy in produzione",
+      "expected_top": [
+        "feedback_deploy_via_github"
+      ],
+      "why": "Regola operativa con un perche'. La versione precedente conteneva la propria risposta ('perche' il deploy non passa da SSH'), che nessuno scriverebbe non ricordandola.",
+      "stato": "corretta",
+      "nota_giorgio": "Giorgio il 2026-09-14: 'non capisco la domanda'. Causa: la domanda conteneva la propria risposta ('perche' il deploy non passa da SSH' presuppone di saperlo gia'). Da riscrivere in forma naturale. Principio per tutto il set: una query e' cio' che si scrive quando NON si ricorda."
     },
     {
       "id": "R06",
       "category": "recall",
       "query": "cosa causava gli errori di memoria del gateway e come e' stato risolto",
-      "expected_top": ["project_kuzu_oom_and_migration"],
+      "expected_top": [
+        "project_kuzu_oom_and_migration"
+      ],
       "why": "Diagnosi tecnica passata, formulata come la chiederebbe qualcuno che non ricorda i termini esatti (nessun 'buffer pool' nella domanda).",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "R07",
       "category": "recall",
-      "query": "che computer uso e come si accende la retroilluminazione della tastiera",
-      "expected_top": ["my computer - Lenovo LOQ 15i", "reference_loq_retroilluminazione_tastiera"],
-      "why": "Domanda con due parti, la cui risposta sta in due nodi diversi. Verifica se almeno uno dei due emerge.",
-      "stato": "da_confermare"
+      "query": "che computer uso e quali sono le sue specifiche",
+      "expected_top": [
+        "my computer - Lenovo LOQ 15i"
+      ],
+      "why": "Scheda tecnica di un oggetto. La versione precedente chiedeva due cose in una (computer e retroilluminazione della tastiera), quindi non poteva avere una risposta sola.",
+      "stato": "corretta"
     },
     {
       "id": "R08",
       "category": "recall",
       "query": "lo scaldabagno di Ganaghello",
-      "expected_top": ["lo-scaldabagno-82", "lo-scaldabango-parte-2-83"],
+      "expected_top": [
+        "lo-scaldabagno-82",
+        "lo-scaldabango-parte-2-83"
+      ],
       "why": "Due puntate della stessa vicenda, di cui una col titolo scritto male ('scaldabango'). Verifica la tolleranza a un errore di battitura nel nodo, non nella domanda.",
-      "stato": "da_confermare"
+      "stato": "confermata",
+      "nota_giorgio": "Confermata la risposta attesa; Giorgio non e' sicuro che la domanda sia posta come la porrebbe lui."
     },
     {
       "id": "R09",
       "category": "recall",
       "query": "documento di progetto di Alfred",
-      "expected_top": ["Alfred - Documento di Progetto"],
+      "expected_top": [
+        "Alfred - Documento di Progetto"
+      ],
       "why": "Titolo quasi identico alla domanda. Caso di controllo: se falliscono anche queste, il problema non e' semantico.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "R10",
       "category": "recall",
       "query": "cosa avevamo deciso sull'uso del trattino lungo nei testi",
-      "expected_top": ["feedback_no_em_dash", "feedback_stile_scrittura"],
+      "expected_top": [
+        "feedback_no_em_dash",
+        "feedback_stile_scrittura"
+      ],
       "why": "Preferenza di stile, in due nodi quasi sinonimi. Anche questa e' conoscenza trasversale ai progetti.",
-      "stato": "da_confermare"
+      "stato": "confermata",
+      "nota_giorgio": "Entrambe le risposte vanno bene: feedback_stile_scrittura E feedback_no_em_dash sono la stessa regola. Vale come successo se emerge una qualsiasi delle due."
     },
-
     {
       "id": "T01",
       "category": "temporal",
       "query": "cosa e' ancora da fare sulle tegole",
-      "expected_top": ["rimuovere-tegole-tettoia-sud-248", "sistemazione-delle-tegole-del-tetto-della-stalla-143"],
+      "expected_top": [
+        "rimuovere-tegole-tettoia-sud-248",
+        "sistemazione-delle-tegole-del-tetto-della-stalla-143"
+      ],
       "why": "Deve restituire i due con status todo e NON quelli archiviati. E' il caso che nell'agosto 2026 ha fatto sbagliare Alfred, che presentava come aperte attivita' chiuse.",
-      "stato": "da_confermare"
+      "stato": "scartata",
+      "motivo_scarto": "Scartata da Giorgio il 2026-09-14."
     },
     {
       "id": "T02",
       "category": "temporal",
       "query": "il rogito e' stato fatto o e' ancora da fare",
-      "expected_top": ["rogito-153"],
+      "expected_top": [
+        "rogito-153"
+      ],
       "why": "Il nodo va trovato E lo stato va letto: e' archiviato, quindi la risposta e' 'fatto'. Verifica che lo stato arrivi insieme al contenuto.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "T03",
       "category": "temporal",
       "query": "quali lavori ho approvato ma non ancora cominciato",
-      "expected_top": ["eliminare-piante-di-ailanto-133"],
+      "expected_top": [
+        "eliminare-piante-di-ailanto-133"
+      ],
       "why": "Interroga un valore di status specifico ('approvato'), che e' l'unico nodo ad averlo. Verifica se lo status e' recuperabile o se e' invisibile alla ricerca.",
-      "stato": "da_confermare"
+      "stato": "scartata",
+      "motivo_scarto": "Scartata il 2026-09-14 su osservazione di Giorgio: 'questa domanda invecchia in fretta'. Chiede quali lavori siano approvati ma non iniziati, cioe' uno stato che cambia lavorando. Principio che ne deriva e vale per tutto il set: una domanda sullo stato va posta su uno stato che non cambiera' piu' (T02, 'il rogito e' stato fatto', resta valida per sempre), altrimenti l'eval misura il calendario invece del recupero. La capacita' di rispondere sullo stato resta importante, vedi il caso dei task archiviati segnalati come aperti nell'agosto 2026: e' la domanda a dover essere stabile, non la capacita'."
     },
     {
       "id": "T04",
       "category": "temporal",
       "query": "quali sono le idee su Ganaghello che non sono ancora diventate lavori",
-      "expected_top": ["un-terrazzino-in-cima-al-silos-152", "acquistare-il-terreno-accando-164", "installare-una-bat-box-233"],
+      "expected_top": [
+        "un-terrazzino-in-cima-al-silos-152",
+        "acquistare-il-terreno-accando-164",
+        "installare-una-bat-box-233"
+      ],
       "why": "Diciassette nodi hanno status 'idea'. Ne basta uno fra i primi. Verifica una domanda di categoria e non di singolo fatto.",
-      "stato": "da_confermare"
+      "stato": "scartata",
+      "motivo_scarto": "Scartata da Giorgio il 2026-09-14."
     },
     {
       "id": "T05",
       "category": "temporal",
       "query": "l'impianto elettrico della zona ovest e' finito",
-      "expected_top": ["rendere-funzionante-limpianto-elettrico-della-zona-ovest-202"],
+      "expected_top": [
+        "rendere-funzionante-limpianto-elettrico-della-zona-ovest-202"
+      ],
       "why": "Nel v1 la domanda equivalente falliva con entrambi i modelli. Utile per vedere se il corpus ripulito cambia l'esito.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "T06",
       "category": "temporal",
       "query": "quali obiettivi hanno una scadenza nel 2027",
-      "expected_top": ["una-casa-6"],
+      "expected_top": [
+        "una-casa-6"
+      ],
       "why": "Le date stanno nel frontmatter e NON nel testo incorporato: l'audit ipotizzava che sia questa la causa del recall temporale a 0,25. Questa domanda e' la verifica diretta di quell'ipotesi.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
-
     {
       "id": "A01",
       "category": "abstention",
       "query": "la ricetta della carbonara con guanciale uova e pecorino",
       "expected_top": [],
       "why": "Fuori dal vault e lontano da tutto. Se anche questa non produce astensione, la soglia e' troppo permissiva.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "A02",
@@ -162,15 +212,18 @@
       "query": "gli orari dei treni da Milano a Roma",
       "expected_top": [],
       "why": "Fuori dal vault. Nel v1 falliva: restituiva 'ingegnere' a distanza 0,401.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "A03",
-      "category": "abstention",
+      "category": "risposta_assente",
       "query": "quanto costa l'assicurazione dell'auto quest'anno",
-      "expected_top": [],
-      "why": "Il caso difficile: plausibile come domanda personale, e nel vault ci sono spese e preventivi, quindi qualcosa somigliera'. Distingue l'astensione dalla fortuna.",
-      "stato": "da_confermare"
+      "expected_top": [
+        "assicurazione-auto-182"
+      ],
+      "why": "Terza situazione, distinta sia dal ritrovamento sia dall'astensione: l'ARGOMENTO e' nel vault (esiste un task 'assicurazione auto', archiviato) ma la RISPOSTA no (non c'e' nessun importo). Il comportamento corretto e' trovare il nodo e dire che il costo non risulta, non inventarlo. E' la situazione che il 19 agosto 2026 ha prodotto due affermazioni marcate FALSO nel briefing di Alfred: il sistema conosceva i temi e ha riempito i dettagli.",
+      "stato": "confermata",
+      "nota_giorgio": "Riclassificata il 2026-09-14. Era stata scritta come astensione dando per scontato che l'assicurazione auto non fosse nel vault; il nodo invece c'e', con corpo vuoto."
     },
     {
       "id": "A04",
@@ -178,7 +231,7 @@
       "query": "chi ha vinto il campionato di calcio",
       "expected_top": [],
       "why": "Fuori dal vault. Nel v1 falliva: restituiva 'edificio'.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
     {
       "id": "A05",
@@ -186,9 +239,8 @@
       "query": "come si chiama il gatto di mia sorella",
       "expected_top": [],
       "why": "Secondo caso difficile: domanda personale su un fatto che nel vault non c'e', mentre persone e animali ci sono.",
-      "stato": "da_confermare"
+      "stato": "confermata"
     },
-
     {
       "id": "C01",
       "category": "citazione",
@@ -235,9 +287,12 @@
       "runnable": false,
       "blocked_by": "Area 5: l'iniezione automatica non esiste ancora",
       "query": "(in una sessione su un progetto di codice) come preferisco che siano strutturate le slide",
-      "expected_top": ["user_slide_system"],
+      "expected_top": [
+        "user_slide_system"
+      ],
       "why": "La nicchia misurata il 10 settembre: 29 memorie trasversali sono intrappolate ognuna in un progetto. Verifica che, lavorando su un progetto, emerga una conoscenza nata in un altro.",
-      "stato": "da_confermare"
+      "stato": "da_confermare",
+      "nota_giorgio": "Giorgio il 2026-09-14: 'non saprei'. Legittimo: chiede se, lavorando su un progetto, emerga conoscenza nata in un altro, e finche' l'iniezione automatica non esiste non c'e' esperienza su cui basare un giudizio. Da riprendere quando l'Area 5 e' in piedi."
     },
     {
       "id": "X02",
@@ -245,17 +300,24 @@
       "runnable": false,
       "blocked_by": "Area 5",
       "query": "(in una sessione sulla didattica) cosa mi sono detto sui tempi delle lezioni",
-      "expected_top": ["feedback_tempi_lezione_li_gestisce_lui", "feedback_piu_materiale_che_meno"],
+      "expected_top": [
+        "feedback_tempi_lezione_li_gestisce_lui",
+        "feedback_piu_materiale_che_meno"
+      ],
       "why": "Il caso peggiore trovato: il progetto Webinar ha 2 memorie, e tutte le preferenze sull'insegnare stanno in Workspace. Questa domanda misura esattamente quel buco.",
-      "stato": "da_confermare"
+      "stato": "confermata",
+      "nota_giorgio": "Confermata da Giorgio il 2026-09-14 dopo aver letto le due note: sono quelle che vorrebbe vedersi comparire preparando una lezione (durate oneste senza limarle, e piu' materiale di quanto entri). Restano non eseguibili finche' l'Area 5 non esiste."
     },
     {
       "id": "N01",
       "category": "rumore",
       "query": "report sistema completo",
-      "expected_top": ["report_sistema_completo"],
+      "expected_top": [
+        "report_sistema_completo"
+      ],
       "why": "Guardia contro un difetto noto: nel vault ci sono nove copie di questo file, otto generate da conflitti Syncthing. La domanda deve restituire l'originale, e finche' ne restituisce le copie il vault non e' pulito.",
-      "stato": "da_confermare"
+      "stato": "spostata",
+      "motivo_scarto": "Tolta dal set il 2026-09-14: non era una domanda sulla conoscenza ma una guardia contro le nove copie da conflitto Syncthing. Quel controllo esiste gia' come rilievo di lint (Area 6), che e' il posto giusto: un eval misura il recupero, non l'igiene dei file."
     }
   ]
 }

@@ -135,14 +135,25 @@ def main():
     #    Nel v1 erano tarate su un altro embedder e hanno prodotto un numero
     #    (0,4) che non voleva dire nulla.
     soglie = es.get("soglie_astensione") or {}
+    calibrazione = next((v for k, v in soglie.items() if k.startswith("calibrazione_")), None)
     if per_categoria.get("abstention") and soglie.get("default") is None:
-        dì("\nsoglie di astensione non calibrate: la categoria va saltata, non misurata a caso")
-        problemi.append("soglie di astensione da calibrare sull'embedder in uso")
+        if calibrazione:
+            # Una soglia nulla DOPO una calibrazione non e' un lavoro in sospeso:
+            # e' il risultato. Distinguere le due cose evita di rimettere in coda
+            # un lavoro gia' fatto che ha dato esito negativo.
+            dì(f"\nsoglia di astensione: nessuna, per misura e non per dimenticanza")
+            dì(f"   esito: {calibrazione.get('esito', '?')}")
+            dì(f"   {calibrazione.get('misura', '')}")
+        else:
+            dì("\nsoglie di astensione non calibrate: la categoria va saltata, non misurata a caso")
+            problemi.append("soglie di astensione da calibrare sull'embedder in uso")
 
     da_confermare = per_stato.get("da_confermare", 0)
     if da_confermare:
-        dì(f"\n{da_confermare} domande sono ancora da confermare: finche' lo sono, i numeri "
-           f"che producono sono indicativi e non un cancello.")
+        n = da_confermare
+        dì(f"\n{n} domand{'a' if n == 1 else 'e'} {'e' if n == 1 else 'sono'} ancora da confermare: "
+           f"finche' lo {'e' if n == 1 else 'sono'}, i numeri che produc{'e' if n == 1 else 'ono'} "
+           f"sono indicativi e non un cancello.")
 
     print()
     if problemi:
