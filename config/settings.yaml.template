@@ -83,6 +83,16 @@ llm:
     model_name: "text-embedding-3-small"
     base_url: ""
     api_key: ""
+    # Prepended to every search QUERY before embedding it (never to documents).
+    # Needed for instruction-tuned asymmetric embedders such as Qwen3-Embedding,
+    # which otherwise treat a query as if it were itself a document and produce
+    # squashed, near-random distances (measured: recall@1 0.40 -> 0.60 with it,
+    # on the eval set in evals/eval_set_v2.json). Leave empty for symmetric
+    # embedders (OpenAI text-embedding-3-*, MiniLM, nomic-embed-text): they
+    # were not trained with this convention and a prefix would only add noise.
+    # Example for Qwen3-Embedding:
+    #   query_instruction: "Instruct: Given a search query, retrieve relevant documents that answer the query\nQuery: "
+    query_instruction: ""
 
   display_name: "The Butler (Mnemosyne)" # Name shown in Open WebUI / API Clients
   

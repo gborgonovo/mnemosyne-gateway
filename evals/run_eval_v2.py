@@ -26,7 +26,11 @@ from core.vector_store import VectorStore  # noqa: E402
 
 EMBEDDERS = {
     "qwen": {"mode": "ollama", "base_url": "http://localhost:11434",
-             "model_name": "Qwen3-Embedding:0.6b", "timeout": 300},
+             "model_name": "Qwen3-Embedding:0.6b", "timeout": 300,
+             "query_instruction": "Instruct: Given a search query, retrieve relevant documents "
+                                   "that answer the query\nQuery: "},
+    "qwen-no-instruction": {"mode": "ollama", "base_url": "http://localhost:11434",
+                            "model_name": "Qwen3-Embedding:0.6b", "timeout": 300},  # per confronto
     "mock": {"mode": "mock"},  # attenzione: non e' finto, e' il default di ChromaDB (all-MiniLM, inglese)
 }
 

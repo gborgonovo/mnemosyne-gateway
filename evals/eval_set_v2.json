@@ -317,7 +317,9 @@
       ],
       "why": "Guardia contro un difetto noto: nel vault ci sono nove copie di questo file, otto generate da conflitti Syncthing. La domanda deve restituire l'originale, e finche' ne restituisce le copie il vault non e' pulito.",
       "stato": "spostata",
-      "motivo_scarto": "Tolta dal set il 2026-09-14: non era una domanda sulla conoscenza ma una guardia contro le nove copie da conflitto Syncthing. Quel controllo esiste gia' come rilievo di lint (Area 6), che e' il posto giusto: un eval misura il recupero, non l'igiene dei file."
+      "motivo_scarto": "Tolta dal set il 2026-09-14: non era una domanda sulla conoscenza ma una guardia contro le nove copie da conflitto Syncthing. Quel controllo esiste gia' come rilievo di lint (Area 6), che e' il posto giusto: un eval misura il recupero, non l'igiene dei file.",
+      "runnable": false,
+      "blocked_by": "Area 6: è un rilievo di lint (file di conflitto Syncthing), non una domanda di recupero"
     }
   ]
 }
