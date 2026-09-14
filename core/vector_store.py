@@ -42,6 +42,20 @@ class VectorStore:
 
         self._chunker = HeuristicChunker(max_chars_per_chunk=CHUNK_SIZE, overlap_chars=CHUNK_OVERLAP)
 
+        # Asymmetric embedders (e.g. Qwen3-Embedding) expect a different framing
+        # for a search QUERY than for a document: without it, the model treats
+        # "quanto costa il notaio" as if it were itself a tiny document, and
+        # every query ends up roughly equidistant from everything in the
+        # collection. Measured 2026-09-14 on the production model: recall@1
+        # 0.40 -> 0.60, temporal recall@1 0.00 -> 0.33, once queries carry the
+        # instruction and documents don't.
+        #
+        # Off by default on purpose: the default ollama model in this codebase
+        # (nomic-embed-text) is NOT instruction-tuned, and prefixing it would
+        # only add noise. Only set query_instruction for an embedder whose docs
+        # recommend one (see config/settings.yaml.template).
+        self._query_instruction = (embedding_config or {}).get("query_instruction") or ""
+
     def _build_embedding_function(self, config: dict):
         mode = config.get("mode", "mock")
 
@@ -235,8 +249,10 @@ class VectorStore:
             return []
         fetch_limit = min(limit * 4, 50, total_docs)
 
+        # The instruction (if any) goes in front of the query text only: documents
+        # are embedded plain via upsert_node/find_similar_nodes. See __init__.
         results = self.collection.query(
-            query_texts=[query],
+            query_texts=[self._query_instruction + query],
             n_results=fetch_limit,
             where=where_filter
         )
