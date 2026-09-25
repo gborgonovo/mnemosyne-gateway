@@ -7,6 +7,7 @@ tree on the server.
 Units in this folder:
 - `mnemosyne.service` — the gateway (FastAPI + MCP), port 4001.
 - `mnemosyne-knowledge-backup.{service,timer}` — daily git snapshot of `knowledge/`.
+- `mnemosyne-knowledge-bundle.{service,timer}` — nightly `git bundle` of that snapshot repo for the off-site copy on the home NAS (see below).
 
 ## Run as `oste`, not root (one-time migration)
 
@@ -82,3 +83,17 @@ ls -l /srv/mnemosyne-gb/knowledge/<the-file>.md   # expect oste:oste, mode 644
 - Thermal-state backup writes `knowledge/_system/thermal_state.json`; add
   `_system/` to Syncthing's `.stignore` on the VPS (see the file-watcher / thermal
   backup notes).
+
+## Knowledge backup: snapshot, bundle, off-site copy
+
+Set up on 2026-09-25 (plan: `~/Workspace/progetti/super_memoria/piano_backup.md`).
+
+- `knowledge/` is its own git repo, owned by `oste`, with `.gitignore` for `.stversions/`, `.stfolder/`, `.mnemo-tmp-*.part`. The VPS `.stignore` excludes `.git` (`.stignore` is per-device: set it on every device).
+- 02:00 `mnemosyne-knowledge-backup.timer`: commit of the day. Clio calls the same service on demand before and after its writes.
+- 02:20 `mnemosyne-knowledge-bundle.timer`: `knowledge_bundle.sh` writes `/var/backups/mnemosyne/mnemosyne-YYYY-MM-DD.bundle` (full history, verified) and `SHA256SUMS`; keeps 30 days plus the first of each month for a year.
+- The home NAS pulls the bundles over SSH as the system user `backup-nas`, whose only key is restricted to `restrict,command="/usr/bin/rrsync -ro /var/backups/mnemosyne/"`: read-only, no shell. The NAS is never exposed; it connects out.
+- Syncthing versioning ("staggered", one year) is on for the vault on the laptop and on the VPS. On the VPS the versions live in `/var/lib/mnemosyne-stversions`, **outside** `knowledge/`: the watcher now skips hidden folders anyway, but keeping versions out of the vault is the safer default.
+
+Install: `sudo cp deploy/mnemosyne-knowledge-bundle.{service,timer} /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now mnemosyne-knowledge-bundle.timer`.
+
+Restore: `git clone mnemosyne-YYYY-MM-DD.bundle knowledge-restored` gives the whole history; check out the date you need.

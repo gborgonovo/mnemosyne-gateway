@@ -35,6 +35,21 @@ EMBEDDERS = {
 }
 
 
+def modello_di_questa_macchina() -> str | None:
+    """Il nome del modello di embedding come lo conosce l'Ollama di questa macchina, da
+    config/settings.yaml. Serve perché Ollama distingue le maiuscole: sulla VPS il modello
+    è `qwen3-embedding:0.6b`, sul portatile `Qwen3-Embedding:0.6b`, e un nome scritto nel
+    codice fallisce con un 404 su una delle due."""
+    percorso = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "settings.yaml")
+    try:
+        import yaml
+        with open(percorso, encoding="utf-8") as f:
+            emb = ((yaml.safe_load(f) or {}).get("llm") or {}).get("embeddings") or {}
+    except OSError:
+        return None
+    return emb.get("model_name") if emb.get("mode") == "ollama" else None
+
+
 def norm(s: str) -> str:
     return s.strip().lower().replace(" ", "_").replace("-", "_")
 
@@ -48,11 +63,15 @@ def main():
     ap.add_argument("--embedder", default="qwen", choices=sorted(EMBEDDERS))
     ap.add_argument("--output-dir", default=os.path.dirname(os.path.abspath(__file__)))
     ap.add_argument("--no-save", action="store_true")
+    ap.add_argument("--model-name", help="nome del modello in Ollama (default: quello di config/settings.yaml)")
     args = ap.parse_args()
 
     with open(args.eval_set, encoding="utf-8") as f:
         es = json.load(f)
-    vs = VectorStore(db_path=args.db_path, embedding_config=EMBEDDERS[args.embedder])
+    embedder = dict(EMBEDDERS[args.embedder])
+    if embedder.get("mode") == "ollama":
+        embedder["model_name"] = args.model_name or modello_di_questa_macchina() or embedder["model_name"]
+    vs = VectorStore(db_path=args.db_path, embedding_config=embedder)
 
     soglia = (es.get("soglie_astensione") or {}).get("default")
     esiti, per_cat = [], {}
@@ -109,7 +128,7 @@ def main():
     payload = {
         "misurato_il": datetime.now().isoformat(timespec="seconds"),
         "come": {"eval_set": os.path.basename(args.eval_set), "versione_set": es["meta"]["version"],
-                 "embedder": args.embedder, "indice": args.db_path,
+                 "embedder": args.embedder, "modello": embedder.get("model_name"), "indice": args.db_path,
                  "nota": "i numeri valgono solo per questa combinazione di set, embedder e indice"},
         "metriche": metriche, "esiti": esiti,
     }
