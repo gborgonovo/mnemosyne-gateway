@@ -23,6 +23,8 @@ attention:
     Task: 0.00045       # half-life ~64 days (~2 months)
     Observation: 0.004  # half-life ~7 days
     Journal: 0.0007     # half-life ~40 days (diary entries: persistent but not evergreen)
+    Reference: 0.0007   # half-life ~41 days (background knowledge: slow, not immortal)
+    Episodio: 0.0007    # half-life ~40 days (Clio: long-term memory of facts)
 
   # Recency floor: creating or editing a file lifts the node to at least this
   # heat (never lowers a hotter node, never inflates past it). Keeps what you

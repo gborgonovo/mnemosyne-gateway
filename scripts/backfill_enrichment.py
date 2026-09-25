@@ -53,6 +53,8 @@ def write_frontmatter(filepath, frontmatter, body):
 
 
 def needs_enrichment(filepath, frontmatter, force=False):
+    if frontmatter.get('enrichment') == 'skip':
+        return False
     if force:
         return True
     node_type = frontmatter.get('type', 'Node')

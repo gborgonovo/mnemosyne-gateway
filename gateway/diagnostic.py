@@ -57,6 +57,7 @@ try:
     else:
         file_count = 0
         for root, dirs, files in os.walk(knowledge_dir):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
             for f in files:
                 if f.endswith('.md'):
                     file_count += 1
