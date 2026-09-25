@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly git bundle of the Mnemosyne knowledge base
+
+[Timer]
+OnCalendar=*-*-* 02:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Mnemosyne Knowledge Base, nightly git bundle for off-site copies
+After=mnemosyne-knowledge-backup.service
+
+[Service]
+Type=oneshot
+User=oste
+Group=oste
+Environment=KNOWLEDGE_DIR=/srv/mnemosyne-gb/knowledge
+Environment=BUNDLE_DIR=/var/backups/mnemosyne
+ExecStart=/bin/bash /srv/mnemosyne-gb/deploy/knowledge_bundle.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mnemosyne-knowledge-bundle
