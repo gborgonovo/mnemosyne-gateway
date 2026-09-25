@@ -39,7 +39,10 @@ class AttentionModel:
         self.kuzu_mgr = kuzu_manager
         self.eb = event_bus
 
-        self.decay_rates = config.get("decay_rates", {
+        # settings.yaml extends these defaults instead of replacing them: a type missing
+        # from the config (Reference was, in production) keeps its designed rate instead
+        # of silently falling back to the Node default.
+        self.decay_rates = {
             "Node":        0.0025,
             "Goal":        0.00026,
             "Task":        0.00045,
@@ -51,7 +54,11 @@ class AttentionModel:
             # Citing/searching a Reference reheats it; a forgotten one drifts into
             # the dormant pool and can be resurfaced as a "forgotten hub".
             "Reference":   0.0007,
-        })
+            # Episodio (Clio): long-term memory of facts. Must stay findable without
+            # competing with current work for the briefing.
+            "Episodio":    0.0007,
+            **(config.get("decay_rates") or {}),
+        }
         self.boost_weights = config.get("boost_weights", {
             "mcp_query": 0.2,
             "proximity": 0.05,

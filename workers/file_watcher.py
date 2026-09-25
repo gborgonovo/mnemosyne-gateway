@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 import sys
 import time
 import yaml
@@ -40,10 +41,18 @@ def _hash_body(body: str) -> str:
 SYNC_CONFLICT_MARKER = ".sync-conflict-"
 
 
-def _is_indexable_md(path: str) -> bool:
-    """True for real markdown files, excluding Syncthing conflict copies."""
+def _is_indexable_md(path: str, knowledge_dir: str | None = None) -> bool:
+    """True for real markdown files, excluding Syncthing conflict copies and anything
+    under a hidden folder (.stversions, .trash, .git): archived copies there would be
+    indexed as duplicate nodes, like the conflict copies of the OOM incident."""
     name = os.path.basename(path)
-    return name.endswith('.md') and SYNC_CONFLICT_MARKER not in name
+    if not name.endswith('.md') or SYNC_CONFLICT_MARKER in name or name.startswith('.'):
+        return False
+    if knowledge_dir:
+        rel = os.path.relpath(path, knowledge_dir)
+        if any(part.startswith('.') for part in rel.split(os.sep)[:-1]):
+            return False
+    return True
 
 
 class WikiSyncHandler(FileSystemEventHandler):
@@ -86,12 +95,12 @@ class WikiSyncHandler(FileSystemEventHandler):
     # ─── Watchdog event handlers ───────────────────────────────────────────────
 
     def on_modified(self, event):
-        if not event.is_directory and _is_indexable_md(event.src_path):
+        if not event.is_directory and _is_indexable_md(event.src_path, self.knowledge_dir):
             logger.info(f"File modified: {event.src_path}")
             self._sync_file(event.src_path, is_startup_sync=False)
 
     def on_created(self, event):
-        if not event.is_directory and _is_indexable_md(event.src_path):
+        if not event.is_directory and _is_indexable_md(event.src_path, self.knowledge_dir):
             logger.info(f"File created: {event.src_path}")
             node_id, display_name = node_id_from_path(event.src_path, self.knowledge_dir)
             basename_key = _normalize_segment(display_name)
@@ -101,7 +110,7 @@ class WikiSyncHandler(FileSystemEventHandler):
             self._sync_file(event.src_path, is_startup_sync=False)
 
     def on_deleted(self, event):
-        if not event.is_directory and _is_indexable_md(event.src_path):
+        if not event.is_directory and _is_indexable_md(event.src_path, self.knowledge_dir):
             logger.info(f"File deleted: {event.src_path}")
             node_id, display_name = node_id_from_path(event.src_path, self.knowledge_dir)
             basename_key = _normalize_segment(display_name)
@@ -129,30 +138,36 @@ class WikiSyncHandler(FileSystemEventHandler):
                     self._sync_file(survivor_path, is_startup_sync=False)
 
     def on_moved(self, event):
-        if not event.is_directory and _is_indexable_md(event.dest_path):
-            logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
-            src_id, src_display = node_id_from_path(event.src_path, self.knowledge_dir)
-            dst_id, dst_display = node_id_from_path(event.dest_path, self.knowledge_dir)
-            src_rel_path = os.path.relpath(event.src_path, self.knowledge_dir)
-            no_survivor = self._unregister_path(src_id, src_rel_path)
-            if src_id != dst_id:
-                # Remove old node from DB and index, unless another file still
-                # backs the same (pre-move) node_id.
-                if no_survivor:
-                    self.kuzu_mgr.delete_node(src_id)
-                    self.vector_store.delete_node(src_id)
-                src_key = _normalize_segment(src_display)
-                ids = self._basename_index.get(src_key, [])
-                if src_id in ids:
-                    ids.remove(src_id)
-                    if not ids:
-                        self._basename_index.pop(src_key, None)
-                # Register new path in index
-                dst_key = _normalize_segment(dst_display)
-                self._basename_index.setdefault(dst_key, [])
-                if dst_id not in self._basename_index[dst_key]:
-                    self._basename_index[dst_key].append(dst_id)
-            self._sync_file(event.dest_path, is_startup_sync=False)
+        if event.is_directory:
+            return
+        if not _is_indexable_md(event.dest_path, self.knowledge_dir):
+            # Moved out of the indexable space (e.g. Obsidian's .trash): it's a deletion.
+            if _is_indexable_md(event.src_path, self.knowledge_dir):
+                self.on_deleted(SimpleNamespace(is_directory=False, src_path=event.src_path))
+            return
+        logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
+        src_id, src_display = node_id_from_path(event.src_path, self.knowledge_dir)
+        dst_id, dst_display = node_id_from_path(event.dest_path, self.knowledge_dir)
+        src_rel_path = os.path.relpath(event.src_path, self.knowledge_dir)
+        no_survivor = self._unregister_path(src_id, src_rel_path)
+        if src_id != dst_id:
+            # Remove old node from DB and index, unless another file still
+            # backs the same (pre-move) node_id.
+            if no_survivor:
+                self.kuzu_mgr.delete_node(src_id)
+                self.vector_store.delete_node(src_id)
+            src_key = _normalize_segment(src_display)
+            ids = self._basename_index.get(src_key, [])
+            if src_id in ids:
+                ids.remove(src_id)
+                if not ids:
+                    self._basename_index.pop(src_key, None)
+            # Register new path in index
+            dst_key = _normalize_segment(dst_display)
+            self._basename_index.setdefault(dst_key, [])
+            if dst_id not in self._basename_index[dst_key]:
+                self._basename_index[dst_key].append(dst_id)
+        self._sync_file(event.dest_path, is_startup_sync=False)
 
     # ─── Node-id collision tracking ────────────────────────────────────────────
 
@@ -195,7 +210,8 @@ class WikiSyncHandler(FileSystemEventHandler):
     def _on_disk_ids(self) -> set:
         """node_id of every indexable .md currently under knowledge_dir."""
         ids = set()
-        for root, _dirs, files in os.walk(self.knowledge_dir):
+        for root, dirs, files in os.walk(self.knowledge_dir):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
             for f in files:
                 if _is_indexable_md(f):
                     nid, _ = node_id_from_path(os.path.join(root, f), self.knowledge_dir)
@@ -276,6 +292,7 @@ class WikiSyncHandler(FileSystemEventHandler):
         """
         self._basename_index = {}
         for root, dirs, files in os.walk(self.knowledge_dir):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
             for f in files:
                 if not _is_indexable_md(f):
                     continue
@@ -337,7 +354,7 @@ class WikiSyncHandler(FileSystemEventHandler):
                 fm, body_now, _, _ = self._parse_markdown(filepath)
                 if fm is None:
                     continue
-                if fm.get('enriched_hash') == _hash_body(body_now):
+                if fm.get('enriched_hash') == _hash_body(body_now) or fm.get('enrichment') == 'skip':
                     continue
                 all_nodes = {n['name'] for n in self.kuzu_mgr.get_all_nodes()}
                 all_nodes.update(context_nodes)
@@ -485,7 +502,12 @@ class WikiSyncHandler(FileSystemEventHandler):
 
         # KuzuDB: ensure node exists with current metadata
         title = frontmatter.get('title', display_name.replace('_', ' ')).replace('_', ' ')
-        self.kuzu_mgr.add_node(node_id, initial_activation=0.5, node_type=node_type,
+        # A machine write (e.g. Clio importing episodes) declares the hash of the body it
+        # wrote. While the body still matches, the node is born cold and gets no recency
+        # boost or proximity propagation: heat must measure Giorgio's interest, not what a
+        # program touched. Once he edits the body, the hashes differ and heat works as usual.
+        machine_write = frontmatter.get('machine_body_hash') == body_hash
+        self.kuzu_mgr.add_node(node_id, initial_activation=0.0 if machine_write else 0.5, node_type=node_type,
                                scope=scope, display_name=title, project=project)
         self.kuzu_mgr.update_node_metadata(node_id, node_type=node_type, scope=scope, project=project)
 
@@ -522,7 +544,7 @@ class WikiSyncHandler(FileSystemEventHandler):
             self.kuzu_mgr.add_edge(node_id, target_id, rel_type, weight=weight)
 
         # Activation boost for real body edits only (not cold boot, not system rewrites)
-        if not is_startup_sync and body_changed:
+        if not is_startup_sync and body_changed and not machine_write:
             if self.am:
                 self.am.record_interaction(node_id, "file_edit", agent="watcher")
             else:
@@ -537,7 +559,8 @@ class WikiSyncHandler(FileSystemEventHandler):
         if (not is_startup_sync
                 and self.llm is not None
                 and len(body) > 150
-                and node_type not in ('Observation',)):
+                and node_type not in ('Observation',)
+                and frontmatter.get('enrichment') != 'skip'):
             if frontmatter.get('enriched_hash') != body_hash:
                 self._enrich_queue.put((filepath, node_id, display_name,
                                         body, list({w for wl in raw_wikilinks
@@ -569,6 +592,7 @@ def start_watcher(knowledge_dir: str = "./knowledge", once: bool = False):
     logger.info(f"Cold boot sync in {knowledge_path}...")
     count = 0
     for root, dirs, files in os.walk(knowledge_path):
+        dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
         for filename in files:
             if _is_indexable_md(filename):
                 event_handler._sync_file(os.path.join(root, filename), is_startup_sync=True)

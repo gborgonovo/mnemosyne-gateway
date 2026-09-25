@@ -59,7 +59,8 @@ def find_node_file(knowledge_dir: str, name: str) -> Optional[str]:
     # 1) Path-based id (contains __): match by computed node_id.
     if "__" in cleaned:
         target_id = normalize_node_name(cleaned)
-        for root, _dirs, files in os.walk(knowledge_dir):
+        for root, dirs, files in os.walk(knowledge_dir):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
             for f in files:
                 if not _indexable(f):
                     continue
@@ -77,7 +78,8 @@ def find_node_file(knowledge_dir: str, name: str) -> Optional[str]:
 
     # 3) Bare basename: normalized comparison, consistent with node_id_from_path.
     target_norm = _normalize_segment(os.path.basename(cleaned))
-    for root, _dirs, files in os.walk(knowledge_dir):
+    for root, dirs, files in os.walk(knowledge_dir):
+        dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
         for f in files:
             if not _indexable(f):
                 continue
@@ -256,7 +258,8 @@ def get_upcoming_deadlines(knowledge_dir: str, lead_days_by_type: Optional[dict]
     today = today or datetime.now().date()
     lead_days_by_type = lead_days_by_type or {}
     results = []
-    for root, _dirs, files in os.walk(knowledge_dir):
+    for root, dirs, files in os.walk(knowledge_dir):
+        dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
         for f in files:
             if not _indexable(f):
                 continue

@@ -261,6 +261,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         """Checks the status of the hybrid architecture databases and file system."""
         all_md_files = []
         for root, dirs, files in os.walk(knowledge_dir):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
             for f in files:
                 if f.endswith('.md'):
                     all_md_files.append(os.path.join(root, f))
@@ -291,6 +292,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         rg = read_filter_grants()
         files_found = []
         for root, dirs, files in os.walk(knowledge_dir):
+            dirs[:] = [x for x in dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
             for f in files:
                 full = os.path.join(root, f)
                 # A privileged but territory-confined key only sees its own tree.

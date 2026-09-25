@@ -171,6 +171,7 @@ try:
     event_handler._build_basename_index()
     import os as _os
     for _root, _dirs, _files in _os.walk(KNOWLEDGE_DIR):
+        _dirs[:] = [x for x in _dirs if not x.startswith('.')]  # .stversions, .trash, .git: mai nodi
         for _fname in _files:
             if _is_indexable_md(_fname):
                 event_handler._sync_file(_os.path.join(_root, _fname), is_startup_sync=True)
