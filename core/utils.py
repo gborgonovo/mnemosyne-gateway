@@ -105,6 +105,25 @@ def resolve_safe_folder(knowledge_dir: str, folder: str) -> str:
     return target
 
 
+def ensure_title_heading(body: str, title: str) -> str:
+    """Return `body` starting with exactly one '# <title>' heading.
+
+    Callers (LLMs above all) often start the content with the node's own title,
+    which would double the heading the gateway adds. Leading H1 lines equal to
+    `title` (case and underscores ignored) are dropped before the single heading
+    is put back; a different H1 further down is left untouched.
+    """
+    def norm(s: str) -> str:
+        return re.sub(r"\s+", " ", s.replace("_", " ")).strip().casefold()
+
+    lines = (body or "").lstrip("\n").split("\n")
+    while lines and lines[0].startswith("# ") and norm(lines[0][2:]) == norm(title):
+        lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+    return f"# {title}\n\n" + "\n".join(lines)
+
+
 def strip_leading_frontmatter(body: str) -> str:
     """Remove any frontmatter block(s) accidentally embedded at the start of a body.
 

@@ -96,5 +96,51 @@ class TestMcpToolsStatusMerge(unittest.TestCase):
         self.assertEqual(fm3["status"], "in_progress", "must not reset to todo on a repeat call")
 
 
+class TestMcpTitleHeading(unittest.TestCase):
+    """create_node/update_node keep exactly one '# title', whatever the caller sends."""
+
+    def setUp(self):
+        self.kdir = tempfile.mkdtemp()
+        self.dbroot = tempfile.mkdtemp()
+        self.kuzu = KuzuManager(db_path=os.path.join(self.dbroot, "kuzu"))
+        self.vec = VectorStore(db_path=os.path.join(self.dbroot, "chroma"),
+                               embedding_config={"mode": "mock"})
+        self.am = AttentionModel(self.kuzu, config={})
+        self.gd = Gardener(self.am, config={}, vector_store=self.vec)
+        mcp = create_mcp_server(self.kuzu, self.vec, self.am, self.gd, config={}, knowledge_dir=self.kdir)
+        self.create_node = mcp._tool_manager.get_tool("create_node").fn
+        self.update_node = mcp._tool_manager.get_tool("update_node").fn
+
+    def tearDown(self):
+        self.kuzu.close()
+        shutil.rmtree(self.kdir, ignore_errors=True)
+        shutil.rmtree(self.dbroot, ignore_errors=True)
+
+    def _body(self, slug):
+        return _read_frontmatter(os.path.join(self.kdir, f"{slug}.md"))[1]
+
+    def test_create_without_title_gets_one(self):
+        self.create_node(name="Mario Rossi", content="Testo.", scope="Private")
+        self.assertEqual(self._body("Mario Rossi"), "# Mario Rossi\n\nTesto.")
+
+    def test_create_with_own_title_is_not_doubled(self):
+        self.create_node(name="Mario Rossi", content="# Mario Rossi\n\nTesto.", scope="Private")
+        self.assertEqual(self._body("Mario Rossi"), "# Mario Rossi\n\nTesto.")
+
+    def test_update_keeps_title(self):
+        self.create_node(name="Mario Rossi", content="Testo.", scope="Private")
+        self.update_node(name="Mario Rossi", content="Nuovo testo.")
+        self.assertEqual(self._body("Mario Rossi"), "# Mario Rossi\n\nNuovo testo.")
+        self.update_node(name="Mario Rossi", content="# Mario Rossi\n\nAncora.")
+        self.assertEqual(self._body("Mario Rossi"), "# Mario Rossi\n\nAncora.")
+
+    def test_update_restores_a_missing_title_from_frontmatter(self):
+        path = os.path.join(self.kdir, "Mario Rossi.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("---\ntitle: Mario Rossi\ntype: Reference\nscope: Private\n---\n\nSenza titolo.")
+        self.update_node(name="Mario Rossi", content="Nuovo.")
+        self.assertEqual(self._body("Mario Rossi"), "# Mario Rossi\n\nNuovo.")
+
+
 if __name__ == "__main__":
     unittest.main()
