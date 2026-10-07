@@ -76,6 +76,33 @@ class UsageTelemetryTest(unittest.TestCase):
         ).get_next()
         self.assertEqual(row[0], "mcp")
 
+    def test_file_edit_after_a_read_does_not_steal_its_attribution(self):
+        """The bug this fixes: last_accessed_agent is overwritten by ANY touch,
+        file edits included, so usage_stats attributed a node's entire query
+        history to whoever happened to touch it last, even when that last
+        touch was never a query at all."""
+        self.am.record_interaction("alpha", "mcp_query", agent="mcp")
+        self.am.record_interaction("alpha", "mcp_query", agent="mcp")
+        self.am.record_interaction("alpha", "file_edit", agent="watcher")
+
+        stats = self.km.usage_stats()
+        self.assertEqual(stats["queries_by_agent"], {"mcp": 2},
+                         "a later file edit must not steal the reads' attribution")
+        self.assertNotIn("watcher", stats["queries_by_agent"],
+                         "the watcher never queried anything")
+
+    def test_two_real_readers_on_the_same_node_are_both_credited(self):
+        """Beyond the file-edit case: even two genuine readers of the same node
+        could never be told apart by a single last_accessed_agent field, since
+        it can only ever name the most recent one."""
+        self.am.record_interaction("alpha", "mcp_query", agent="mcp")
+        self.am.record_interaction("alpha", "mcp_query", agent="mcp")
+        self.am.record_interaction("alpha", "mcp_query", agent="alfred")
+
+        stats = self.km.usage_stats()
+        self.assertEqual(stats["queries_total"], 3)
+        self.assertEqual(stats["queries_by_agent"], {"mcp": 2, "alfred": 1})
+
     def test_resurfacing_efficacy_counts_only_what_followed(self):
         self.km.mark_resurfaced(["alpha", "beta"])
         time.sleep(0.02)
@@ -104,9 +131,11 @@ class UsageTelemetryTest(unittest.TestCase):
         self.assertFalse(thermal_backup.export(self.km, path)["skipped"])
 
         self.km.conn.execute(
-            "MATCH (n:Node) SET n.query_count = 0, n.last_accessed_agent = '', n.last_resurfaced_at = 0.0"
+            "MATCH (n:Node) SET n.query_count = 0, n.last_accessed_agent = '', "
+            "n.query_count_by_agent = '{}', n.last_resurfaced_at = 0.0"
         )
         self.assertEqual(self.km.usage_stats()["queries_total"], 0)
+        self.assertEqual(self.km.usage_stats()["queries_by_agent"], {})
 
         thermal_backup.restore(self.km, path)
         stats = self.km.usage_stats()
@@ -122,7 +151,7 @@ class SchemaMigrationTest(unittest.TestCase):
         try:
             path = os.path.join(directory, "kz")
             km = KuzuManager(db_path=path, buffer_pool_size=POOL)
-            for column in ("query_count", "last_accessed_agent", "last_resurfaced_at"):
+            for column in ("query_count", "last_accessed_agent", "query_count_by_agent", "last_resurfaced_at"):
                 km.conn.execute(f"ALTER TABLE Node DROP {column}")
             km.add_node("delta", node_type="Node", scope="Public")
             del km

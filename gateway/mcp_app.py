@@ -5,7 +5,7 @@ import uuid
 import os
 from datetime import datetime
 
-from core.utils import resolve_safe_folder, atomic_write, render_markdown
+from core.utils import resolve_safe_folder, atomic_write, render_markdown, ensure_title_heading
 from core.attention import thermal_rerank
 from core.mcp_auth import scope_filter, require_privileged, assert_write, read_filter_grants, get_agent
 from core.authz import filter_by_read, territory_allows
@@ -190,7 +190,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         ephemeral, unnamed events.
 
         name: meaningful identifier (e.g. 'Progetto Mnemosyne', 'Giorgio', 'Machine Learning')
-        content: body of the node in markdown
+        content: body of the node in markdown, WITHOUT the title (the '# name' heading is added automatically)
         node_type: 'Node' (default), 'Reference' (evergreen, never decays), 'Goal', 'Task'
         scope: 'Public' (default) or 'Private'
         links: comma-separated node names for untyped wikilinks (e.g. 'Progetto Alpha,Giorgio')
@@ -212,7 +212,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         if links:
             targets = [l.strip() for l in links.split(",") if l.strip()]
             wikilinks = "\n\n" + " ".join(f"[[{t}]]" for t in targets)
-        body = f"# {name}\n\n{content}{wikilinks}"
+        body = ensure_title_heading(content, name) + wikilinks
         try:
             write_markdown(name, frontmatter, body, folder=folder)
             return json.dumps({"status": "success", "message": f"Node '{name}' created with type '{node_type}'."})
@@ -364,7 +364,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
         """Update the body and/or frontmatter of an existing node (works for any type: Node, Goal, Task, Observation).
 
         name: name of the existing node to update
-        content: new markdown body — replaces the existing body entirely (omit to leave unchanged)
+        content: new markdown body, without the title (the node's '# title' heading is kept automatically) — replaces the existing body entirely (omit to leave unchanged)
         updates: JSON object of frontmatter fields to merge into the existing frontmatter
                  e.g. '{"status": "done", "deadline": "2026-06-01", "relations": [{"target": "X", "type": "PART_OF"}]}'
                  omit to leave frontmatter unchanged
@@ -390,7 +390,7 @@ def create_mcp_server(kuzu_mgr, vector_store, am, gd, config, knowledge_dir):
                 return denied
         try:
             node_service.update_node(knowledge_dir, name, content=content,
-                                     frontmatter_updates=properties_dict)
+                                     frontmatter_updates=properties_dict, keep_title=True)
             return json.dumps({"status": "success", "message": f"Node '{name}' updated."})
         except Exception as e:
             return json.dumps({"error": str(e)})

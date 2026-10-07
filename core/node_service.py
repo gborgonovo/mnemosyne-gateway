@@ -22,6 +22,7 @@ from typing import Optional
 from core.utils import (
     node_id_from_path, normalize_node_name, _normalize_segment,
     resolve_safe_folder, strip_leading_frontmatter, atomic_write, render_markdown,
+    ensure_title_heading,
 )
 
 # Syncthing conflict copies ("name.sync-conflict-...md") still end in .md but must
@@ -313,12 +314,15 @@ def delete_node_file(knowledge_dir: str, name: str) -> bool:
 
 
 def update_node(knowledge_dir: str, name: str, content: Optional[str] = None,
-                frontmatter_updates: Optional[dict] = None) -> tuple:
+                frontmatter_updates: Optional[dict] = None, keep_title: bool = False) -> tuple:
     """Merge frontmatter (and optionally replace the body) of an EXISTING node.
 
     Reuses the existing body when `content` is None/empty; merges
     `frontmatter_updates` onto the current frontmatter (via upsert). Raises
     FileNotFoundError if the node doesn't exist. Returns (canonical, 'updated').
+
+    With `keep_title`, a replaced body gets the node's '# title' heading back
+    (existing H1, else frontmatter `title`); observations have no heading.
     """
     path = find_node_file(knowledge_dir, name)
     if not path or not os.path.exists(path):
@@ -328,6 +332,12 @@ def update_node(knowledge_dir: str, name: str, content: Optional[str] = None,
     m = re.match(r"^---\n(.*?)\n---\n(.*)", raw, re.DOTALL)
     existing_body = m.group(2) if m else raw
     body = content if content else existing_body
+    if content and keep_title:
+        fm = (yaml.safe_load(m.group(1)) if m else None) or {}
+        h1 = re.match(r"\s*# (.+)", existing_body)
+        title = h1.group(1).strip() if h1 else fm.get("title")
+        if title and fm.get("type") != "Observation":
+            body = ensure_title_heading(content, title)
     return upsert(knowledge_dir, name, body, frontmatter_updates or {})
 
 

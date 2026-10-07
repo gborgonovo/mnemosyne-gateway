@@ -1,3 +1,4 @@
+import json
 import kuzu
 import logging
 import os
@@ -79,6 +80,7 @@ class KuzuManager:
                     interaction_count INT64,
                     query_count INT64,
                     last_accessed_agent STRING,
+                    query_count_by_agent STRING,
                     last_resurfaced_at DOUBLE,
                     PRIMARY KEY (name)
                 )
@@ -109,6 +111,12 @@ class KuzuManager:
             ("query_count",          "INT64",  "0"),
             ("last_accessed_agent",  "STRING", "''"),
             ("last_resurfaced_at",   "DOUBLE", "0.0"),
+            # last_accessed_agent answers "who touched this last, edits included";
+            # it gets overwritten by a file edit, so it cannot tell who has been
+            # READING a node that someone later also edited. This answers that
+            # question instead: {"mcp": 12, "alfred": 3}, one count per reader,
+            # never touched by a file_edit.
+            ("query_count_by_agent", "STRING", "'{}'"),
         ]
         for col_name, col_type, default_val in migrations:
             try:
@@ -258,7 +266,8 @@ class KuzuManager:
         """Snapshot of every node's thermal state, for backup (see core.thermal_backup).
 
         Returns [{name, activation, last_interaction, interaction_count,
-        last_decay_applied, query_count, last_accessed_agent, last_resurfaced_at}, ...].
+        last_decay_applied, query_count, last_accessed_agent, query_count_by_agent,
+        last_resurfaced_at}, ...].
         This is the ONLY authoritative state that is not derivable from the markdown
         files, hence the only thing that needs backing up. The telemetry counters
         belong here for the same reason: a rebuild would otherwise silently reset
@@ -269,7 +278,7 @@ class KuzuManager:
         res = self.conn.execute(
             "MATCH (n:Node) RETURN n.name, n.activation, n.last_interaction, "
             "n.interaction_count, n.last_decay_applied, n.query_count, "
-            "n.last_accessed_agent, n.last_resurfaced_at"
+            "n.last_accessed_agent, n.query_count_by_agent, n.last_resurfaced_at"
         )
         rows = []
         while res.has_next():
@@ -282,7 +291,8 @@ class KuzuManager:
                 "last_decay_applied": r[4],
                 "query_count": r[5] or 0,
                 "last_accessed_agent": r[6] or "",
-                "last_resurfaced_at": r[7] or 0.0,
+                "query_count_by_agent": r[7] or "{}",
+                "last_resurfaced_at": r[8] or 0.0,
             })
         return rows
 
@@ -290,6 +300,7 @@ class KuzuManager:
     def restore_thermal(self, name: str, activation: float, last_interaction: float,
                         interaction_count: int, last_decay_applied: float,
                         query_count: int = 0, last_accessed_agent: str = "",
+                        query_count_by_agent: str = "{}",
                         last_resurfaced_at: float = 0.0):
         """Write a node's thermal fields back verbatim from a backup snapshot.
 
@@ -301,13 +312,44 @@ class KuzuManager:
         self.conn.execute(
             "MATCH (n:Node {name: $name}) SET n.activation = $act, "
             "n.last_interaction = $li, n.interaction_count = $ic, n.last_decay_applied = $lda, "
-            "n.query_count = $qc, n.last_accessed_agent = $aga, n.last_resurfaced_at = $lra",
+            "n.query_count = $qc, n.last_accessed_agent = $aga, "
+            "n.query_count_by_agent = $qba, n.last_resurfaced_at = $lra",
             parameters={
                 "name": normalize_node_name(name), "act": activation,
                 "li": last_interaction, "ic": interaction_count, "lda": last_decay_applied,
-                "qc": query_count, "aga": last_accessed_agent, "lra": last_resurfaced_at,
+                "qc": query_count, "aga": last_accessed_agent,
+                "qba": query_count_by_agent or "{}", "lra": last_resurfaced_at,
             },
         )
+
+    def _bump_query_count_by_agent(self, norm_name: str, agent: str) -> str:
+        """Read-modify-write the per-agent read counter for one node, returning
+        the updated JSON to write back.
+
+        Only called from inside update_interaction, which is @_synchronized: no
+        other writer can interleave between this read and the SET that follows,
+        so the read-modify-write is safe despite not being a single statement.
+
+        Why this exists and last_accessed_agent isn't enough: that field is
+        overwritten by ANY touch, file edits included, so a node that was read
+        by one client and later edited as a file loses the reader's identity
+        entirely; and even between two real readers, a single field can only
+        ever name the most recent one, never split credit between them. This
+        counter is written only here, on a read, never on a file edit.
+        """
+        current = self.conn.execute(
+            "MATCH (n:Node {name: $name}) RETURN n.query_count_by_agent",
+            parameters={"name": norm_name},
+        )
+        raw = current.get_next()[0] if current.has_next() else None
+        try:
+            counts = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            # Malformed/foreign content left in the column: don't propagate a
+            # parse error into the interaction path, just start counting fresh.
+            counts = {}
+        counts[agent] = counts.get(agent, 0) + 1
+        return json.dumps(counts, ensure_ascii=False)
 
     @_synchronized
     def update_interaction(self, name: str, boost: float, update_timestamp: bool = True, floor: float = 0.0,
@@ -330,16 +372,22 @@ class KuzuManager:
             new_activation = max(new_activation, floor)
         now = time.time()
         if update_timestamp:
-            query = """
-            MATCH (n:Node {name: $name})
+            params = {"name": norm_name, "act": new_activation, "now": now,
+                      "q": 1 if is_query else 0, "agent": agent or ""}
+            qba_set = ""
+            if is_query and agent:
+                params["qba"] = self._bump_query_count_by_agent(norm_name, agent)
+                qba_set = ", n.query_count_by_agent = $qba"
+            query = f"""
+            MATCH (n:Node {{name: $name}})
             SET n.activation = $act,
                 n.last_interaction = $now,
                 n.interaction_count = COALESCE(n.interaction_count, 0) + 1,
                 n.query_count = COALESCE(n.query_count, 0) + $q,
                 n.last_accessed_agent = CASE WHEN $agent = '' THEN COALESCE(n.last_accessed_agent, '') ELSE $agent END
+                {qba_set}
             """
-            self.conn.execute(query, parameters={"name": norm_name, "act": new_activation, "now": now,
-                                                 "q": 1 if is_query else 0, "agent": agent or ""})
+            self.conn.execute(query, parameters=params)
         else:
             self.conn.execute(
                 "MATCH (n:Node {name: $name}) SET n.activation = $act",
@@ -374,18 +422,29 @@ class KuzuManager:
         """
         cutoff = time.time() - window_days * 86400
         rows = self.conn.execute(
-            "MATCH (n:Node) RETURN n.query_count, n.last_accessed_agent, n.last_resurfaced_at, n.last_interaction"
+            "MATCH (n:Node) RETURN n.query_count, n.query_count_by_agent, "
+            "n.last_resurfaced_at, n.last_interaction"
         )
         by_agent, queried_nodes, total_queries = {}, 0, 0
         resurfaced = followed = 0
         while rows.has_next():
-            qc, agent, res_at, last_int = rows.get_next()
+            qc, qba_raw, res_at, last_int = rows.get_next()
             qc = qc or 0
             total_queries += qc
             if qc:
                 queried_nodes += 1
-                if agent:
-                    by_agent[agent] = by_agent.get(agent, 0) + qc
+            # Summed from the per-agent counter, not from qc * last_accessed_agent:
+            # that single field can only ever name the one client that touched a
+            # node most recently, file edits included, so it misattributes every
+            # read on a node that was later edited, and can't split credit between
+            # two real readers of the same node either. See _bump_query_count_by_agent.
+            if qba_raw:
+                try:
+                    qba = json.loads(qba_raw)
+                except (TypeError, ValueError):
+                    qba = {}
+                for a, count in qba.items():
+                    by_agent[a] = by_agent.get(a, 0) + (count or 0)
             if res_at and res_at >= cutoff:
                 resurfaced += 1
                 if last_int and last_int > res_at:
