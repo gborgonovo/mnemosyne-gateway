@@ -93,11 +93,13 @@ class TestThermalBackup(unittest.TestCase):
             payload = json.load(f)
         self.assertIn("x", payload["nodes"])
         # Exact set on purpose: adding a field to the snapshot must be a deliberate
-        # act, not a side effect. The three telemetry counters are in here because
+        # act, not a side effect. The telemetry counters are in here because
         # a rebuild would otherwise reset the very measurement being collected.
+        # query_count_by_agent joined the others on 2026-10-07: without it, a
+        # rebuild would reset who-reads-what back to an empty map for every node.
         self.assertEqual(set(payload["nodes"]["x"].keys()),
                          {"activation", "last_interaction", "interaction_count", "last_decay_applied",
-                          "query_count", "last_accessed_agent", "last_resurfaced_at"})
+                          "query_count", "last_accessed_agent", "query_count_by_agent", "last_resurfaced_at"})
 
 
 if __name__ == "__main__":
